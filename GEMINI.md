@@ -64,10 +64,12 @@ message User {
 
 | Runtime     |    Encode |     Decode | Best For                 |
 | ----------- | --------: | ---------: | ------------------------ |
+| **jit**     | **70 ns** | **114 ns** | **Peak perf, V8 only**   |
+| **unsafe**  |    107 ns |     126 ns | Low overhead, trusted    |
 | **ultra**   |     65 ns |      82 ns | Single messages, Node.js |
 | **hyper**   | 72 ns/msg | 153 ns/msg | Batch operations         |
 | **node**    |     80 ns |     125 ns | Node.js/Bun              |
-| **index**   |    467 ns |     203 ns | Universal                |
+| **index**   |    513 ns |     210 ns | Universal                |
 | **browser** |    467 ns |     203 ns | Web browsers             |
 
 ## Commands
@@ -128,6 +130,8 @@ cd benchmarks/ts && npm run bench
 
 ### TypeScript Runtimes
 
+- `runtime/ts/src/jit.ts` - JIT Compiler + Slab
+- `runtime/ts/src/unsafe.ts` - Direct Uint8Array access
 - `runtime/ts/src/ultra.ts` - Fastest single message
 - `runtime/ts/src/hyper.ts` - Batch operations
 - `runtime/ts/src/node.ts` - Node.js Buffer

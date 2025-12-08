@@ -122,23 +122,33 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
     case FieldType.Int32:
       // Inline Zigzag + Varint
       return code + `
+
         var z = (${valVar} << 1) ^ (${valVar} >> 31);
-        while (z >= 0x80) {
-          buf[pos++] = (z & 0x7f) | 0x80;
-          z >>>= 7;
+        if (z < 128) {
+          buf[pos++] = z;
+        } else {
+          while (z >= 0x80) {
+            buf[pos++] = (z & 0x7f) | 0x80;
+            z >>>= 7;
+          }
+          buf[pos++] = z;
         }
-        buf[pos++] = z;
       `;
       
     case FieldType.Int64:
       // BigInt Zigzag + Varint
        return code + `
+
         var z = (${valVar} << 1n) ^ (${valVar} >> 63n);
-        while (z >= 0x80n) {
-          buf[pos++] = Number((z & 0x7fn) | 0x80n);
-          z >>= 7n;
+        if (z < 128n) {
+          buf[pos++] = Number(z);
+        } else {
+          while (z >= 0x80n) {
+            buf[pos++] = Number((z & 0x7fn) | 0x80n);
+            z >>= 7n;
+          }
+          buf[pos++] = Number(z);
         }
-        buf[pos++] = Number(z);
       `;
 
     case FieldType.String:
