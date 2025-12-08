@@ -1,0 +1,16 @@
+{
+  "name": "@xpb/benchmarks",
+  "version": "0.1.0",
+  "description": "XPB benchmark suite for TypeScript",
+  "type": "module",
+  "scripts": {
+    "bench": "tsx src/benchmark.ts",
+    "bench:all": "tsx src/benchmark.ts && cd ../.. && go test -bench=. -benchmem ./benchmarks/go/..."
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "@msgpack/msgpack": "^3.0.0",
+    "protobufjs": "^7.2.0"
+  }
+}

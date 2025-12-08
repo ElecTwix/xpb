@@ -1,84 +1,99 @@
 # XPB - Compact Binary Serialization
 
-A protobuf-like but smaller, C-style, compressible and streamable binary serialization format.
+A compact, protobuf-compatible binary serialization format with Go-based code generator.
 
 ## Features
 
-- **Compact** - Minimal wire overhead with varint encoding
-- **Streamable** - Length-prefixed messages for incremental parsing
-- **Simple** - Easy to implement in any language
-- **Fast** - Zero-allocation decoding possible
-
-## Installation
-
-```bash
-go install github.com/anthropic/xpb/cmd/xpbc@latest
-```
+- **Same size as Protobuf** - Uses identical wire format
+- **Faster decode** - 2.5x faster than Protobuf in Go
+- **Multi-language** - Go and TypeScript support
+- **Extended types** - Repeated fields, maps, enums
 
 ## Quick Start
 
-### 1. Define your schema (`user.xpb`)
+```bash
+# Build compiler
+go build -o xpbc ./cmd/xpbc
+
+# Generate code
+./xpbc --lang=go,ts schema.xpb
+```
+
+### Schema Example
 
 ```xpb
 package myapp
 
+enum Status { ACTIVE = 1 }
+
 message User {
     1: string name
     2: int32 age
-    3: bool active
+    3: []string tags       // repeated
+    4: map<string,string> meta  // map
+    5: Status status       // enum
 }
 ```
 
-### 2. Generate code
+## Benchmark Matrix
+
+### Size Comparison (bytes)
+
+| Format       |     Go | TypeScript |
+| ------------ | -----: | ---------: |
+| **XPB**      | **19** |     **19** |
+| **Protobuf** | **19** |          - |
+| Msgpack      |     37 |         33 |
+| JSON         |     47 |         47 |
+
+### Speed Comparison - Go (ns/op)
+
+| Format   |  Encode |    Decode |
+| -------- | ------: | --------: |
+| **XPB**  | **100** | **52** 🏆 |
+| Protobuf |     102 |       131 |
+| JSON     |     151 |       849 |
+| Msgpack  |     305 |       352 |
+
+### Speed Comparison - TypeScript (ns/op)
+
+| Format   |    Encode |     Decode |
+| -------- | --------: | ---------: |
+| XPB      |       724 |        394 |
+| **JSON** | **85** 🏆 | **212** 🏆 |
+| Msgpack  |      1246 |        350 |
+
+> Note: V8 (Node.js) has native JSON optimization, making it faster than JavaScript-based binary parsers.
+
+## Key Results
+
+| Metric                 | Go               | TypeScript       |
+| ---------------------- | ---------------- | ---------------- |
+| XPB vs Protobuf decode | **2.5x faster**  | N/A              |
+| XPB vs JSON size       | **2.5x smaller** | **2.5x smaller** |
+| XPB vs Msgpack size    | **1.9x smaller** | **1.7x smaller** |
+
+## Running Benchmarks
 
 ```bash
-# Generate Go code
-xpbc --lang=go user.xpb
+# All benchmarks
+./benchmarks/run_all.sh
 
-# Generate TypeScript code
-xpbc --lang=ts user.xpb
-```
+# Go only
+go test -bench=. ./benchmarks/go/...
 
-### 3. Use generated code
-
-**Go:**
-
-```go
-user := &User{Name: "Alice", Age: 30, Active: true}
-data, _ := user.Marshal()
-// data is a compact binary representation
-```
-
-**TypeScript:**
-
-```typescript
-const user = new User({ name: "Alice", age: 30, active: true });
-const data = User.encode(user);
-// data is a Uint8Array
+# TypeScript only
+cd benchmarks/ts && npm run bench
 ```
 
 ## Wire Format
 
-XPB uses a simple tag-length-value encoding:
-
-| Component | Encoding                                 |
-| --------- | ---------------------------------------- |
-| Field tag | `(field_id << 3) \| wire_type` as varint |
-| Length    | Varint (for strings/bytes/messages)      |
-| Value     | Type-specific encoding                   |
-
-### Wire Types
-
-| Type            | ID  | Used For                           |
-| --------------- | --- | ---------------------------------- |
-| Varint          | 0   | int32, int64, uint32, uint64, bool |
-| Fixed32         | 1   | float32                            |
-| Fixed64         | 2   | float64                            |
-| LengthDelimited | 3   | string, bytes, nested messages     |
-
-## Benchmarks
-
-See [benchmarks/](./benchmarks/) for performance comparisons against protobuf and msgpack.
+| Wire Type       |  ID | Used For                                 |
+| --------------- | --: | ---------------------------------------- |
+| Varint          |   0 | int32, int64, uint32, uint64, bool, enum |
+| Fixed32         |   5 | float32                                  |
+| Fixed64         |   1 | float64                                  |
+| LengthDelimited |   2 | string, bytes, messages                  |
 
 ## License
 
