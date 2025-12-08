@@ -1,0 +1,20 @@
+package myapp
+
+message User {
+    1: string name
+    2: int32 age
+    3: bool active
+}
+
+message Address {
+    1: string city
+    2: string country
+    3: ?string postal_code
+}
+
+message Profile {
+    1: string bio
+    2: ?string avatar_url
+    3: User user
+    4: ?Address address
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@xpb/runtime",
+  "version": "0.1.0",
+  "description": "XPB runtime library for TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "xpb",
+    "serialization",
+    "binary",
+    "protobuf"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

@@ -1,0 +1,23 @@
+# Binaries
+xpbc
+*.exe
+
+# Node modules
+node_modules/
+dist/
+
+# Go build artifacts
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Generated files (optional - can be committed)
+# testdata/gen/
+
+# OS files
+.DS_Store
+Thumbs.db

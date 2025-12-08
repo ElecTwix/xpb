@@ -1,0 +1,46 @@
+package myapp
+
+// Enum for status
+enum Status {
+    UNKNOWN = 0
+    ACTIVE = 1
+    INACTIVE = 2
+    PENDING = 3
+}
+
+// Basic message with all scalar types
+message User {
+    1: string name
+    2: int32 age
+    3: bool active
+    4: ?string email
+    5: []string tags
+    6: Status status
+}
+
+// Message with nested types
+message Address {
+    1: string city
+    2: string country
+    3: ?string postal_code
+}
+
+// Message with map and nested message
+message Profile {
+    1: string bio
+    2: ?string avatar_url
+    3: User user
+    4: ?Address address
+    5: []int32 scores
+    6: map<string, string> metadata
+}
+
+// Complex message for testing
+message Order {
+    1: uint64 id
+    2: string customer_name
+    3: []Profile profiles
+    4: float64 total
+    5: bool paid
+    6: map<int32, string> items
+}
