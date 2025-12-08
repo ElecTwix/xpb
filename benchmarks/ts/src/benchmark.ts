@@ -197,6 +197,59 @@ function benchXPB_JIT_Small(): BenchResult {
   return { name: "XPB (JIT)", encodeNs, decodeNs, sizeBytes: size };
 }
 
+function benchXPB_JIT_Struct(): BenchResult {
+  const iterations = 100000;
+  
+  // Compile with Struct Mode (No Tags) + Fixed Ints
+  const jitEncode = compileEncoder<typeof smallUser>(userSchema, { structMode: true, fixedInts: true });
+  // We haven't implemented a Struct Decoder yet, so we only benchmark encode
+  const slab = new SlabAllocator(65536);
+  
+  // Warmup
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+
+  const encodeNs = bench("JIT Struct encode", iterations, () => {
+    if (slab.pos > 60000) slab.pos = 0;
+    jitEncode(slab, smallUser);
+  });
+  
+  // Size measure
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+  const size = slab.pos;
+  
+  // Dummy decode 0
+  const decodeNs = 0;
+
+  return { name: "XPB (Struct)", encodeNs, decodeNs, sizeBytes: size };
+}
+
+function benchXPB_JIT_Aligned(): BenchResult {
+  const iterations = 100000;
+  
+  // Compile with Aligned Mode (Fixed Ints + Padding)
+  const jitEncode = compileEncoder<typeof smallUser>(userSchema, { aligned: true });
+  const slab = new SlabAllocator(65536);
+  
+  // Warmup
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+
+  const encodeNs = bench("JIT Aligned encode", iterations, () => {
+    if (slab.pos > 60000) slab.pos = 0;
+    jitEncode(slab, smallUser);
+  });
+  
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+  const size = slab.pos;
+  
+  const decodeNs = 0;
+
+  return { name: "XPB (Aligned)", encodeNs, decodeNs, sizeBytes: size };
+}
+
 // ============= JSON Benchmark =============
 
 function benchJSON_Small(): BenchResult {
@@ -371,6 +424,8 @@ async function main() {
   smallResults.push(benchXPB_Small());
   smallResults.push(benchXPB_Unsafe_Small());
   smallResults.push(benchXPB_JIT_Small());
+  smallResults.push(benchXPB_JIT_Struct());
+  smallResults.push(benchXPB_JIT_Aligned());
   smallResults.push(benchXPB_Hybrid_Small());
   smallResults.push(benchJSON_Small());
   smallResults.push(benchMsgpack_Small());

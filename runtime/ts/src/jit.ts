@@ -60,7 +60,19 @@ export interface SchemaDef {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj: T) => void {
+export interface JITOptions {
+  fixedInts?: boolean;
+  structMode?: boolean; // No tags, implicit order (like C structs)
+  aligned?: boolean;    // Force 4-byte alignment (implies fixedInts + structMode)
+}
+
+export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (slab: SlabAllocator, obj: T) => void {
+  // Aligned implies structMode + fixedInts
+  if (opts.aligned) {
+    opts.structMode = true;
+    opts.fixedInts = true;
+  }
+
   const lines: string[] = [];
   
   lines.push(`
@@ -76,18 +88,37 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
       lines.push(`
         var arr = ${propAccess};
         if (arr && arr.length > 0) {
+          // In Struct Mode, we might technically need a length prefix for the array itself!
+          // For this experiment, let's assume "Packed" behavior: 
+          // Write count, then elements.
+          // BUT standard XPB repeated fields are just repeated tags.
+          // In Struct Mode, we really need a count if it's dynamic. 
+          // Let's assume for this benchmark we just write them (unsafe for decoding if variable length).
+          // To be fair to "Struct Mode", usually there's a length prefix or fixed count.
+          // Let's add a length prefix (Int32) for repeated fields in Struct Mode.
+          
+          ${opts.structMode ? 'buf[pos++] = arr.length; /* Varint count for now, optimized later */' : ''}
+          ${opts.fixedInts && opts.structMode ? 
+             // If fixed ints, length should be fixed too
+             'buf[pos++] = arr.length; buf[pos++] = arr.length >> 8; buf[pos++] = arr.length >> 16; buf[pos++] = arr.length >> 24;'
+             : ''}
+          
           for (var i = 0; i < arr.length; i++) {
              val = arr[i];
-             ${generateFieldWrite(field, 'val', true)}
+             ${generateFieldWrite(field, 'val', true, opts)}
           }
+        } else {
+             ${opts.structMode ? '// Struct mode: write 0 length for empty array\n' + (opts.fixedInts ? 'pos += 4; buf.fill(0, pos-4, pos);' : 'buf[pos++] = 0;') : ''}
         }
       `);
     } else {
       lines.push(`
         val = ${propAccess};
+        // In StructMode, we MUST write something if missing (default).
+        // For benchmarks, inputs are full.
         if (val !== undefined) {
-          ${generateFieldWrite(field, 'val', false)}
-        }
+          ${generateFieldWrite(field, 'val', false, opts)}
+        } ${opts.structMode ? 'else { /* Missing: Write Zero/Default */ ' + generateDefaultWrite(field, opts) + '}' : ''}
       `);
     }
   }
@@ -103,26 +134,61 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
     .bind(null, WireType, textEncoder) as any;
 }
 
-function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean): string {
-  const tagVarint = (field.tag << 3) | getWireType(field.type);
-  const tagBytes = encodeVarint32(tagVarint);
+function generateDefaultWrite(field: FieldDef, opts: JITOptions): string {
+    // Basic zeroes
+    if (opts.fixedInts) {
+        if (field.type === FieldType.Int64 || field.type === FieldType.Float64) return 'pos+=8;';
+        return 'pos+=4;';
+    }
+    return 'buf[pos++] = 0;';
+}
+
+function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean, opts: JITOptions): string {
+  let code = '';
   
-  // Inline tag write
-  let code = `
-    // Tag: ${field.tag} (${field.name})
-  `;
-  for (const b of tagBytes) {
-      code += `buf[pos++] = ${b};\n`;
+  // Tag only if NOT struct mode
+  if (!opts.structMode) {
+      const tagVarint = (field.tag << 3) | getWireType(field.type);
+      const tagBytes = encodeVarint32(tagVarint);
+      // Inline tag write
+      code += `
+        // Tag: ${field.tag} (${field.name})
+      `;
+      for (const b of tagBytes) {
+          code += `buf[pos++] = ${b};\n`;
+      }
+  }
+
+  // Padding for Aligned mode (before value)
+  // This is simplistic; real alignment requires checking pos % 4.
+  // Ideally slab.pos is always aligned at start of message, and we just pad.
+  if (opts.aligned) {
+      code += `while ((pos & 3) !== 0) pos++;\n`;
   }
 
   switch (field.type) {
     case FieldType.Bool:
+      if (opts.fixedInts) {
+          // write 4 bytes
+          return code + `buf[pos++] = ${valVar} ? 1 : 0; buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0;`;
+      }
       return code + `buf[pos++] = ${valVar} ? 1 : 0;`;
     
     case FieldType.Int32:
-      // Inline Zigzag + Varint
+    case FieldType.Uint32:
+      if (opts.fixedInts) {
+          // Fixed 32
+          return code + `
+            var v = ${valVar};
+            buf[pos++] = v;
+            buf[pos++] = v >> 8;
+            buf[pos++] = v >> 16;
+            buf[pos++] = v >> 24;
+          `;
+      }
+      
+      // Inline Zigzag + Varint (Optimistic)
       return code + `
-
         var z = (${valVar} << 1) ^ (${valVar} >> 31);
         if (z < 128) {
           buf[pos++] = z;
@@ -136,9 +202,25 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
       `;
       
     case FieldType.Int64:
-      // BigInt Zigzag + Varint
+    case FieldType.Uint64:
+      // BigInt
+       if (opts.fixedInts) {
+          // Fixed 64
+          return code + `
+            var v = ${valVar};
+            var lo = Number(v & 0xffffffffn);
+            var hi = Number(v >> 32n);
+            buf[pos++] = lo;
+            buf[pos++] = lo >> 8;
+            buf[pos++] = lo >> 16;
+            buf[pos++] = lo >> 24;
+            buf[pos++] = hi;
+            buf[pos++] = hi >> 8;
+            buf[pos++] = hi >> 16;
+            buf[pos++] = hi >> 24;
+          `;
+       }
        return code + `
-
         var z = (${valVar} << 1n) ^ (${valVar} >> 63n);
         if (z < 128n) {
           buf[pos++] = Number(z);
@@ -152,41 +234,143 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
       `;
 
     case FieldType.String:
+       // String handling
+       // Standard: Varint Length + Bytes
+       // Fixed/Struct: Still need length! Strings are variable.
+       // Aligned: Length (Fixed32) + Bytes + Padding.
+       
        // Optimistic Length Write for String
        // 1. Write Tag (done)
        // 2. Reserve 1 byte for length (common case)
        // 3. EncodeInto
        // 4. Fixup length if needed
-       return `
-          // String: ${field.name}
-          ${code} // Write Tag
-          
-          // Assume length < 128 (1 byte varint)
-          // We don't check buffer size here (Unsafe!)
-          var res = textEncoder.encodeInto(${valVar}, buf.subarray(pos + 1));
-          var written = res.written;
-          
-          if (written < 128) {
-             buf[pos] = written;
-             pos += written + 1;
-          } else {
-             // Fallback for long strings: shift data and write real varint
-             var lenBytes = 0;
-             var t = written;
-             while(t >= 0x80) { t >>= 7; lenBytes++; }
-             lenBytes++; // last byte
+       
+       let lenWriteCode = '';
+       if (opts.fixedInts) {
+           lenWriteCode = `
+             var lenPos = pos;
+             pos += 4; // Reserve Fixed32 length
+           `;
+           
+           // ASCII Optimization for Fixed Ints (Struct Mode)
+           return code + `
+             // String: ${field.name}
+             ${lenWriteCode}
              
-             // Move data
-             buf.copyWithin(pos + lenBytes, pos + 1, pos + 1 + written);
+             var str = ${valVar};
+             var strLen = str.length;
+             var written = 0;
              
-             // Write varint length
-             var l = written;
-             while (l >= 0x80) {
-                buf[pos++] = (l & 0x7f) | 0x80;
-                l >>>= 7;
+             // ASCII Fast Path (Heuristic < 40 chars)
+             if (strLen < 40) {
+                 var isAscii = true;
+                 for (var i = 0; i < strLen; i++) {
+                     var c = str.charCodeAt(i);
+                     if (c > 127) { isAscii = false; break; }
+                     buf[pos + i] = c;
+                 }
+                 if (isAscii) {
+                     written = strLen;
+                     pos += strLen;
+                 } else {
+                     // Fallback
+                     var res = textEncoder.encodeInto(str, buf.subarray(pos));
+                     written = res.written;
+                     pos += written;
+                 }
+             } else {
+                 var res = textEncoder.encodeInto(str, buf.subarray(pos));
+                 written = res.written;
+                 pos += written;
              }
-             buf[pos++] = l;
-             pos += written;
+             
+             // Write Length back
+             buf[lenPos] = written;
+             buf[lenPos+1] = written >> 8;
+             buf[lenPos+2] = written >> 16;
+             buf[lenPos+3] = written >> 24;
+             
+             ${opts.aligned ? 'while ((pos & 3) !== 0) buf[pos++] = 0;' : ''}
+           `;
+       }
+
+       // Standard implementation (with optimistic update)
+       // We can also apply ASCII path here for standard varints
+       return code + `
+          // String: ${field.name}
+          // Note: Tag written above if needed.
+          
+          var str = ${valVar};
+          var strLen = str.length;
+          
+          if (strLen < 40) {
+              // Try ASCII
+              var isAscii = true;
+              var savePos = pos;
+              // Reserve 1 byte len
+              pos++; 
+              
+              for (var i = 0; i < strLen; i++) {
+                  var c = str.charCodeAt(i);
+                  if (c > 127) { isAscii = false; break; }
+                  buf[pos + i] = c;
+              }
+              
+              if (isAscii) {
+                  buf[savePos] = strLen;
+                  pos += strLen;
+              } else {
+                  // Fallback: Reset and use standard
+                  pos = savePos;
+                  var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
+                  var written = res.written;
+                  
+                  if (written < 128) {
+                     buf[pos] = written;
+                     pos += written + 1;
+                  } else {
+                     // Fallback deep
+                     var lenBytes = 0;
+                     var t = written;
+                     while(t >= 0x80) { t >>= 7; lenBytes++; }
+                     lenBytes++; 
+                     
+                     buf.copyWithin(pos + lenBytes, pos + 1, pos + 1 + written);
+                     
+                     var l = written;
+                     while (l >= 0x80) {
+                        buf[pos++] = (l & 0x7f) | 0x80;
+                        l >>>= 7;
+                     }
+                     buf[pos++] = l;
+                     pos += written;
+                  }
+              }
+          } else {
+              // Long string standard path
+              var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
+              var written = res.written;
+              
+              // ... same fallback logic ...
+              if (written < 128) {
+                 buf[pos] = written;
+                 pos += written + 1;
+              } else {
+                 var lenBytes = 0;
+                 var t = written;
+                 while(t >= 0x80) { t >>= 7; lenBytes++; }
+                 lenBytes++; 
+                 
+                 buf.copyWithin(pos + lenBytes, pos + 1, pos + 1 + written);
+                 
+                 var l = written;
+                 while (l >= 0x80) {
+                    buf[pos++] = (l & 0x7f) | 0x80;
+                    l >>>= 7;
+                 }
+                 buf[pos++] = l;
+                 pos += written;
+              }
           }
        `;
 
