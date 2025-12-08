@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	pb "github.com/anthropic/xpb/benchmarks/go/proto"
 	"github.com/anthropic/xpb/pkg/wire"
 	"github.com/anthropic/xpb/runtime/go/xpb"
 	"github.com/vmihailenco/msgpack/v5"
@@ -20,20 +21,16 @@ type BenchUser struct {
 	Active bool   `json:"active" msgpack:"active"`
 }
 
-// For size comparison output
-var sizeResults = make(map[string]int)
-
 // ============= XPB Benchmarks =============
 
 func BenchmarkXPB_Encode_Simple(b *testing.B) {
-	user := BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		enc := xpb.NewEncoder(64)
-		enc.WriteString(1, user.Name)
-		enc.WriteInt32(2, user.Age)
-		enc.WriteBool(3, user.Active)
+		enc.WriteString(1, "Alice Johnson")
+		enc.WriteInt32(2, 30)
+		enc.WriteBool(3, true)
 		_ = enc.Bytes()
 	}
 }
@@ -44,27 +41,51 @@ func BenchmarkXPB_Decode_Simple(b *testing.B) {
 	enc.WriteInt32(2, 30)
 	enc.WriteBool(3, true)
 	data := enc.Bytes()
-	sizeResults["XPB"] = len(data)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		dec := xpb.NewDecoder(data)
-		var user BenchUser
+		var name string
+		var age int32
+		var active bool
 		for !dec.EOF() {
 			fn, wt, _ := dec.ReadTag()
 			switch fn {
 			case 1:
-				user.Name, _ = dec.ReadString()
+				name, _ = dec.ReadString()
 			case 2:
-				user.Age, _ = dec.ReadInt32()
+				age, _ = dec.ReadInt32()
 			case 3:
-				user.Active, _ = dec.ReadBool()
+				active, _ = dec.ReadBool()
 			default:
 				dec.Skip(wt)
 			}
 		}
-		_ = user
+		_, _, _ = name, age, active
+	}
+}
+
+// ============= Protobuf Benchmarks =============
+
+func BenchmarkProtobuf_Encode_Simple(b *testing.B) {
+	user := &pb.BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = proto.Marshal(user)
+	}
+}
+
+func BenchmarkProtobuf_Decode_Simple(b *testing.B) {
+	user := &pb.BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
+	data, _ := proto.Marshal(user)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		u := &pb.BenchUser{}
+		_ = proto.Unmarshal(data, u)
 	}
 }
 
@@ -82,7 +103,6 @@ func BenchmarkJSON_Encode_Simple(b *testing.B) {
 func BenchmarkJSON_Decode_Simple(b *testing.B) {
 	user := BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
 	data, _ := json.Marshal(&user)
-	sizeResults["JSON"] = len(data)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -106,7 +126,6 @@ func BenchmarkMsgpack_Encode_Simple(b *testing.B) {
 func BenchmarkMsgpack_Decode_Simple(b *testing.B) {
 	user := BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
 	data, _ := msgpack.Marshal(&user)
-	sizeResults["Msgpack"] = len(data)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -119,31 +138,36 @@ func BenchmarkMsgpack_Decode_Simple(b *testing.B) {
 // ============= Size Comparison Test =============
 
 func TestEncodedSizes(t *testing.T) {
-	user := BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
-
 	// XPB
 	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, user.Name)
-	enc.WriteInt32(2, user.Age)
-	enc.WriteBool(3, user.Active)
+	enc.WriteString(1, "Alice Johnson")
+	enc.WriteInt32(2, 30)
+	enc.WriteBool(3, true)
 	xpbData := enc.Bytes()
 
+	// Protobuf
+	protoUser := &pb.BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
+	protoData, _ := proto.Marshal(protoUser)
+
 	// JSON
+	user := BenchUser{Name: "Alice Johnson", Age: 30, Active: true}
 	jsonData, _ := json.Marshal(&user)
 
 	// Msgpack
 	msgpackData, _ := msgpack.Marshal(&user)
 
-	t.Logf("=== Encoded Sizes ===")
+	t.Logf("=== Encoded Sizes (Simple Message) ===")
 	t.Logf("XPB:      %d bytes", len(xpbData))
+	t.Logf("Protobuf: %d bytes", len(protoData))
 	t.Logf("JSON:     %d bytes", len(jsonData))
 	t.Logf("Msgpack:  %d bytes", len(msgpackData))
 	t.Logf("")
-	t.Logf("XPB is %.1fx smaller than JSON", float64(len(jsonData))/float64(len(xpbData)))
-	t.Logf("XPB is %.1fx smaller than Msgpack", float64(len(msgpackData))/float64(len(xpbData)))
+	t.Logf("XPB vs Protobuf: %.2fx", float64(len(protoData))/float64(len(xpbData)))
+	t.Logf("XPB vs JSON:     %.2fx smaller", float64(len(jsonData))/float64(len(xpbData)))
+	t.Logf("XPB vs Msgpack:  %.2fx smaller", float64(len(msgpackData))/float64(len(xpbData)))
 }
 
-// ============= Larger Message Benchmarks =============
+// ============= Large Message Benchmarks =============
 
 type LargeBenchUser struct {
 	ID          uint64  `json:"id" msgpack:"id"`
@@ -156,8 +180,24 @@ type LargeBenchUser struct {
 }
 
 func BenchmarkXPB_Encode_Large(b *testing.B) {
-	user := LargeBenchUser{
-		ID:          12345678901234,
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		enc := xpb.NewEncoder(256)
+		enc.WriteUint64(1, 12345678901234)
+		enc.WriteString(2, "Alice Johnson")
+		enc.WriteString(3, "alice.johnson@example.com")
+		enc.WriteInt32(4, 30)
+		enc.WriteFloat64(5, 95.5)
+		enc.WriteBool(6, true)
+		enc.WriteString(7, "This is a longer description field that contains more text.")
+		_ = enc.Bytes()
+	}
+}
+
+func BenchmarkProtobuf_Encode_Large(b *testing.B) {
+	user := &pb.LargeBenchUser{
+		Id:          12345678901234,
 		Name:        "Alice Johnson",
 		Email:       "alice.johnson@example.com",
 		Age:         30,
@@ -168,15 +208,7 @@ func BenchmarkXPB_Encode_Large(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		enc := xpb.NewEncoder(256)
-		enc.WriteUint64(1, user.ID)
-		enc.WriteString(2, user.Name)
-		enc.WriteString(3, user.Email)
-		enc.WriteInt32(4, user.Age)
-		enc.WriteFloat64(5, user.Score)
-		enc.WriteBool(6, user.Active)
-		enc.WriteString(7, user.Description)
-		_ = enc.Bytes()
+		_, _ = proto.Marshal(user)
 	}
 }
 
@@ -215,6 +247,30 @@ func BenchmarkMsgpack_Encode_Large(b *testing.B) {
 }
 
 func TestLargeEncodedSizes(t *testing.T) {
+	// XPB
+	enc := xpb.NewEncoder(256)
+	enc.WriteUint64(1, 12345678901234)
+	enc.WriteString(2, "Alice Johnson")
+	enc.WriteString(3, "alice.johnson@example.com")
+	enc.WriteInt32(4, 30)
+	enc.WriteFloat64(5, 95.5)
+	enc.WriteBool(6, true)
+	enc.WriteString(7, "This is a longer description field that contains more text.")
+	xpbData := enc.Bytes()
+
+	// Protobuf
+	protoUser := &pb.LargeBenchUser{
+		Id:          12345678901234,
+		Name:        "Alice Johnson",
+		Email:       "alice.johnson@example.com",
+		Age:         30,
+		Score:       95.5,
+		Active:      true,
+		Description: "This is a longer description field that contains more text.",
+	}
+	protoData, _ := proto.Marshal(protoUser)
+
+	// JSON
 	user := LargeBenchUser{
 		ID:          12345678901234,
 		Name:        "Alice Johnson",
@@ -224,32 +280,18 @@ func TestLargeEncodedSizes(t *testing.T) {
 		Active:      true,
 		Description: "This is a longer description field that contains more text.",
 	}
-
-	// XPB
-	enc := xpb.NewEncoder(256)
-	enc.WriteUint64(1, user.ID)
-	enc.WriteString(2, user.Name)
-	enc.WriteString(3, user.Email)
-	enc.WriteInt32(4, user.Age)
-	enc.WriteFloat64(5, user.Score)
-	enc.WriteBool(6, user.Active)
-	enc.WriteString(7, user.Description)
-	xpbData := enc.Bytes()
-
-	// JSON
 	jsonData, _ := json.Marshal(&user)
 
 	// Msgpack
 	msgpackData, _ := msgpack.Marshal(&user)
 
-	t.Logf("=== Large Message Encoded Sizes ===")
+	t.Logf("=== Encoded Sizes (Large Message) ===")
 	t.Logf("XPB:      %d bytes", len(xpbData))
+	t.Logf("Protobuf: %d bytes", len(protoData))
 	t.Logf("JSON:     %d bytes", len(jsonData))
 	t.Logf("Msgpack:  %d bytes", len(msgpackData))
 	t.Logf("")
-	t.Logf("XPB is %.1fx smaller than JSON", float64(len(jsonData))/float64(len(xpbData)))
-	t.Logf("XPB is %.1fx smaller than Msgpack", float64(len(msgpackData))/float64(len(xpbData)))
+	t.Logf("XPB vs Protobuf: %.2fx", float64(len(protoData))/float64(len(xpbData)))
+	t.Logf("XPB vs JSON:     %.2fx smaller", float64(len(jsonData))/float64(len(xpbData)))
+	t.Logf("XPB vs Msgpack:  %.2fx smaller", float64(len(msgpackData))/float64(len(xpbData)))
 }
-
-// Suppress protobuf import for now (requires proto file compilation)
-var _ = proto.Marshal

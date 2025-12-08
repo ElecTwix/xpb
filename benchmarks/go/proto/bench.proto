@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package benchmark;
+
+option go_package = "github.com/anthropic/xpb/benchmarks/go/proto";
+
+message BenchUser {
+    string name = 1;
+    int32 age = 2;
+    bool active = 3;
+}
+
+message LargeBenchUser {
+    uint64 id = 1;
+    string name = 2;
+    string email = 3;
+    int32 age = 4;
+    double score = 5;
+    bool active = 6;
+    string description = 7;
+}
