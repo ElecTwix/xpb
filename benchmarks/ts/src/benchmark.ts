@@ -6,6 +6,8 @@
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { Encoder, Decoder } from '../../../runtime/ts/src/index.js';
 import { HybridEncoder, HybridDecoder, createDecoder } from '../../../runtime/ts/src/hybrid.js';
+import { UnsafeEncoder, UnsafeDecoder } from '../../../runtime/ts/src/unsafe.js';
+import { SlabAllocator, compileEncoder, compileDecoder, FieldType } from '../../../runtime/ts/src/jit.js';
 
 // ============= Benchmark Utilities =============
 
@@ -114,6 +116,87 @@ function benchXPB_Hybrid_Small(): BenchResult {
   return { name: "XPB (Hybrid)", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
+// ============= XPB Unsafe Benchmark =============
+
+function benchXPB_Unsafe_Small(): BenchResult {
+  const iterations = 100000;
+  const enc = new UnsafeEncoder(64);
+  let encoded: Uint8Array = new Uint8Array();
+  
+  const encodeNs = bench("Unsafe encode", iterations, () => {
+    enc.reset();
+    enc.writeString(1, smallUser.name);
+    enc.writeInt32(2, smallUser.age);
+    enc.writeBool(3, smallUser.active);
+    encoded = enc.finish();
+  });
+
+  enc.reset();
+  enc.writeString(1, smallUser.name);
+  enc.writeInt32(2, smallUser.age);
+  enc.writeBool(3, smallUser.active);
+  encoded = new Uint8Array(enc.finish());
+
+  const decodeNs = bench("Unsafe decode", iterations, () => {
+    const dec = new UnsafeDecoder(encoded);
+    while (!dec.eof()) {
+      const [fn, wt] = dec.readTag();
+      switch (fn) {
+        case 1: dec.readString(); break;
+        case 2: dec.readInt32(); break;
+        case 3: dec.readBool(); break;
+        default: dec.skip(wt);
+      }
+    }
+  });
+
+  return { name: "XPB (Unsafe)", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
+// ============= XPB JIT Benchmark =============
+
+const userSchema = {
+  fields: [
+    { tag: 1, type: FieldType.String, name: 'name' },
+    { tag: 2, type: FieldType.Int32, name: 'age' },
+    { tag: 3, type: FieldType.Bool, name: 'active' }
+  ]
+};
+
+function benchXPB_JIT_Small(): BenchResult {
+  const iterations = 100000;
+  
+  // Compile once
+  const jitEncode = compileEncoder<typeof smallUser>(userSchema);
+  const jitDecode = compileDecoder<typeof smallUser>(userSchema);
+  const slab = new SlabAllocator(65536);
+  
+  // Warmup
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+
+  // Measurement
+  const encodeNs = bench("JIT encode", iterations, () => {
+    // Reset slab if getting full (simple benchmark strategy)
+    if (slab.pos > 60000) slab.pos = 0;
+    
+    // Save start for sizing
+    jitEncode(slab, smallUser);
+  });
+
+  // Calculate size for report
+  slab.pos = 0;
+  jitEncode(slab, smallUser);
+  const size = slab.pos;
+  const encoded = slab.buf.subarray(0, size);
+
+  const decodeNs = bench("JIT decode", iterations, () => {
+     jitDecode(encoded, encoded.length);
+  });
+
+  return { name: "XPB (JIT)", encodeNs, decodeNs, sizeBytes: size };
+}
+
 // ============= JSON Benchmark =============
 
 function benchJSON_Small(): BenchResult {
@@ -219,6 +302,45 @@ function benchXPB_Large(): BenchResult {
   return { name: "XPB (JS)", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
+function benchXPB_Unsafe_Large(): BenchResult {
+  const iterations = 10000;
+  const enc = new UnsafeEncoder(2048);
+  let encoded: Uint8Array = new Uint8Array();
+  
+  const encodeNs = bench("Unsafe large encode", iterations, () => {
+    enc.reset();
+    enc.writeString(1, largeUser.name);
+    enc.writeString(2, largeUser.email);
+    enc.writeString(3, largeUser.bio);
+    for (const tag of largeUser.tags) {
+      enc.writeString(4, tag);
+    }
+    encoded = enc.finish();
+  });
+
+  enc.reset();
+  enc.writeString(1, largeUser.name);
+  enc.writeString(2, largeUser.email);
+  enc.writeString(3, largeUser.bio);
+  for (const tag of largeUser.tags) {
+    enc.writeString(4, tag);
+  }
+  encoded = new Uint8Array(enc.finish());
+
+  const decodeNs = bench("Unsafe large decode", iterations, () => {
+    const dec = new UnsafeDecoder(encoded);
+    while (!dec.eof()) {
+      const [fn, wt] = dec.readTag();
+      switch (fn) {
+        case 1: case 2: case 3: case 4: dec.readString(); break;
+        default: dec.skip(wt);
+      }
+    }
+  });
+
+  return { name: "XPB (Unsafe)", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
 // ============= Print Results =============
 
 function printResults(title: string, results: BenchResult[]) {
@@ -247,6 +369,8 @@ async function main() {
   // Small message benchmarks
   const smallResults: BenchResult[] = [];
   smallResults.push(benchXPB_Small());
+  smallResults.push(benchXPB_Unsafe_Small());
+  smallResults.push(benchXPB_JIT_Small());
   smallResults.push(benchXPB_Hybrid_Small());
   smallResults.push(benchJSON_Small());
   smallResults.push(benchMsgpack_Small());
@@ -256,6 +380,7 @@ async function main() {
   // Large message benchmarks
   const largeResults: BenchResult[] = [];
   largeResults.push(benchXPB_Large());
+  largeResults.push(benchXPB_Unsafe_Large());
   largeResults.push(benchJSON_Large());
   largeResults.push(benchMsgpack_Large());
   
