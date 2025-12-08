@@ -3,33 +3,16 @@
  */
 export const WireType = {
   Varint: 0,
-  Fixed32: 1,
-  Fixed64: 2,
-  LengthDelimited: 3,
+  Fixed64: 1,
+  LengthDelimited: 2,
+  Fixed32: 5,
 } as const;
 
 export type WireType = (typeof WireType)[keyof typeof WireType];
 
-/**
- * Extracts the field number from a tag.
- */
-export function tagFieldNumber(tag: number): number {
-  return tag >>> 3;
-}
-
-/**
- * Extracts the wire type from a tag.
- */
-export function tagWireType(tag: number): WireType {
-  return (tag & 0x7) as WireType;
-}
-
-/**
- * Creates a tag from a field number and wire type.
- */
-export function makeTag(fieldNumber: number, wireType: WireType): number {
-  return (fieldNumber << 3) | wireType;
-}
+// Cached encoder/decoder for strings (avoid creating new instances)
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 /**
  * Zigzag encodes a signed 32-bit integer.
@@ -60,167 +43,162 @@ export function zigzagDecode64(n: bigint): bigint {
 }
 
 /**
- * Encoder for XPB binary format.
+ * Optimized Encoder for XPB binary format.
+ * Uses preallocated buffer and avoids BigInt for 32-bit operations.
  */
 export class Encoder {
-  private buf: number[] = [];
+  private buf: Uint8Array;
+  private pos = 0;
+  private view: DataView;
 
-  /**
-   * Returns the encoded bytes.
-   */
-  finish(): Uint8Array {
-    return new Uint8Array(this.buf);
+  constructor(initialSize = 256) {
+    this.buf = new Uint8Array(initialSize);
+    this.view = new DataView(this.buf.buffer);
   }
 
-  /**
-   * Clears the encoder for reuse.
-   */
-  reset(): void {
-    this.buf = [];
-  }
-
-  /**
-   * Writes an unsigned varint.
-   */
-  writeUvarint(v: number | bigint): void {
-    let n = typeof v === "bigint" ? v : BigInt(v);
-    while (n >= 0x80n) {
-      this.buf.push(Number((n & 0x7fn) | 0x80n));
-      n >>= 7n;
+  private ensureCapacity(needed: number): void {
+    if (this.pos + needed > this.buf.length) {
+      const newSize = Math.max(this.buf.length * 2, this.pos + needed);
+      const newBuf = new Uint8Array(newSize);
+      newBuf.set(this.buf);
+      this.buf = newBuf;
+      this.view = new DataView(this.buf.buffer);
     }
-    this.buf.push(Number(n));
   }
 
-  /**
-   * Writes a tag (field number + wire type).
-   */
-  writeTag(fieldNumber: number, wireType: WireType): void {
-    this.writeUvarint(makeTag(fieldNumber, wireType));
+  finish(): Uint8Array {
+    return this.buf.subarray(0, this.pos);
   }
 
-  /**
-   * Writes a boolean field.
-   */
+  reset(): void {
+    this.pos = 0;
+  }
+
+  // Fast 32-bit varint (avoids BigInt)
+  private writeVarint32(v: number): void {
+    this.ensureCapacity(5);
+    v = v >>> 0; // Convert to unsigned
+    while (v >= 0x80) {
+      this.buf[this.pos++] = (v & 0x7f) | 0x80;
+      v >>>= 7;
+    }
+    this.buf[this.pos++] = v;
+  }
+
+  // 64-bit varint (uses BigInt only when needed)
+  private writeVarint64(v: bigint): void {
+    this.ensureCapacity(10);
+    while (v >= 0x80n) {
+      this.buf[this.pos++] = Number((v & 0x7fn) | 0x80n);
+      v >>= 7n;
+    }
+    this.buf[this.pos++] = Number(v);
+  }
+
+  private writeTag(fieldNumber: number, wireType: number): void {
+    this.writeVarint32((fieldNumber << 3) | wireType);
+  }
+
   writeBool(fieldNumber: number, v: boolean): void {
+    this.ensureCapacity(2);
     this.writeTag(fieldNumber, WireType.Varint);
-    this.buf.push(v ? 1 : 0);
+    this.buf[this.pos++] = v ? 1 : 0;
   }
 
-  /**
-   * Writes a signed 32-bit integer field.
-   */
   writeInt32(fieldNumber: number, v: number): void {
     this.writeTag(fieldNumber, WireType.Varint);
-    this.writeUvarint(zigzagEncode32(v));
+    this.writeVarint32(zigzagEncode32(v));
   }
 
-  /**
-   * Writes a signed 64-bit integer field.
-   */
   writeInt64(fieldNumber: number, v: bigint): void {
     this.writeTag(fieldNumber, WireType.Varint);
-    this.writeUvarint(zigzagEncode64(v));
+    this.writeVarint64(zigzagEncode64(v));
   }
 
-  /**
-   * Writes an unsigned 32-bit integer field.
-   */
   writeUint32(fieldNumber: number, v: number): void {
     this.writeTag(fieldNumber, WireType.Varint);
-    this.writeUvarint(v);
+    this.writeVarint32(v);
   }
 
-  /**
-   * Writes an unsigned 64-bit integer field.
-   */
   writeUint64(fieldNumber: number, v: bigint): void {
     this.writeTag(fieldNumber, WireType.Varint);
-    this.writeUvarint(v);
+    this.writeVarint64(v);
   }
 
-  /**
-   * Writes a 32-bit float field.
-   */
   writeFloat32(fieldNumber: number, v: number): void {
+    this.ensureCapacity(6);
     this.writeTag(fieldNumber, WireType.Fixed32);
-    const buf = new ArrayBuffer(4);
-    new DataView(buf).setFloat32(0, v, true);
-    const bytes = new Uint8Array(buf);
-    for (let i = 0; i < 4; i++) {
-      this.buf.push(bytes[i]);
-    }
+    this.view.setFloat32(this.pos, v, true);
+    this.pos += 4;
   }
 
-  /**
-   * Writes a 64-bit float field.
-   */
   writeFloat64(fieldNumber: number, v: number): void {
+    this.ensureCapacity(10);
     this.writeTag(fieldNumber, WireType.Fixed64);
-    const buf = new ArrayBuffer(8);
-    new DataView(buf).setFloat64(0, v, true);
-    const bytes = new Uint8Array(buf);
-    for (let i = 0; i < 8; i++) {
-      this.buf.push(bytes[i]);
-    }
+    this.view.setFloat64(this.pos, v, true);
+    this.pos += 8;
   }
 
-  /**
-   * Writes a string field.
-   */
   writeString(fieldNumber: number, v: string): void {
+    const bytes = textEncoder.encode(v);
+    this.ensureCapacity(bytes.length + 10);
     this.writeTag(fieldNumber, WireType.LengthDelimited);
-    const bytes = new TextEncoder().encode(v);
-    this.writeUvarint(bytes.length);
-    for (let i = 0; i < bytes.length; i++) {
-      this.buf.push(bytes[i]);
-    }
+    this.writeVarint32(bytes.length);
+    this.buf.set(bytes, this.pos);
+    this.pos += bytes.length;
   }
 
-  /**
-   * Writes a bytes field.
-   */
   writeBytes(fieldNumber: number, v: Uint8Array): void {
+    this.ensureCapacity(v.length + 10);
     this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeUvarint(v.length);
-    for (let i = 0; i < v.length; i++) {
-      this.buf.push(v[i]);
-    }
+    this.writeVarint32(v.length);
+    this.buf.set(v, this.pos);
+    this.pos += v.length;
   }
 
-  /**
-   * Writes a nested message field.
-   */
   writeMessage(fieldNumber: number, data: Uint8Array): void {
-    this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeUvarint(data.length);
-    for (let i = 0; i < data.length; i++) {
-      this.buf.push(data[i]);
-    }
+    this.writeBytes(fieldNumber, data);
   }
 }
 
 /**
- * Decoder for XPB binary format.
+ * Optimized Decoder for XPB binary format.
+ * Uses 32-bit path where possible to avoid BigInt overhead.
  */
 export class Decoder {
   private data: Uint8Array;
   private pos = 0;
+  private view: DataView;
 
   constructor(data: Uint8Array) {
     this.data = data;
+    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   }
 
-  /**
-   * Returns true if all data has been consumed.
-   */
   eof(): boolean {
     return this.pos >= this.data.length;
   }
 
-  /**
-   * Reads an unsigned varint.
-   */
-  readUvarint(): bigint {
+  // Fast 32-bit varint (avoids BigInt)
+  private readVarint32(): number {
+    let result = 0;
+    let shift = 0;
+    while (this.pos < this.data.length) {
+      const b = this.data[this.pos++];
+      result |= (b & 0x7f) << shift;
+      if ((b & 0x80) === 0) {
+        return result >>> 0;
+      }
+      shift += 7;
+      if (shift > 35) {
+        throw new Error("xpb: varint too long for 32-bit");
+      }
+    }
+    throw new Error("xpb: unexpected EOF reading varint");
+  }
+
+  // 64-bit varint (BigInt)
+  private readVarint64(): bigint {
     let result = 0n;
     let shift = 0n;
     while (this.pos < this.data.length) {
@@ -234,91 +212,61 @@ export class Decoder {
     throw new Error("xpb: unexpected EOF reading varint");
   }
 
-  /**
-   * Reads a tag and returns [fieldNumber, wireType].
-   */
   readTag(): [number, WireType] {
-    const tag = Number(this.readUvarint());
-    return [tagFieldNumber(tag), tagWireType(tag)];
+    const tag = this.readVarint32();
+    return [tag >>> 3, (tag & 0x7) as WireType];
   }
 
-  /**
-   * Reads a boolean value.
-   */
   readBool(): boolean {
-    return this.readUvarint() !== 0n;
+    return this.readVarint32() !== 0;
   }
 
-  /**
-   * Reads a signed 32-bit integer.
-   */
   readInt32(): number {
-    return zigzagDecode32(Number(this.readUvarint()));
+    return zigzagDecode32(this.readVarint32());
   }
 
-  /**
-   * Reads a signed 64-bit integer.
-   */
   readInt64(): bigint {
-    return zigzagDecode64(this.readUvarint());
+    return zigzagDecode64(this.readVarint64());
   }
 
-  /**
-   * Reads an unsigned 32-bit integer.
-   */
   readUint32(): number {
-    return Number(this.readUvarint());
+    return this.readVarint32();
   }
 
-  /**
-   * Reads an unsigned 64-bit integer.
-   */
   readUint64(): bigint {
-    return this.readUvarint();
+    return this.readVarint64();
   }
 
-  /**
-   * Reads a 32-bit float.
-   */
   readFloat32(): number {
     if (this.pos + 4 > this.data.length) {
       throw new Error("xpb: unexpected EOF reading float32");
     }
-    const view = new DataView(this.data.buffer, this.data.byteOffset + this.pos, 4);
+    const v = this.view.getFloat32(this.pos, true);
     this.pos += 4;
-    return view.getFloat32(0, true);
+    return v;
   }
 
-  /**
-   * Reads a 64-bit float.
-   */
   readFloat64(): number {
     if (this.pos + 8 > this.data.length) {
       throw new Error("xpb: unexpected EOF reading float64");
     }
-    const view = new DataView(this.data.buffer, this.data.byteOffset + this.pos, 8);
+    const v = this.view.getFloat64(this.pos, true);
     this.pos += 8;
-    return view.getFloat64(0, true);
+    return v;
   }
 
-  /**
-   * Reads a string.
-   */
   readString(): string {
-    const length = Number(this.readUvarint());
+    const length = this.readVarint32();
     if (this.pos + length > this.data.length) {
       throw new Error("xpb: unexpected EOF reading string");
     }
     const bytes = this.data.subarray(this.pos, this.pos + length);
     this.pos += length;
-    return new TextDecoder().decode(bytes);
+    return textDecoder.decode(bytes);
   }
 
-  /**
-   * Reads bytes.
-   */
   readBytes(): Uint8Array {
-    const length = Number(this.readUvarint());
+    const length = this.readVarint32();
     if (this.pos + length > this.data.length) {
       throw new Error("xpb: unexpected EOF reading bytes");
     }
@@ -327,20 +275,14 @@ export class Decoder {
     return bytes;
   }
 
-  /**
-   * Reads message bytes (for nested messages).
-   */
   readMessageBytes(): Uint8Array {
     return this.readBytes();
   }
 
-  /**
-   * Skips a field based on wire type.
-   */
   skip(wireType: WireType): void {
     switch (wireType) {
       case WireType.Varint:
-        this.readUvarint();
+        this.readVarint32();
         break;
       case WireType.Fixed32:
         this.pos += 4;
@@ -349,7 +291,7 @@ export class Decoder {
         this.pos += 8;
         break;
       case WireType.LengthDelimited:
-        const length = Number(this.readUvarint());
+        const length = this.readVarint32();
         this.pos += length;
         break;
       default:

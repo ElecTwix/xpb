@@ -1,116 +1,10 @@
 /**
  * XPB TypeScript Benchmark Suite
- * Compares XPB vs JSON vs MessagePack vs Protobuf
+ * Compares XPB vs JSON vs MessagePack
  */
 
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
-
-// ============= XPB Runtime (inline for benchmark) =============
-
-const WireType = { Varint: 0, Fixed64: 1, LengthDelimited: 2, Fixed32: 5 } as const;
-
-function zigzagEncode32(n: number): number {
-  return (n << 1) ^ (n >> 31);
-}
-
-function zigzagDecode32(n: number): number {
-  return (n >>> 1) ^ -(n & 1);
-}
-
-class XPBEncoder {
-  private buf: number[] = [];
-
-  private writeVarint(n: number | bigint): void {
-    let val = typeof n === 'bigint' ? n : BigInt(n);
-    while (val > 0x7fn) {
-      this.buf.push(Number(val & 0x7fn) | 0x80);
-      val >>= 7n;
-    }
-    this.buf.push(Number(val));
-  }
-
-  private writeTag(fieldNum: number, wireType: number): void {
-    this.writeVarint((fieldNum << 3) | wireType);
-  }
-
-  writeString(fieldNum: number, value: string): void {
-    this.writeTag(fieldNum, WireType.LengthDelimited);
-    const bytes = new TextEncoder().encode(value);
-    this.writeVarint(bytes.length);
-    for (const b of bytes) this.buf.push(b);
-  }
-
-  writeInt32(fieldNum: number, value: number): void {
-    this.writeTag(fieldNum, WireType.Varint);
-    this.writeVarint(zigzagEncode32(value));
-  }
-
-  writeBool(fieldNum: number, value: boolean): void {
-    this.writeTag(fieldNum, WireType.Varint);
-    this.buf.push(value ? 1 : 0);
-  }
-
-  finish(): Uint8Array {
-    return new Uint8Array(this.buf);
-  }
-}
-
-class XPBDecoder {
-  private pos = 0;
-  private view: DataView;
-  private data: Uint8Array;
-
-  constructor(data: Uint8Array) {
-    this.data = data;
-    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  }
-
-  eof(): boolean { return this.pos >= this.data.length; }
-
-  private readVarint(): bigint {
-    let result = 0n;
-    let shift = 0n;
-    while (this.pos < this.data.length) {
-      const b = this.data[this.pos++];
-      result |= BigInt(b & 0x7f) << shift;
-      if ((b & 0x80) === 0) break;
-      shift += 7n;
-    }
-    return result;
-  }
-
-  readTag(): [number, number] {
-    const tag = Number(this.readVarint());
-    return [tag >>> 3, tag & 0x7];
-  }
-
-  readString(): string {
-    const len = Number(this.readVarint());
-    const bytes = this.data.slice(this.pos, this.pos + len);
-    this.pos += len;
-    return new TextDecoder().decode(bytes);
-  }
-
-  readInt32(): number {
-    return zigzagDecode32(Number(this.readVarint()));
-  }
-
-  readBool(): boolean {
-    return this.readVarint() !== 0n;
-  }
-
-  skip(wireType: number): void {
-    switch (wireType) {
-      case WireType.Varint: this.readVarint(); break;
-      case WireType.Fixed64: this.pos += 8; break;
-      case WireType.Fixed32: this.pos += 4; break;
-      case WireType.LengthDelimited:
-        const len = Number(this.readVarint());
-        this.pos += len;
-        break;
-    }
-  }
-}
+import { Encoder, Decoder, WireType, zigzagEncode32, zigzagDecode32 } from '../../../runtime/ts/src/index.js';
 
 // ============= Benchmark Utilities =============
 
@@ -119,7 +13,6 @@ interface BenchResult {
   encodeNs: number;
   decodeNs: number;
   sizeBytes: number;
-  encodeAllocs?: string;
 }
 
 function bench(name: string, iterations: number, fn: () => void): number {
@@ -142,19 +35,27 @@ const testUser = { name: "Alice Johnson", age: 30, active: true };
 function benchXPB(): BenchResult {
   const iterations = 100000;
   
-  // Encode
+  // Reuse encoder for better performance
+  const enc = new Encoder(64);
   let encoded: Uint8Array = new Uint8Array();
+  
   const encodeNs = bench("XPB encode", iterations, () => {
-    const enc = new XPBEncoder();
+    enc.reset();
     enc.writeString(1, testUser.name);
     enc.writeInt32(2, testUser.age);
     enc.writeBool(3, testUser.active);
     encoded = enc.finish();
   });
 
-  // Decode
+  // Get final encoded data
+  enc.reset();
+  enc.writeString(1, testUser.name);
+  enc.writeInt32(2, testUser.age);
+  enc.writeBool(3, testUser.active);
+  encoded = new Uint8Array(enc.finish()); // Copy for decode benchmark
+
   const decodeNs = bench("XPB decode", iterations, () => {
-    const dec = new XPBDecoder(encoded);
+    const dec = new Decoder(encoded);
     let name = "", age = 0, active = false;
     while (!dec.eof()) {
       const [fn, wt] = dec.readTag();
@@ -208,7 +109,7 @@ function benchMsgpack(): BenchResult {
 
 async function main() {
   console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║           XPB TypeScript Benchmark Results                   ║");
+  console.log("║        XPB TypeScript Benchmark (Optimized Runtime)          ║");
   console.log("╠══════════════════════════════════════════════════════════════╣");
   console.log("║ Test: Simple message { name, age, active }                   ║");
   console.log("╚══════════════════════════════════════════════════════════════╝\n");
@@ -238,13 +139,12 @@ async function main() {
   const json = results[1];
   const msgpack = results[2];
 
-  console.log("Comparison vs XPB:");
-  console.log(`  JSON encode:   ${(json.encodeNs / xpb.encodeNs).toFixed(1)}x slower`);
-  console.log(`  JSON decode:   ${(json.decodeNs / xpb.decodeNs).toFixed(1)}x slower`);
-  console.log(`  JSON size:     ${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x larger`);
-  console.log(`  Msgpack enc:   ${(msgpack.encodeNs / xpb.encodeNs).toFixed(1)}x slower`);
-  console.log(`  Msgpack dec:   ${(msgpack.decodeNs / xpb.decodeNs).toFixed(1)}x slower`);
-  console.log(`  Msgpack size:  ${(msgpack.sizeBytes / xpb.sizeBytes).toFixed(1)}x larger`);
+  console.log("Comparison:");
+  console.log(`  XPB encode:    ${xpb.encodeNs.toFixed(0)} ns (${(json.encodeNs / xpb.encodeNs).toFixed(1)}x vs JSON)`);
+  console.log(`  XPB decode:    ${xpb.decodeNs.toFixed(0)} ns (${(json.decodeNs / xpb.decodeNs).toFixed(1)}x vs JSON)`);
+  console.log(`  XPB size:      ${xpb.sizeBytes} bytes (${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller than JSON)`);
+  console.log(`  Msgpack enc:   ${(msgpack.encodeNs / xpb.encodeNs).toFixed(1)}x vs XPB`);
+  console.log(`  Msgpack dec:   ${(msgpack.decodeNs / xpb.decodeNs).toFixed(1)}x vs XPB`);
 }
 
 main().catch(console.error);
