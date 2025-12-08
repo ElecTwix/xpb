@@ -1,10 +1,24 @@
 {
   "name": "@xpb/runtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "XPB runtime library for TypeScript",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./hybrid": {
+      "types": "./dist/hybrid.d.ts",
+      "default": "./dist/hybrid.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm.d.ts",
+      "default": "./dist/wasm.js"
+    }
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -18,7 +32,8 @@
     "xpb",
     "serialization",
     "binary",
-    "protobuf"
+    "protobuf",
+    "wasm"
   ],
   "license": "MIT",
   "devDependencies": {
