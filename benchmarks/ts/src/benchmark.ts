@@ -1,10 +1,11 @@
 /**
  * XPB TypeScript Benchmark Suite
- * Compares XPB vs JSON vs MessagePack
+ * Compares XPB (pure JS, hybrid) vs JSON vs MessagePack
  */
 
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
-import { Encoder, Decoder, WireType, zigzagEncode32, zigzagDecode32 } from '../../../runtime/ts/src/index.js';
+import { Encoder, Decoder } from '../../../runtime/ts/src/index.js';
+import { HybridEncoder, HybridDecoder, createDecoder } from '../../../runtime/ts/src/hybrid.js';
 
 // ============= Benchmark Utilities =============
 
@@ -28,57 +29,99 @@ function bench(name: string, iterations: number, fn: () => void): number {
 
 // ============= Test Data =============
 
-const testUser = { name: "Alice Johnson", age: 30, active: true };
+const smallUser = { name: "Alice Johnson", age: 30, active: true };
 
-// ============= XPB Benchmark =============
+// Large message for hybrid testing
+const largeUser = {
+  name: "Alice Johnson",
+  email: "alice.johnson@example.com",
+  bio: "This is a much longer description field that contains significantly more text to simulate a larger payload that would benefit from WASM processing. ".repeat(5),
+  tags: ["developer", "designer", "architect", "manager", "consultant"],
+  metadata: { version: "1.0", region: "us-west", tier: "premium" }
+};
 
-function benchXPB(): BenchResult {
+// ============= XPB Pure JS Benchmark =============
+
+function benchXPB_Small(): BenchResult {
   const iterations = 100000;
-  
-  // Reuse encoder for better performance
   const enc = new Encoder(64);
   let encoded: Uint8Array = new Uint8Array();
   
   const encodeNs = bench("XPB encode", iterations, () => {
     enc.reset();
-    enc.writeString(1, testUser.name);
-    enc.writeInt32(2, testUser.age);
-    enc.writeBool(3, testUser.active);
+    enc.writeString(1, smallUser.name);
+    enc.writeInt32(2, smallUser.age);
+    enc.writeBool(3, smallUser.active);
     encoded = enc.finish();
   });
 
-  // Get final encoded data
   enc.reset();
-  enc.writeString(1, testUser.name);
-  enc.writeInt32(2, testUser.age);
-  enc.writeBool(3, testUser.active);
-  encoded = new Uint8Array(enc.finish()); // Copy for decode benchmark
+  enc.writeString(1, smallUser.name);
+  enc.writeInt32(2, smallUser.age);
+  enc.writeBool(3, smallUser.active);
+  encoded = new Uint8Array(enc.finish());
 
   const decodeNs = bench("XPB decode", iterations, () => {
     const dec = new Decoder(encoded);
-    let name = "", age = 0, active = false;
     while (!dec.eof()) {
       const [fn, wt] = dec.readTag();
       switch (fn) {
-        case 1: name = dec.readString(); break;
-        case 2: age = dec.readInt32(); break;
-        case 3: active = dec.readBool(); break;
+        case 1: dec.readString(); break;
+        case 2: dec.readInt32(); break;
+        case 3: dec.readBool(); break;
         default: dec.skip(wt);
       }
     }
   });
 
-  return { name: "XPB", encodeNs, decodeNs, sizeBytes: encoded.length };
+  return { name: "XPB (JS)", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
+// ============= XPB Hybrid Benchmark =============
+
+function benchXPB_Hybrid_Small(): BenchResult {
+  const iterations = 100000;
+  const enc = new HybridEncoder(64);
+  let encoded: Uint8Array = new Uint8Array();
+  
+  const encodeNs = bench("Hybrid encode", iterations, () => {
+    enc.reset();
+    enc.writeString(1, smallUser.name);
+    enc.writeInt32(2, smallUser.age);
+    enc.writeBool(3, smallUser.active);
+    encoded = enc.finish();
+  });
+
+  enc.reset();
+  enc.writeString(1, smallUser.name);
+  enc.writeInt32(2, smallUser.age);
+  enc.writeBool(3, smallUser.active);
+  encoded = new Uint8Array(enc.finish());
+
+  const decodeNs = bench("Hybrid decode", iterations, () => {
+    const dec = createDecoder(encoded);
+    while (!dec.eof()) {
+      const [fn, wt] = dec.readTag();
+      switch (fn) {
+        case 1: dec.readString(); break;
+        case 2: dec.readInt32(); break;
+        case 3: dec.readBool(); break;
+        default: dec.skip(wt);
+      }
+    }
+  });
+
+  return { name: "XPB (Hybrid)", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
 // ============= JSON Benchmark =============
 
-function benchJSON(): BenchResult {
+function benchJSON_Small(): BenchResult {
   const iterations = 100000;
   
   let encoded = "";
   const encodeNs = bench("JSON encode", iterations, () => {
-    encoded = JSON.stringify(testUser);
+    encoded = JSON.stringify(smallUser);
   });
 
   const decodeNs = bench("JSON decode", iterations, () => {
@@ -90,12 +133,12 @@ function benchJSON(): BenchResult {
 
 // ============= MessagePack Benchmark =============
 
-function benchMsgpack(): BenchResult {
+function benchMsgpack_Small(): BenchResult {
   const iterations = 100000;
   
   let encoded: Uint8Array = new Uint8Array();
   const encodeNs = bench("Msgpack encode", iterations, () => {
-    encoded = msgpackEncode(testUser);
+    encoded = msgpackEncode(smallUser);
   });
 
   const decodeNs = bench("Msgpack decode", iterations, () => {
@@ -105,46 +148,128 @@ function benchMsgpack(): BenchResult {
   return { name: "Msgpack", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
-// ============= Main =============
+// ============= Large Message Benchmarks =============
 
-async function main() {
-  console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║        XPB TypeScript Benchmark (Optimized Runtime)          ║");
-  console.log("╠══════════════════════════════════════════════════════════════╣");
-  console.log("║ Test: Simple message { name, age, active }                   ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝\n");
-
-  const results: BenchResult[] = [];
+function benchJSON_Large(): BenchResult {
+  const iterations = 10000;
   
-  results.push(benchXPB());
-  results.push(benchJSON());
-  results.push(benchMsgpack());
+  let encoded = "";
+  const encodeNs = bench("JSON large encode", iterations, () => {
+    encoded = JSON.stringify(largeUser);
+  });
 
-  // Print results table
-  console.log("┌────────────┬────────────┬────────────┬────────────┐");
-  console.log("│ Format     │ Encode     │ Decode     │ Size       │");
-  console.log("├────────────┼────────────┼────────────┼────────────┤");
+  const decodeNs = bench("JSON large decode", iterations, () => {
+    JSON.parse(encoded);
+  });
+
+  return { name: "JSON", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
+function benchMsgpack_Large(): BenchResult {
+  const iterations = 10000;
+  
+  let encoded: Uint8Array = new Uint8Array();
+  const encodeNs = bench("Msgpack large encode", iterations, () => {
+    encoded = msgpackEncode(largeUser);
+  });
+
+  const decodeNs = bench("Msgpack large decode", iterations, () => {
+    msgpackDecode(encoded);
+  });
+
+  return { name: "Msgpack", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
+function benchXPB_Large(): BenchResult {
+  const iterations = 10000;
+  const enc = new Encoder(2048);
+  let encoded: Uint8Array = new Uint8Array();
+  
+  const encodeNs = bench("XPB large encode", iterations, () => {
+    enc.reset();
+    enc.writeString(1, largeUser.name);
+    enc.writeString(2, largeUser.email);
+    enc.writeString(3, largeUser.bio);
+    for (const tag of largeUser.tags) {
+      enc.writeString(4, tag);
+    }
+    encoded = enc.finish();
+  });
+
+  enc.reset();
+  enc.writeString(1, largeUser.name);
+  enc.writeString(2, largeUser.email);
+  enc.writeString(3, largeUser.bio);
+  for (const tag of largeUser.tags) {
+    enc.writeString(4, tag);
+  }
+  encoded = new Uint8Array(enc.finish());
+
+  const decodeNs = bench("XPB large decode", iterations, () => {
+    const dec = new Decoder(encoded);
+    while (!dec.eof()) {
+      const [fn, wt] = dec.readTag();
+      switch (fn) {
+        case 1: case 2: case 3: case 4: dec.readString(); break;
+        default: dec.skip(wt);
+      }
+    }
+  });
+
+  return { name: "XPB (JS)", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
+
+// ============= Print Results =============
+
+function printResults(title: string, results: BenchResult[]) {
+  console.log(`\n${title}`);
+  console.log("┌────────────────┬────────────┬────────────┬────────────┐");
+  console.log("│ Format         │ Encode     │ Decode     │ Size       │");
+  console.log("├────────────────┼────────────┼────────────┼────────────┤");
   
   for (const r of results) {
     const enc = r.encodeNs.toFixed(0).padStart(7) + " ns";
     const dec = r.decodeNs.toFixed(0).padStart(7) + " ns";
-    const size = (r.sizeBytes + " bytes").padStart(9);
-    console.log(`│ ${r.name.padEnd(10)} │ ${enc} │ ${dec} │ ${size} │`);
+    const size = (r.sizeBytes + " B").padStart(8);
+    console.log(`│ ${r.name.padEnd(14)} │ ${enc} │ ${dec} │ ${size} │`);
   }
   
-  console.log("└────────────┴────────────┴────────────┴────────────┘\n");
+  console.log("└────────────────┴────────────┴────────────┴────────────┘");
+}
 
-  // Comparisons
-  const xpb = results[0];
-  const json = results[1];
-  const msgpack = results[2];
+// ============= Main =============
 
-  console.log("Comparison:");
-  console.log(`  XPB encode:    ${xpb.encodeNs.toFixed(0)} ns (${(json.encodeNs / xpb.encodeNs).toFixed(1)}x vs JSON)`);
-  console.log(`  XPB decode:    ${xpb.decodeNs.toFixed(0)} ns (${(json.decodeNs / xpb.decodeNs).toFixed(1)}x vs JSON)`);
-  console.log(`  XPB size:      ${xpb.sizeBytes} bytes (${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller than JSON)`);
-  console.log(`  Msgpack enc:   ${(msgpack.encodeNs / xpb.encodeNs).toFixed(1)}x vs XPB`);
-  console.log(`  Msgpack dec:   ${(msgpack.decodeNs / xpb.decodeNs).toFixed(1)}x vs XPB`);
+async function main() {
+  console.log("╔══════════════════════════════════════════════════════════════╗");
+  console.log("║      XPB Benchmark: Pure JS vs Hybrid vs JSON vs Msgpack     ║");
+  console.log("╚══════════════════════════════════════════════════════════════╝");
+
+  // Small message benchmarks
+  const smallResults: BenchResult[] = [];
+  smallResults.push(benchXPB_Small());
+  smallResults.push(benchXPB_Hybrid_Small());
+  smallResults.push(benchJSON_Small());
+  smallResults.push(benchMsgpack_Small());
+  
+  printResults("Small Message (19-47 bytes)", smallResults);
+
+  // Large message benchmarks
+  const largeResults: BenchResult[] = [];
+  largeResults.push(benchXPB_Large());
+  largeResults.push(benchJSON_Large());
+  largeResults.push(benchMsgpack_Large());
+  
+  printResults("Large Message (1KB+)", largeResults);
+
+  // Summary
+  console.log("\n📊 Summary:");
+  const xpbSmall = smallResults[0];
+  const hybridSmall = smallResults[1];
+  const jsonSmall = smallResults[2];
+  
+  console.log(`  XPB vs JSON size:     ${(jsonSmall.sizeBytes / xpbSmall.sizeBytes).toFixed(1)}x smaller`);
+  console.log(`  Hybrid overhead:      ${((hybridSmall.decodeNs / xpbSmall.decodeNs - 1) * 100).toFixed(1)}% vs pure JS`);
+  console.log(`  XPB decode vs JSON:   ${(jsonSmall.decodeNs / xpbSmall.decodeNs).toFixed(2)}x`);
 }
 
 main().catch(console.error);
