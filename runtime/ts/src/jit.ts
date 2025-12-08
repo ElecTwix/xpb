@@ -15,7 +15,11 @@ export class SlabAllocator {
   public size: number;
 
   constructor(size = 65536) {
-    this.buf = new Uint8Array(size);
+    if (typeof Buffer !== 'undefined') {
+      this.buf = Buffer.alloc(size);
+    } else {
+      this.buf = new Uint8Array(size);
+    }
     this.pos = 0;
     this.size = size;
   }
@@ -64,6 +68,7 @@ export interface JITOptions {
   fixedInts?: boolean;
   structMode?: boolean; // No tags, implicit order (like C structs)
   aligned?: boolean;    // Force 4-byte alignment (implies fixedInts + structMode)
+  target?: 'node' | 'browser'; // Optimized generation target
 }
 
 export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (slab: SlabAllocator, obj: T) => void {
@@ -71,6 +76,10 @@ export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (sl
   if (opts.aligned) {
     opts.structMode = true;
     opts.fixedInts = true;
+  }
+  // Auto-detect node if not specified and buffer exists
+  if (!opts.target && typeof Buffer !== 'undefined') {
+      opts.target = 'node';
   }
 
   const lines: string[] = [];
@@ -274,13 +283,11 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
                      pos += strLen;
                  } else {
                      // Fallback
-                     var res = textEncoder.encodeInto(str, buf.subarray(pos));
-                     written = res.written;
+                     ${opts.target === 'node' ? 'written = buf.write(str, pos);' : 'var res = textEncoder.encodeInto(str, buf.subarray(pos)); written = res.written;'}
                      pos += written;
                  }
              } else {
-                 var res = textEncoder.encodeInto(str, buf.subarray(pos));
-                 written = res.written;
+                 ${opts.target === 'node' ? 'written = buf.write(str, pos);' : 'var res = textEncoder.encodeInto(str, buf.subarray(pos)); written = res.written;'}
                  pos += written;
              }
              
@@ -322,8 +329,11 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
               } else {
                   // Fallback: Reset and use standard
                   pos = savePos;
-                  var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
-                  var written = res.written;
+                  ${opts.target === 'node' ? 
+                  `var written = buf.write(str, pos + 1);` : 
+                  `var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
+                   var written = res.written;`
+                  }
                   
                   if (written < 128) {
                      buf[pos] = written;
@@ -348,8 +358,11 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
               }
           } else {
               // Long string standard path
-              var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
-              var written = res.written;
+              ${opts.target === 'node' ? 
+              `var written = buf.write(str, pos + 1);` : 
+              `var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
+               var written = res.written;`
+              }
               
               // ... same fallback logic ...
               if (written < 128) {

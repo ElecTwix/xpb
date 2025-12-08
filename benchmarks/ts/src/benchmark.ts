@@ -11,14 +11,14 @@ import { SlabAllocator, compileEncoder, compileDecoder, FieldType } from '../../
 
 // ============= Benchmark Utilities =============
 
-interface BenchResult {
+export interface BenchResult {
   name: string;
   encodeNs: number;
   decodeNs: number;
   sizeBytes: number;
 }
 
-function bench(name: string, iterations: number, fn: () => void): number {
+export function bench(name: string, iterations: number, fn: () => void): number {
   // Warmup
   for (let i = 0; i < 1000; i++) fn();
   
@@ -40,6 +40,16 @@ const largeUser = {
   bio: "This is a much longer description field that contains significantly more text to simulate a larger payload that would benefit from WASM processing. ".repeat(5),
   tags: ["developer", "designer", "architect", "manager", "consultant"],
   metadata: { version: "1.0", region: "us-west", tier: "premium" }
+};
+
+const testDataLarge = largeUser;
+const schemaLarge = {
+    fields: [
+        { tag: 1, name: 'name', type: FieldType.String },
+        { tag: 2, name: 'email', type: FieldType.String },
+        { tag: 3, name: 'bio', type: FieldType.String },
+        { tag: 4, name: 'tags', type: FieldType.String, repeated: true }
+    ]
 };
 
 // ============= XPB Pure JS Benchmark =============
@@ -300,7 +310,30 @@ function benchJSON_Large(): BenchResult {
 
   return { name: "JSON", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
+function benchXPB_JIT_Large(): BenchResult {
+    const iters = 50000;
+    // Compile JIT for Large Schema
+    const jitEncode = compileEncoder<typeof testDataLarge>(schemaLarge, { target: 'node' });
+    const jitDecode = compileDecoder<typeof testDataLarge>(schemaLarge);
+    
+    // Create new slab
+    const slab = new SlabAllocator(65536);
 
+    // Warmup & Size Capture
+    slab.pos = 0;
+    jitEncode(slab, testDataLarge);
+    const encoded = new Uint8Array(slab.buf.subarray(0, slab.pos));
+
+    const encodeNs = bench("JIT Large encode", iters, () => {
+        if (slab.pos > 60000) slab.pos = 0;
+        jitEncode(slab, testDataLarge);
+    });
+    const decodeNs = bench("JIT Large decode", iters, () => {
+        jitDecode(encoded, encoded.length);
+    });
+
+    return { name: "XPB (JIT)", encodeNs, decodeNs, sizeBytes: encoded.length };
+}
 function benchMsgpack_Large(): BenchResult {
   const iterations = 10000;
   
@@ -396,7 +429,7 @@ function benchXPB_Unsafe_Large(): BenchResult {
 
 // ============= Print Results =============
 
-function printResults(title: string, results: BenchResult[]) {
+export function printResults(title: string, results: BenchResult[]) {
   console.log(`\n${title}`);
   console.log("┌────────────────┬────────────┬────────────┬────────────┐");
   console.log("│ Format         │ Encode     │ Decode     │ Size       │");
@@ -436,6 +469,7 @@ async function main() {
   const largeResults: BenchResult[] = [];
   largeResults.push(benchXPB_Large());
   largeResults.push(benchXPB_Unsafe_Large());
+  largeResults.push(benchXPB_JIT_Large());
   largeResults.push(benchJSON_Large());
   largeResults.push(benchMsgpack_Large());
   
