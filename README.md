@@ -1,13 +1,50 @@
-# XPB - Compact Binary Serialization
+# XPB V2 - High-Performance Binary Serialization
 
-A compact, protobuf-compatible binary serialization format with Go-based code generator.
+A speed-optimized binary serialization format that beats JSON and Protobuf.
+
+## Supported Platforms
+
+| Platform    | Status          | Runtime              |
+| :---------- | :-------------- | :------------------- |
+| **Go**      | ✅ Full Support | `runtime/go/xpb`     |
+| **Node.js** | ✅ Full Support | `runtime/ts/src`     |
+| **Browser** | ✅ Full Support | `benchmarks/browser` |
 
 ## Features
 
-- **Same size as Protobuf** - Uses identical wire format
-- **Faster decode** - 2.5x faster than Protobuf in Go
-- **Multi-language** - Go and TypeScript support
-- **Extended types** - Repeated fields, maps, enums
+- **Faster than JSON** - 3-5x faster encode, 1.4-2.9x faster decode
+- **Smaller than JSON** - 2.5x smaller payloads
+- **Multi-platform** - Go, Node.js, and Browser support
+- **JIT Compilation** - Runtime-generated optimized encoders/decoders
+- **V2 Wire Format** - Struct mode, fixed-width integers, compact lengths
+
+## Performance (Best of 5 Rounds)
+
+### Node.js
+
+| Format     |    Encode |     Decode |     Size |
+| :--------- | --------: | ---------: | -------: |
+| **XPB V2** | **28 ns** | **133 ns** | **19 B** |
+| JSON       |    149 ns |     378 ns |     47 B |
+
+**XPB is 5.4x faster encode, 2.9x faster decode vs JSON**
+
+### Browser (Chromium)
+
+| Format     |    Encode |     Decode |     Size |
+| :--------- | --------: | ---------: | -------: |
+| **XPB V2** | **22 ns** | **137 ns** | **19 B** |
+| JSON       |     81 ns |     194 ns |     47 B |
+
+**XPB is 3.7x faster encode, 1.4x faster decode vs JSON**
+
+### Go
+
+| Format     |    Encode |    Decode |     Size |
+| :--------- | --------: | --------: | -------: |
+| **XPB V2** | **50 ns** | **40 ns** | **19 B** |
+| Protobuf   |    169 ns |    247 ns |     19 B |
+| JSON       |    259 ns |  1,501 ns |     47 B |
 
 ## Quick Start
 
@@ -17,6 +54,9 @@ go build -o xpbc ./cmd/xpbc
 
 # Generate code
 ./xpbc --lang=go,ts schema.xpb
+
+# Run all benchmarks
+./benchmarks/run-all.sh
 ```
 
 ### Schema Example
@@ -29,71 +69,17 @@ enum Status { ACTIVE = 1 }
 message User {
     1: string name
     2: int32 age
-    3: []string tags       // repeated
-    4: map<string,string> meta  // map
-    5: Status status       // enum
+    3: []string tags
+    4: Status status
 }
 ```
 
-## Benchmark Matrix
+## V2 Wire Format
 
-### Size Comparison (bytes)
-
-| Format       |     Go | TypeScript |
-| ------------ | -----: | ---------: |
-| **XPB**      | **19** |     **19** |
-| **Protobuf** | **19** |          - |
-| Msgpack      |     37 |         33 |
-| JSON         |     47 |         47 |
-
-### Speed Comparison - Go (ns/op)
-
-| Format   |  Encode |    Decode |
-| -------- | ------: | --------: |
-| **XPB**  | **100** | **52** 🏆 |
-| Protobuf |     102 |       131 |
-| JSON     |     151 |       849 |
-| Msgpack  |     305 |       352 |
-
-### Speed Comparison - TypeScript (ns/op)
-
-| Format   |    Encode |     Decode |
-| -------- | --------: | ---------: |
-| XPB      |       724 |        394 |
-| **JSON** | **85** 🏆 | **212** 🏆 |
-| Msgpack  |      1246 |        350 |
-
-> Note: V8 (Node.js) has native JSON optimization, making it faster than JavaScript-based binary parsers.
-
-## Key Results
-
-| Metric                 | Go               | TypeScript       |
-| ---------------------- | ---------------- | ---------------- |
-| XPB vs Protobuf decode | **2.5x faster**  | N/A              |
-| XPB vs JSON size       | **2.5x smaller** | **2.5x smaller** |
-| XPB vs Msgpack size    | **1.9x smaller** | **1.7x smaller** |
-
-## Running Benchmarks
-
-```bash
-# All benchmarks
-./benchmarks/run_all.sh
-
-# Go only
-go test -bench=. ./benchmarks/go/...
-
-# TypeScript only
-cd benchmarks/ts && npm run bench
-```
-
-## Wire Format
-
-| Wire Type       |  ID | Used For                                 |
-| --------------- | --: | ---------------------------------------- |
-| Varint          |   0 | int32, int64, uint32, uint64, bool, enum |
-| Fixed32         |   5 | float32                                  |
-| Fixed64         |   1 | float64                                  |
-| LengthDelimited |   2 | string, bytes, messages                  |
+- **Struct Mode** - No field tags, fields in declaration order
+- **Fixed-Width Integers** - 4 bytes for int32, 8 bytes for int64
+- **Compact Lengths** - 1 byte if < 255, else 5 bytes
+- **Little-Endian** - All multi-byte values
 
 ## License
 

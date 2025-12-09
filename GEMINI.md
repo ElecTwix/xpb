@@ -2,9 +2,17 @@
 
 ## Overview
 
-XPB V2 is a speed-optimized binary serialization format with Go and TypeScript runtimes.
+XPB V2 is a speed-optimized binary serialization format with runtimes for Go, Node.js, and Browser.
 
-**V2 Format:**
+## Supported Platforms
+
+| Platform    | Runtime              | JIT | Performance vs JSON      |
+| :---------- | :------------------- | :-- | :----------------------- |
+| **Go**      | `runtime/go/xpb`     | N/A | 5x encode, 38x decode    |
+| **Node.js** | `runtime/ts/src`     | ✅  | 5.4x encode, 2.9x decode |
+| **Browser** | `benchmarks/browser` | ✅  | 3.7x encode, 1.4x decode |
+
+## V2 Format
 
 - Struct mode (no tags, fields in declaration order)
 - Fixed-width integers (4/8 bytes, little-endian)
@@ -23,43 +31,37 @@ xpb/
 ├── runtime/
 │   ├── go/xpb/         # Go runtime (Encoder/Decoder)
 │   └── ts/src/         # TypeScript runtime + JIT compiler
-├── benchmarks/         # Go and TypeScript benchmarks
+├── benchmarks/
+│   ├── go/             # Go benchmarks
+│   ├── ts/             # Node.js benchmarks
+│   ├── browser/        # Browser benchmarks (Playwright)
+│   └── run-all.sh      # Unified benchmark runner
 └── tests/              # E2E tests
 ```
 
-## Schema Language
+## Performance (Best of 5 Rounds)
 
-```xpb
-package myapp
+### Node.js
 
-enum Status { ACTIVE = 1, INACTIVE = 2 }
+| Format     |    Encode |     Decode |     Size |
+| :--------- | --------: | ---------: | -------: |
+| **XPB V2** | **28 ns** | **133 ns** | **19 B** |
+| JSON       |    149 ns |     378 ns |     47 B |
 
-message User {
-    1: string name
-    2: int32 age
-    3: optional bool active
-    4: []string tags
-    5: Status status
-}
-```
+### Browser (Chromium)
 
-## Performance
+| Format     |    Encode |     Decode |     Size |
+| :--------- | --------: | ---------: | -------: |
+| **XPB V2** | **22 ns** | **137 ns** | **19 B** |
+| JSON       |     81 ns |     194 ns |     47 B |
 
-### Go (V2 vs Other Formats)
+### Go
 
 | Format     |    Encode |    Decode |     Size |
 | :--------- | --------: | --------: | -------: |
 | **XPB V2** | **50 ns** | **40 ns** | **19 B** |
 | Protobuf   |    169 ns |    247 ns |     19 B |
 | JSON       |    259 ns |  1,501 ns |     47 B |
-
-### TypeScript
-
-| Runtime    | Encode | Decode | Size |
-| :--------- | -----: | -----: | ---: |
-| **JIT**    | 883 ns | 309 ns | 19 B |
-| **Manual** | 827 ns | 310 ns | 19 B |
-| JSON       | 150 ns | 378 ns | 47 B |
 
 ## Commands
 
@@ -70,26 +72,25 @@ go build -o xpbc ./cmd/xpbc
 # Generate Go code
 ./xpbc --lang=go schema.xpb
 
-# Run Go tests and benchmarks
-go test ./...
-go test -bench=. ./benchmarks/go/...
+# Run all benchmarks
+./benchmarks/run-all.sh
 
-# Run TypeScript tests and benchmarks
+# Run Go tests
+go test ./...
+
+# Run TypeScript tests
 cd runtime/ts && npm test
-cd benchmarks/ts && npm run bench
 ```
 
 ## Go Usage
 
 ```go
-// Encode (V2: no field numbers)
 enc := xpb.NewEncoder(64)
 enc.WriteString("Alice")
 enc.WriteInt32(30)
 enc.WriteBool(true)
 data := enc.Bytes()
 
-// Decode (sequential order)
 dec := xpb.NewDecoder(data)
 name, _ := dec.ReadString()
 age, _ := dec.ReadInt32()
@@ -101,14 +102,12 @@ active, _ := dec.ReadBool()
 ```typescript
 import { Encoder, Decoder } from "@xpb/runtime";
 
-// Encode
 const enc = new Encoder(64);
 enc.writeString("Alice");
 enc.writeInt32(30);
 enc.writeBool(true);
 const data = enc.finish();
 
-// Decode
 const dec = new Decoder(data);
 const name = dec.readString();
 const age = dec.readInt32();
@@ -117,8 +116,8 @@ const active = dec.readBool();
 
 ## Key Files
 
-- `pkg/wire/wire.go` - V2 constants (compact length)
+- `pkg/wire/wire.go` - V2 wire format constants
 - `runtime/go/xpb/xpb.go` - Go Encoder/Decoder
 - `runtime/ts/src/index.ts` - TypeScript Encoder/Decoder
 - `runtime/ts/src/jit.ts` - JIT Compiler
-- `pkg/codegen/golang/emitter.go` - Go code generator
+- `benchmarks/browser/src/xpb-browser.ts` - Browser-optimized runtime
