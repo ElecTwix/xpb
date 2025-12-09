@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/xpb-browser.ts --bundle --outfile=dist/xpb-browser.js --format=esm --target=es2020",
+    "build:worker": "esbuild src/xpb-worker.ts --bundle --outfile=dist/xpb-worker.js --format=esm --target=es2020",
+    "build:pool": "esbuild src/xpb-worker-pool.ts --bundle --outfile=dist/xpb-worker-pool.js --format=esm --target=es2020",
     "build:msgpack": "esbuild node_modules/@msgpack/msgpack/dist.esm/index.mjs --bundle --outfile=dist/msgpack.js --format=esm --target=es2020",
+    "build:all": "npm run build && npm run build:worker && npm run build:pool && npm run build:msgpack",
     "bench": "npm run build && npm run build:msgpack && npx tsx src/bench-playwright.ts"
   },
   "devDependencies": {

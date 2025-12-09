@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XPB V2 Worker Benchmark</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #eee;
+      min-height: 100vh;
+      margin: 0;
+      padding: 2rem;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { 
+      text-align: center;
+      background: linear-gradient(90deg, #ff6b6b, #ffd93d);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    h2 { color: #ffd93d; margin-top: 2rem; }
+    .info {
+      background: rgba(100, 100, 255, 0.2);
+      border: 1px solid #88f;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1rem 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+    th, td {
+      padding: 1rem;
+      text-align: right;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    th { background: rgba(255, 217, 61, 0.2); text-align: left; }
+    td:first-child { text-align: left; font-weight: bold; }
+    .highlight { color: #ffd93d; font-weight: bold; }
+    .success { color: #0f8; }
+    .warning { color: #fa0; }
+    #status {
+      text-align: center;
+      padding: 2rem;
+      font-size: 1.2rem;
+    }
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #ffd93d;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .summary {
+      background: rgba(255, 217, 61, 0.1);
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      margin: 1rem 0;
+    }
+    pre { background: #111; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    code { color: #0ff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚡ XPB V2 Worker Benchmark</h1>
+    <div class="info">
+      <p><strong>Web Worker Decoding</strong> - Test decoding large XPB payloads in a separate thread.</p>
+      <p>This is useful for avoiding main thread blocking when decoding payloads &gt;10KB.</p>
+    </div>
+    <div id="status"><span class="spinner"></span>Initializing workers...</div>
+    <div id="results"></div>
+  </div>
+
+  <script type="module">
+    import './dist/xpb-browser.js';
+    import { XPBWorkerPool } from './dist/xpb-worker-pool.js';
+    
+    const { Encoder, Decoder, FieldType, compileEncoder, compileDecoder, SlabAllocator } = window.XPB;
+    const results = document.getElementById('results');
+    const status = document.getElementById('status');
+    
+    // Generate test data of various sizes
+    function generateLargeStringArray(count) {
+      const arr = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(`item_${String.fromCharCode(65 + (i % 26))}_value_${i}_padding`);
+      }
+      return arr;
+    }
+    
+    function generateLargeIntArray(count) {
+      const arr = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(i * 17);
+      }
+      return arr;
+    }
+    
+    // Encode test data
+    function encodeStringArray(arr) {
+      const encoder = new Encoder(arr.length * 30);
+      encoder.writeInt32(arr.length);
+      for (const s of arr) {
+        encoder.writeString(s);
+      }
+      return encoder.finish();
+    }
+    
+    function encodeInt32Array(arr) {
+      const encoder = new Encoder(arr.length * 4 + 4);
+      encoder.writeInt32(arr.length);
+      for (const v of arr) {
+        encoder.writeInt32(v);
+      }
+      return encoder.finish();
+    }
+    
+    // Synchronous decode (main thread)
+    function decodeStringArraySync(data) {
+      const decoder = new Decoder(data);
+      const count = decoder.readInt32();
+      const result = [];
+      for (let i = 0; i < count; i++) {
+        result.push(decoder.readString());
+      }
+      return result;
+    }
+    
+    function decodeInt32ArraySync(data) {
+      const decoder = new Decoder(data);
+      const count = decoder.readInt32();
+      const result = [];
+      for (let i = 0; i < count; i++) {
+        result.push(decoder.readInt32());
+      }
+      return result;
+    }
+    
+    // Benchmark utilities
+    async function benchSync(name, iterations, fn) {
+      // Warmup
+      for (let i = 0; i < 10; i++) fn();
+      
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        fn();
+      }
+      const end = performance.now();
+      
+      return (end - start) / iterations;
+    }
+    
+    async function benchAsync(name, iterations, fn) {
+      // Warmup
+      for (let i = 0; i < 5; i++) await fn();
+      
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        await fn();
+      }
+      const end = performance.now();
+      
+      return (end - start) / iterations;
+    }
+    
+    // Run benchmarks
+    async function runBenchmarks() {
+      status.textContent = 'Initializing worker pool...';
+      
+      // Initialize worker pool
+      const pool = new XPBWorkerPool(4);
+      await pool.init('./dist/xpb-worker.js');
+      
+      status.textContent = 'Running benchmarks...';
+      
+      const testSizes = [
+        { name: 'Small (100 items)', count: 100, iterations: 100 },
+        { name: 'Medium (1K items)', count: 1000, iterations: 50 },
+        { name: 'Large (10K items)', count: 10000, iterations: 10 },
+        { name: 'XLarge (50K items)', count: 50000, iterations: 3 },
+      ];
+      
+      let html = '';
+      
+      // String Array benchmarks
+      html += '<h2>📦 String Array Decode: Main Thread vs Worker</h2>';
+      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Worker</th><th>Speedup</th><th>Main Thread Blocked</th></tr>';
+      
+      for (const { name, count, iterations } of testSizes) {
+        const data = generateLargeStringArray(count);
+        const encoded = encodeStringArray(data);
+        const payloadSize = (encoded.length / 1024).toFixed(1) + ' KB';
+        
+        // Main thread benchmark
+        const syncTime = await benchSync('sync', iterations, () => {
+          decodeStringArraySync(encoded);
+        });
+        
+        // Worker benchmark
+        const asyncTime = await benchAsync('async', iterations, async () => {
+          // Need to clone buffer since it's transferred
+          const buffer = encoded.buffer.slice(0);
+          await pool.decodeStringArrayAsync(buffer);
+        });
+        
+        const speedup = syncTime / asyncTime;
+        const blocked = syncTime > 1 ? 
+          `<span class="warning">Yes (${syncTime.toFixed(1)}ms)</span>` : 
+          '<span class="success">No</span>';
+        
+        html += `<tr>
+          <td>${name}</td>
+          <td>${payloadSize}</td>
+          <td>${syncTime.toFixed(2)} ms</td>
+          <td>${asyncTime.toFixed(2)} ms</td>
+          <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
+          <td>${blocked}</td>
+        </tr>`;
+      }
+      
+      html += '</table>';
+      
+      // Int32 Array benchmarks
+      html += '<h2>📦 Int32 Array Decode: Main Thread vs Worker</h2>';
+      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Worker</th><th>Speedup</th><th>Main Thread Blocked</th></tr>';
+      
+      for (const { name, count, iterations } of testSizes) {
+        const data = generateLargeIntArray(count);
+        const encoded = encodeInt32Array(data);
+        const payloadSize = (encoded.length / 1024).toFixed(1) + ' KB';
+        
+        const syncTime = await benchSync('sync', iterations, () => {
+          decodeInt32ArraySync(encoded);
+        });
+        
+        const asyncTime = await benchAsync('async', iterations, async () => {
+          const buffer = encoded.buffer.slice(0);
+          await pool.decodeInt32ArrayAsync(buffer);
+        });
+        
+        const speedup = syncTime / asyncTime;
+        const blocked = syncTime > 1 ? 
+          `<span class="warning">Yes (${syncTime.toFixed(1)}ms)</span>` : 
+          '<span class="success">No</span>';
+        
+        html += `<tr>
+          <td>${name}</td>
+          <td>${payloadSize}</td>
+          <td>${syncTime.toFixed(2)} ms</td>
+          <td>${asyncTime.toFixed(2)} ms</td>
+          <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
+          <td>${blocked}</td>
+        </tr>`;
+      }
+      
+      html += '</table>';
+      
+      // Summary and recommendations
+      html += `
+        <div class="summary">
+          <h3>📊 Recommendations</h3>
+          <p><strong>Use main thread (sync) when:</strong></p>
+          <ul>
+            <li>Payload is &lt; 10KB</li>
+            <li>Latency is critical (no async overhead)</li>
+          </ul>
+          <p><strong>Use worker (async) when:</strong></p>
+          <ul>
+            <li>Payload is &gt; 10KB</li>
+            <li>Main thread responsiveness is critical (UI, animations)</li>
+            <li>Processing multiple large payloads concurrently</li>
+          </ul>
+        </div>
+      `;
+      
+      results.innerHTML = html;
+      status.style.display = 'none';
+      
+      // Cleanup
+      pool.terminate();
+    }
+    
+    runBenchmarks().catch(e => {
+      console.error(e);
+      status.innerHTML = `<span style="color: #f44">Error: ${e.message}</span>`;
+    });
+  </script>
+</body>
+</html>
