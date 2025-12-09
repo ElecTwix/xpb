@@ -12,7 +12,7 @@ A speed-optimized binary serialization format that beats JSON and Protobuf.
 
 ## Features
 
-- **Faster than JSON** - 3-5x faster encode, 1.4-2.9x faster decode
+- **Faster than JSON** - 3-7x faster encode, 1.4-38x faster decode
 - **Smaller than JSON** - 2.5x smaller payloads
 - **Multi-platform** - Go, Node.js, and Browser support
 - **JIT Compilation** - Runtime-generated optimized encoders/decoders
@@ -24,25 +24,25 @@ A speed-optimized binary serialization format that beats JSON and Protobuf.
 
 | Format     |    Encode |     Decode |     Size |
 | :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **28 ns** | **133 ns** | **19 B** |
-| JSON       |    149 ns |     378 ns |     47 B |
+| **XPB V2** | **21 ns** | **109 ns** | **19 B** |
+| JSON       |    149 ns |     371 ns |     47 B |
 
-**XPB is 5.4x faster encode, 2.9x faster decode vs JSON**
+**XPB is 7x faster encode, 3.4x faster decode vs JSON**
 
 ### Browser (Chromium)
 
 | Format     |    Encode |     Decode |     Size |
 | :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **22 ns** | **137 ns** | **19 B** |
-| JSON       |     81 ns |     194 ns |     47 B |
+| **XPB V2** | **22 ns** | **138 ns** | **19 B** |
+| JSON       |     79 ns |     194 ns |     47 B |
 
-**XPB is 3.7x faster encode, 1.4x faster decode vs JSON**
+**XPB is 3.6x faster encode, 1.4x faster decode vs JSON**
 
 ### Go
 
 | Format     |    Encode |    Decode |     Size |
 | :--------- | --------: | --------: | -------: |
-| **XPB V2** | **50 ns** | **40 ns** | **19 B** |
+| **XPB V2** | **53 ns** | **40 ns** | **19 B** |
 | Protobuf   |    169 ns |    247 ns |     19 B |
 | JSON       |    259 ns |  1,501 ns |     47 B |
 

@@ -9,8 +9,8 @@ XPB V2 is a speed-optimized binary serialization format with runtimes for Go, No
 | Platform    | Runtime              | JIT | Performance vs JSON      |
 | :---------- | :------------------- | :-- | :----------------------- |
 | **Go**      | `runtime/go/xpb`     | N/A | 5x encode, 38x decode    |
-| **Node.js** | `runtime/ts/src`     | ✅  | 5.4x encode, 2.9x decode |
-| **Browser** | `benchmarks/browser` | ✅  | 3.7x encode, 1.4x decode |
+| **Node.js** | `runtime/ts/src`     | ✅  | 7x encode, 3.4x decode   |
+| **Browser** | `benchmarks/browser` | ✅  | 3.6x encode, 1.4x decode |
 
 ## V2 Format
 
@@ -45,21 +45,21 @@ xpb/
 
 | Format     |    Encode |     Decode |     Size |
 | :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **28 ns** | **133 ns** | **19 B** |
-| JSON       |    149 ns |     378 ns |     47 B |
+| **XPB V2** | **21 ns** | **109 ns** | **19 B** |
+| JSON       |    149 ns |     371 ns |     47 B |
 
 ### Browser (Chromium)
 
 | Format     |    Encode |     Decode |     Size |
 | :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **22 ns** | **137 ns** | **19 B** |
-| JSON       |     81 ns |     194 ns |     47 B |
+| **XPB V2** | **22 ns** | **138 ns** | **19 B** |
+| JSON       |     79 ns |     194 ns |     47 B |
 
 ### Go
 
 | Format     |    Encode |    Decode |     Size |
 | :--------- | --------: | --------: | -------: |
-| **XPB V2** | **50 ns** | **40 ns** | **19 B** |
+| **XPB V2** | **53 ns** | **40 ns** | **19 B** |
 | Protobuf   |    169 ns |    247 ns |     19 B |
 | JSON       |    259 ns |  1,501 ns |     47 B |
 

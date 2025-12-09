@@ -54,44 +54,32 @@ func (e *Encoder) WriteBool(v bool) {
 
 // WriteInt32 writes a signed 32-bit integer as 4 bytes (little-endian, two's complement).
 func (e *Encoder) WriteInt32(v int32) {
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(v))
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint32(e.buf, uint32(v))
 }
 
 // WriteInt64 writes a signed 64-bit integer as 8 bytes (little-endian, two's complement).
 func (e *Encoder) WriteInt64(v int64) {
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], uint64(v))
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint64(e.buf, uint64(v))
 }
 
 // WriteUint32 writes an unsigned 32-bit integer as 4 bytes (little-endian).
 func (e *Encoder) WriteUint32(v uint32) {
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], v)
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint32(e.buf, v)
 }
 
 // WriteUint64 writes an unsigned 64-bit integer as 8 bytes (little-endian).
 func (e *Encoder) WriteUint64(v uint64) {
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], v)
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint64(e.buf, v)
 }
 
 // WriteFloat32 writes a 32-bit float as 4 bytes.
 func (e *Encoder) WriteFloat32(v float32) {
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], math.Float32bits(v))
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint32(e.buf, math.Float32bits(v))
 }
 
 // WriteFloat64 writes a 64-bit float as 8 bytes.
 func (e *Encoder) WriteFloat64(v float64) {
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], math.Float64bits(v))
-	e.buf = append(e.buf, buf[:]...)
+	e.buf = binary.LittleEndian.AppendUint64(e.buf, math.Float64bits(v))
 }
 
 // writeCompactLength writes a length using compact encoding.
@@ -102,9 +90,7 @@ func (e *Encoder) writeCompactLength(length int) {
 		e.buf = append(e.buf, byte(length))
 	} else {
 		e.buf = append(e.buf, wire.CompactLengthMarker)
-		var buf [4]byte
-		binary.LittleEndian.PutUint32(buf[:], uint32(length))
-		e.buf = append(e.buf, buf[:]...)
+		e.buf = binary.LittleEndian.AppendUint32(e.buf, uint32(length))
 	}
 }
 
