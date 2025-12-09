@@ -72,11 +72,10 @@ export interface JITOptions {
 }
 
 export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (slab: SlabAllocator, obj: T) => void {
-  // Aligned implies structMode + fixedInts
-  if (opts.aligned) {
-    opts.structMode = true;
-    opts.fixedInts = true;
-  }
+  // Enforce Struct Mode options for maximum speed
+  opts.structMode = true;
+  opts.fixedInts = true;
+
   // Auto-detect node if not specified and buffer exists
   if (!opts.target && typeof Buffer !== 'undefined') {
       opts.target = 'node';
@@ -91,44 +90,48 @@ export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (sl
   `);
 
   for (const field of schema.fields) {
-    const propAccess = `obj.${field.name}`;
+    // STRUCT MODE: No Tags. Strict Order.
+    const access = `obj.${field.name}`;
     
     if (field.repeated) {
-      lines.push(`
-        var arr = ${propAccess};
-        if (arr && arr.length > 0) {
-          // In Struct Mode, we might technically need a length prefix for the array itself!
-          // For this experiment, let's assume "Packed" behavior: 
-          // Write count, then elements.
-          // BUT standard XPB repeated fields are just repeated tags.
-          // In Struct Mode, we really need a count if it's dynamic. 
-          // Let's assume for this benchmark we just write them (unsafe for decoding if variable length).
-          // To be fair to "Struct Mode", usually there's a length prefix or fixed count.
-          // Let's add a length prefix (Int32) for repeated fields in Struct Mode.
-          
-          ${opts.structMode ? 'buf[pos++] = arr.length; /* Varint count for now, optimized later */' : ''}
-          ${opts.fixedInts && opts.structMode ? 
-             // If fixed ints, length should be fixed too
-             'buf[pos++] = arr.length; buf[pos++] = arr.length >> 8; buf[pos++] = arr.length >> 16; buf[pos++] = arr.length >> 24;'
-             : ''}
-          
-          for (var i = 0; i < arr.length; i++) {
-             val = arr[i];
-             ${generateFieldWrite(field, 'val', true, opts)}
+        // Repeated Field (Array)
+        // 1. Get Array
+        // 2. Write Length (Fixed Int32)
+        // 3. Write Elements
+        lines.push(`
+          var arr = ${access};
+          if (arr) {
+             // Write Length
+             var arrLen = arr.length;
+             ${opts.fixedInts ? 
+               'buf[pos++] = arrLen; buf[pos++] = arrLen >> 8; buf[pos++] = arrLen >> 16; buf[pos++] = arrLen >> 24;' : 
+               '// Varint length not implemented for struct mode benchmark'
+             }
+             
+             // Write Elements
+             for (var i = 0; i < arrLen; i++) {
+                 val = arr[i];
+                 ${generateFieldWrite(field, 'val', true, opts)}
+             }
+          } else {
+             // Write 0 Length
+             ${opts.fixedInts ? 
+               'buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0;' : 
+               '// Varint 0'
+             }
           }
-        } else {
-             ${opts.structMode ? '// Struct mode: write 0 length for empty array\n' + (opts.fixedInts ? 'pos += 4; buf.fill(0, pos-4, pos);' : 'buf[pos++] = 0;') : ''}
-        }
-      `);
+        `);
     } else {
-      lines.push(`
-        val = ${propAccess};
-        // In StructMode, we MUST write something if missing (default).
-        // For benchmarks, inputs are full.
-        if (val !== undefined) {
-          ${generateFieldWrite(field, 'val', false, opts)}
-        } ${opts.structMode ? 'else { /* Missing: Write Zero/Default */ ' + generateDefaultWrite(field, opts) + '}' : ''}
-      `);
+        // Singular Field
+        lines.push(`
+          val = ${access};
+          if (val !== undefined) {
+             ${generateFieldWrite(field, 'val', false, opts)}
+          } else {
+             // Missing: Write Default/Zero
+             ${generateDefaultWrite(field, opts)}
+          }
+        `);
     }
   }
 

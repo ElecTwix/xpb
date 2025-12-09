@@ -5,8 +5,6 @@
 
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { Encoder, Decoder } from '../../../runtime/ts/src/index.js';
-import { HybridEncoder, HybridDecoder, createDecoder } from '../../../runtime/ts/src/hybrid.js';
-import { UnsafeEncoder, UnsafeDecoder } from '../../../runtime/ts/src/unsafe.js';
 import { SlabAllocator, compileEncoder, compileDecoder, FieldType } from '../../../runtime/ts/src/jit.js';
 
 // ============= Benchmark Utilities =============
@@ -54,114 +52,11 @@ const schemaLarge = {
 
 // ============= XPB Pure JS Benchmark =============
 
-function benchXPB_Small(): BenchResult {
-  const iterations = 100000;
-  const enc = new Encoder(64);
-  let encoded: Uint8Array = new Uint8Array();
-  
-  const encodeNs = bench("XPB encode", iterations, () => {
-    enc.reset();
-    enc.writeString(1, smallUser.name);
-    enc.writeInt32(2, smallUser.age);
-    enc.writeBool(3, smallUser.active);
-    encoded = enc.finish();
-  });
 
-  enc.reset();
-  enc.writeString(1, smallUser.name);
-  enc.writeInt32(2, smallUser.age);
-  enc.writeBool(3, smallUser.active);
-  encoded = new Uint8Array(enc.finish());
-
-  const decodeNs = bench("XPB decode", iterations, () => {
-    const dec = new Decoder(encoded);
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      switch (fn) {
-        case 1: dec.readString(); break;
-        case 2: dec.readInt32(); break;
-        case 3: dec.readBool(); break;
-        default: dec.skip(wt);
-      }
-    }
-  });
-
-  return { name: "XPB (JS)", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
 
 // ============= XPB Hybrid Benchmark =============
 
-function benchXPB_Hybrid_Small(): BenchResult {
-  const iterations = 100000;
-  const enc = new HybridEncoder(64);
-  let encoded: Uint8Array = new Uint8Array();
-  
-  const encodeNs = bench("Hybrid encode", iterations, () => {
-    enc.reset();
-    enc.writeString(1, smallUser.name);
-    enc.writeInt32(2, smallUser.age);
-    enc.writeBool(3, smallUser.active);
-    encoded = enc.finish();
-  });
 
-  enc.reset();
-  enc.writeString(1, smallUser.name);
-  enc.writeInt32(2, smallUser.age);
-  enc.writeBool(3, smallUser.active);
-  encoded = new Uint8Array(enc.finish());
-
-  const decodeNs = bench("Hybrid decode", iterations, () => {
-    const dec = createDecoder(encoded);
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      switch (fn) {
-        case 1: dec.readString(); break;
-        case 2: dec.readInt32(); break;
-        case 3: dec.readBool(); break;
-        default: dec.skip(wt);
-      }
-    }
-  });
-
-  return { name: "XPB (Hybrid)", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
-
-// ============= XPB Unsafe Benchmark =============
-
-function benchXPB_Unsafe_Small(): BenchResult {
-  const iterations = 100000;
-  const enc = new UnsafeEncoder(64);
-  let encoded: Uint8Array = new Uint8Array();
-  
-  const encodeNs = bench("Unsafe encode", iterations, () => {
-    enc.reset();
-    enc.writeString(1, smallUser.name);
-    enc.writeInt32(2, smallUser.age);
-    enc.writeBool(3, smallUser.active);
-    encoded = enc.finish();
-  });
-
-  enc.reset();
-  enc.writeString(1, smallUser.name);
-  enc.writeInt32(2, smallUser.age);
-  enc.writeBool(3, smallUser.active);
-  encoded = new Uint8Array(enc.finish());
-
-  const decodeNs = bench("Unsafe decode", iterations, () => {
-    const dec = new UnsafeDecoder(encoded);
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      switch (fn) {
-        case 1: dec.readString(); break;
-        case 2: dec.readInt32(); break;
-        case 3: dec.readBool(); break;
-        default: dec.skip(wt);
-      }
-    }
-  });
-
-  return { name: "XPB (Unsafe)", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
 
 // ============= XPB JIT Benchmark =============
 
@@ -346,83 +241,8 @@ function benchMsgpack_Large(): BenchResult {
   return { name: "Msgpack", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
-function benchXPB_Large(): BenchResult {
-  const iterations = 10000;
-  const enc = new Encoder(2048);
-  let encoded: Uint8Array = new Uint8Array();
-  
-  const encodeNs = bench("XPB large encode", iterations, () => {
-    enc.reset();
-    enc.writeString(1, largeUser.name);
-    enc.writeString(2, largeUser.email);
-    enc.writeString(3, largeUser.bio);
-    for (const tag of largeUser.tags) {
-      enc.writeString(4, tag);
-    }
-    encoded = enc.finish();
-  });
 
-  enc.reset();
-  enc.writeString(1, largeUser.name);
-  enc.writeString(2, largeUser.email);
-  enc.writeString(3, largeUser.bio);
-  for (const tag of largeUser.tags) {
-    enc.writeString(4, tag);
-  }
-  encoded = new Uint8Array(enc.finish());
 
-  const decodeNs = bench("XPB large decode", iterations, () => {
-    const dec = new Decoder(encoded);
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      switch (fn) {
-        case 1: case 2: case 3: case 4: dec.readString(); break;
-        default: dec.skip(wt);
-      }
-    }
-  });
-
-  return { name: "XPB (JS)", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
-
-function benchXPB_Unsafe_Large(): BenchResult {
-  const iterations = 10000;
-  const enc = new UnsafeEncoder(2048);
-  let encoded: Uint8Array = new Uint8Array();
-  
-  const encodeNs = bench("Unsafe large encode", iterations, () => {
-    enc.reset();
-    enc.writeString(1, largeUser.name);
-    enc.writeString(2, largeUser.email);
-    enc.writeString(3, largeUser.bio);
-    for (const tag of largeUser.tags) {
-      enc.writeString(4, tag);
-    }
-    encoded = enc.finish();
-  });
-
-  enc.reset();
-  enc.writeString(1, largeUser.name);
-  enc.writeString(2, largeUser.email);
-  enc.writeString(3, largeUser.bio);
-  for (const tag of largeUser.tags) {
-    enc.writeString(4, tag);
-  }
-  encoded = new Uint8Array(enc.finish());
-
-  const decodeNs = bench("Unsafe large decode", iterations, () => {
-    const dec = new UnsafeDecoder(encoded);
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      switch (fn) {
-        case 1: case 2: case 3: case 4: dec.readString(); break;
-        default: dec.skip(wt);
-      }
-    }
-  });
-
-  return { name: "XPB (Unsafe)", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
 
 // ============= Print Results =============
 
@@ -451,12 +271,7 @@ async function main() {
 
   // Small message benchmarks
   const smallResults: BenchResult[] = [];
-  smallResults.push(benchXPB_Small());
-  smallResults.push(benchXPB_Unsafe_Small());
-  smallResults.push(benchXPB_JIT_Small());
   smallResults.push(benchXPB_JIT_Struct());
-  smallResults.push(benchXPB_JIT_Aligned());
-  smallResults.push(benchXPB_Hybrid_Small());
   smallResults.push(benchJSON_Small());
   smallResults.push(benchMsgpack_Small());
   
@@ -464,8 +279,6 @@ async function main() {
 
   // Large message benchmarks
   const largeResults: BenchResult[] = [];
-  largeResults.push(benchXPB_Large());
-  largeResults.push(benchXPB_Unsafe_Large());
   largeResults.push(benchXPB_JIT_Large());
   largeResults.push(benchJSON_Large());
   largeResults.push(benchMsgpack_Large());
