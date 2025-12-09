@@ -1,8 +1,14 @@
-# XPB - Compact Binary Serialization
+# XPB V2 - High-Performance Binary Serialization
 
 ## Overview
 
-XPB is a high-performance, protobuf-compatible binary serialization format with a Go-based code generator and multi-language runtime support.
+XPB V2 is a speed-optimized binary serialization format with Go and TypeScript runtimes.
+
+**V2 Format:**
+
+- Struct mode (no tags, fields in declaration order)
+- Fixed-width integers (4/8 bytes, little-endian)
+- Compact length encoding (1 byte if < 255, else 5 bytes)
 
 ## Project Structure
 
@@ -12,25 +18,12 @@ xpb/
 ├── pkg/
 │   ├── ast/            # Abstract Syntax Tree
 │   ├── parser/         # Lexer and Parser
-│   ├── codegen/
-│   │   ├── golang/     # Go code generator
-│   │   └── typescript/ # TypeScript code generator
-│   └── wire/           # Wire format utilities
+│   ├── codegen/        # Go and TypeScript generators
+│   └── wire/           # V2 wire format constants
 ├── runtime/
-│   ├── go/xpb/         # Go runtime library
-│   ├── ts/src/         # TypeScript runtimes
-│   │   ├── index.ts    # Universal (Uint8Array)
-│   │   ├── node.ts     # Node.js (Buffer optimized)
-│   │   ├── browser.ts  # Browser (encodeInto optimized)
-│   │   ├── ultra.ts    # Ultra-speed (pooling + fixed-size)
-│   │   ├── hyper.ts    # Hyper-speed (inline + batch)
-│   │   ├── wasm.ts     # WASM module (310 bytes)
-│   │   └── hybrid.ts   # Auto-selects by message size
-│   └── wasm/           # WAT source for WASM module
-├── benchmarks/
-│   ├── go/             # Go benchmarks (vs Protobuf, JSON, Msgpack)
-│   └── ts/             # TypeScript benchmarks
-├── testdata/           # Example .xpb schemas
+│   ├── go/xpb/         # Go runtime (Encoder/Decoder)
+│   └── ts/src/         # TypeScript runtime + JIT compiler
+├── benchmarks/         # Go and TypeScript benchmarks
 └── tests/              # E2E tests
 ```
 
@@ -45,32 +38,28 @@ message User {
     1: string name
     2: int32 age
     3: optional bool active
-    4: []string tags         // repeated
-    5: map<string,string> meta
-    6: Status status
+    4: []string tags
+    5: Status status
 }
 ```
 
-## Wire Format
+## Performance
 
-| Wire Type       |  ID | Used For                                 |
-| --------------- | --: | ---------------------------------------- |
-| Varint          |   0 | int32, int64, uint32, uint64, bool, enum |
-| Fixed64         |   1 | float64                                  |
-| LengthDelimited |   2 | string, bytes, messages                  |
-| Fixed32         |   5 | float32                                  |
+### Go (V2 vs Other Formats)
 
-## TypeScript Runtime Tiers
+| Format     |    Encode |    Decode |     Size |
+| :--------- | --------: | --------: | -------: |
+| **XPB V2** | **50 ns** | **40 ns** | **19 B** |
+| Protobuf   |    169 ns |    247 ns |     19 B |
+| JSON       |    259 ns |  1,501 ns |     47 B |
 
-| Runtime     |    Encode |     Decode | Best For                 |
-| ----------- | --------: | ---------: | ------------------------ |
-| **jit**     | **70 ns** | **114 ns** | **Peak perf, V8 only**   |
-| **unsafe**  |    107 ns |     126 ns | Low overhead, trusted    |
-| **ultra**   |     65 ns |      82 ns | Single messages, Node.js |
-| **hyper**   | 72 ns/msg | 153 ns/msg | Batch operations         |
-| **node**    |     80 ns |     125 ns | Node.js/Bun              |
-| **index**   |    513 ns |     210 ns | Universal                |
-| **browser** |    467 ns |     203 ns | Web browsers             |
+### TypeScript
+
+| Runtime    | Encode | Decode | Size |
+| :--------- | -----: | -----: | ---: |
+| **JIT**    | 883 ns | 309 ns | 19 B |
+| **Manual** | 827 ns | 310 ns | 19 B |
+| JSON       | 150 ns | 378 ns | 47 B |
 
 ## Commands
 
@@ -81,119 +70,55 @@ go build -o xpbc ./cmd/xpbc
 # Generate Go code
 ./xpbc --lang=go schema.xpb
 
-# Generate TypeScript code
-./xpbc --lang=ts schema.xpb
-
-# Run Go tests
+# Run Go tests and benchmarks
 go test ./...
+go test -bench=. ./benchmarks/go/...
 
-# Run TypeScript tests
+# Run TypeScript tests and benchmarks
 cd runtime/ts && npm test
-
-# Run benchmarks
 cd benchmarks/ts && npm run bench
-./benchmarks/run_all.sh
 ```
 
-## Benchmark Results
+## Go Usage
 
-### Go (vs Protobuf, JSON, Msgpack)
+```go
+// Encode (V2: no field numbers)
+enc := xpb.NewEncoder(64)
+enc.WriteString("Alice")
+enc.WriteInt32(30)
+enc.WriteBool(true)
+data := enc.Bytes()
 
-| Format   | Encode |    Decode | Size |
-| -------- | -----: | --------: | ---: |
-| **XPB**  | 100 ns | **52 ns** | 19 B |
-| Protobuf | 102 ns |    131 ns | 19 B |
-| JSON     | 151 ns |    849 ns | 47 B |
-| Msgpack  | 305 ns |    352 ns | 37 B |
+// Decode (sequential order)
+dec := xpb.NewDecoder(data)
+name, _ := dec.ReadString()
+age, _ := dec.ReadInt32()
+active, _ := dec.ReadBool()
+```
 
-### TypeScript (Ultra mode)
+## TypeScript Usage
 
-| Format        |    Encode |    Decode | Size |
-| ------------- | --------: | --------: | ---: |
-| **XPB Ultra** | **65 ns** | **82 ns** | 19 B |
-| JSON          |     81 ns |    218 ns | 47 B |
+```typescript
+import { Encoder, Decoder } from "@xpb/runtime";
+
+// Encode
+const enc = new Encoder(64);
+enc.writeString("Alice");
+enc.writeInt32(30);
+enc.writeBool(true);
+const data = enc.finish();
+
+// Decode
+const dec = new Decoder(data);
+const name = dec.readString();
+const age = dec.readInt32();
+const active = dec.readBool();
+```
 
 ## Key Files
 
-### Code Generator
-
-- `cmd/xpbc/main.go` - CLI entry point
-- `pkg/parser/lexer.go` - Tokenizer
-- `pkg/parser/parser.go` - Parser
-- `pkg/ast/ast.go` - AST types
-- `pkg/codegen/golang/emitter.go` - Go generator
-- `pkg/codegen/typescript/emitter.go` - TS generator
-
-### Go Runtime
-
-- `runtime/go/xpb/xpb.go` - Encoder/Decoder
-
-### TypeScript Runtimes
-
-- `runtime/ts/src/jit.ts` - JIT Compiler + Slab
-- `runtime/ts/src/unsafe.ts` - Direct Uint8Array access
-- `runtime/ts/src/ultra.ts` - Fastest single message
-- `runtime/ts/src/hyper.ts` - Batch operations
-- `runtime/ts/src/node.ts` - Node.js Buffer
-- `runtime/ts/src/browser.ts` - Browser encodeInto
-- `runtime/ts/src/index.ts` - Universal
-
-## Usage Examples
-
-### Go
-
-```go
-user := &User{Name: "Alice", Age: 30, Active: true}
-data, _ := user.Marshal()
-
-decoded := &User{}
-decoded.Unmarshal(data)
-```
-
-### TypeScript (Ultra)
-
-```typescript
-import { getEncoder, releaseEncoder, UltraDecoder } from "@xpb/runtime/ultra";
-
-const enc = getEncoder(64);
-enc.writeString(1, "Alice");
-enc.writeInt32(2, 30);
-enc.writeBool(3, true);
-const data = enc.finish();
-releaseEncoder(enc);
-```
-
-### TypeScript (Hyper Batch)
-
-```typescript
-import { batchEncode, batchDecode, E, D } from "@xpb/runtime/hyper";
-
-const data = batchEncode(
-  users,
-  (e, u) => {
-    E.str(e, 1, u.name);
-    E.i32(e, 2, u.age);
-  },
-  8192
-);
-
-const decoded = batchDecode(data, (d) => ({
-  name: D.str(d),
-  age: D.i32(d),
-}));
-```
-
-## Testing
-
-```bash
-# Go tests
-go test ./...
-go test -v ./tests/...  # E2E tests
-
-# TypeScript tests
-cd runtime/ts && npm test
-
-# Benchmarks
-go test -bench=. ./benchmarks/go/...
-cd benchmarks/ts && npx tsx src/ultra-bench.ts
-```
+- `pkg/wire/wire.go` - V2 constants (compact length)
+- `runtime/go/xpb/xpb.go` - Go Encoder/Decoder
+- `runtime/ts/src/index.ts` - TypeScript Encoder/Decoder
+- `runtime/ts/src/jit.ts` - JIT Compiler
+- `pkg/codegen/golang/emitter.go` - Go code generator

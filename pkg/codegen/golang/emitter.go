@@ -42,11 +42,9 @@ func (g *Generator) generate(file *ast.File) ([]byte, error) {
 
 	g.printf("import (\n")
 	g.printf("\t\"github.com/anthropic/xpb/runtime/go/xpb\"\n")
-	g.printf("\t\"github.com/anthropic/xpb/pkg/wire\"\n")
 	g.printf(")\n\n")
 
-	g.printf("var _ = xpb.NewEncoder\n")
-	g.printf("var _ = wire.WireVarint\n\n")
+	g.printf("var _ = xpb.NewEncoder\n\n")
 
 	// Generate enums
 	for _, enum := range file.Enums {
@@ -105,7 +103,7 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	}
 	g.printf("}\n\n")
 
-	// Marshal
+	// Marshal - V2: no tags, fields in order
 	g.printf("func (m *%s) Marshal() ([]byte, error) {\n", name)
 	g.printf("\tenc := xpb.NewEncoder(%d)\n", estimateSize(msg))
 	for _, field := range msg.Fields {
@@ -121,24 +119,12 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	}
 	g.printf("}\n\n")
 
-	// Unmarshal
+	// Unmarshal - V2: no tags, read fields in order
 	g.printf("func (m *%s) Unmarshal(data []byte) error {\n", name)
 	g.printf("\tdec := xpb.NewDecoder(data)\n")
-	g.printf("\tfor !dec.EOF() {\n")
-	g.printf("\t\tfieldNum, wireType, err := dec.ReadTag()\n")
-	g.printf("\t\tif err != nil {\n")
-	g.printf("\t\t\treturn err\n")
-	g.printf("\t\t}\n")
-	g.printf("\t\tswitch fieldNum {\n")
 	for _, field := range msg.Fields {
 		g.generateFieldDecode(field)
 	}
-	g.printf("\t\tdefault:\n")
-	g.printf("\t\t\tif err := dec.Skip(wireType); err != nil {\n")
-	g.printf("\t\t\t\treturn err\n")
-	g.printf("\t\t\t}\n")
-	g.printf("\t\t}\n")
-	g.printf("\t}\n")
 	g.printf("\treturn nil\n")
 	g.printf("}\n\n")
 
@@ -155,172 +141,117 @@ func (g *Generator) isEnumType(t ast.FieldType) bool {
 
 func (g *Generator) generateFieldEncode(field *ast.Field) {
 	fieldName := toCamelCase(field.Name)
-	fieldNum := field.Number
 	isEnum := g.isEnumType(field.Type)
 
-	// Handle repeated fields
+	// Handle repeated fields - V2: write count then elements
 	if field.Repeated {
+		g.printf("\tenc.WriteInt32(int32(len(m.%s)))\n", fieldName)
 		g.printf("\tfor _, v := range m.%s {\n", fieldName)
-		g.generateScalarEncode("v", fieldNum, field.Type, "\t\t", isEnum)
+		g.generateScalarEncode("v", field.Type, "\t\t", isEnum)
 		g.printf("\t}\n")
 		return
 	}
 
-	// Handle map fields
+	// Handle map fields - V2: write count then key-value pairs
 	if field.Type.Kind == ast.TypeMap {
+		g.printf("\tenc.WriteInt32(int32(len(m.%s)))\n", fieldName)
 		g.printf("\tfor k, v := range m.%s {\n", fieldName)
-		g.printf("\t\tmapEnc := xpb.NewEncoder(32)\n")
-		g.generateScalarEncode("k", 1, *field.Type.KeyType, "\t\t", false)
-		g.generateScalarEncode("v", 2, *field.Type.ValType, "\t\t", g.isEnumType(*field.Type.ValType))
-		g.printf("\t\tenc.WriteMessage(%d, mapEnc.Bytes())\n", fieldNum)
+		g.generateScalarEncode("k", *field.Type.KeyType, "\t\t", false)
+		g.generateScalarEncode("v", *field.Type.ValType, "\t\t", g.isEnumType(*field.Type.ValType))
 		g.printf("\t}\n")
 		return
 	}
 
-	// Handle optional
-	if field.Optional {
-		switch {
-		case field.Type.Kind == ast.TypeString:
-			g.printf("\tif m.%s != \"\" {\n", fieldName)
-			g.printf("\t\tenc.WriteString(%d, m.%s)\n", fieldNum, fieldName)
-		case field.Type.Kind == ast.TypeBytes:
-			g.printf("\tif len(m.%s) > 0 {\n", fieldName)
-			g.printf("\t\tenc.WriteBytes(%d, m.%s)\n", fieldNum, fieldName)
-		case field.Type.Kind == ast.TypeMessage && !isEnum:
-			g.printf("\tif m.%s != nil {\n", fieldName)
-			g.printf("\t\tnestedEnc := xpb.NewEncoder(64)\n")
-			g.printf("\t\tm.%s.MarshalTo(nestedEnc)\n", fieldName)
-			g.printf("\t\tenc.WriteMessage(%d, nestedEnc.Bytes())\n", fieldNum)
-		case isEnum:
-			g.printf("\tif m.%s != 0 {\n", fieldName)
-			g.printf("\t\tenc.WriteInt32(%d, int32(m.%s))\n", fieldNum, fieldName)
-		default:
-			g.printf("\tif m.%s != nil {\n", fieldName)
-			g.printf("\t\tenc.WriteInt32(%d, int32(*m.%s))\n", fieldNum, fieldName)
-		}
-		g.printf("\t}\n")
-		return
-	}
-
-	// Regular field
-	g.generateScalarEncode("m."+fieldName, fieldNum, field.Type, "\t", isEnum)
+	// Regular field - V2: no tags
+	g.generateScalarEncode("m."+fieldName, field.Type, "\t", isEnum)
 }
 
-func (g *Generator) generateScalarEncode(varName string, fieldNum uint32, t ast.FieldType, indent string, isEnum bool) {
+func (g *Generator) generateScalarEncode(varName string, t ast.FieldType, indent string, isEnum bool) {
 	if isEnum || t.Kind == ast.TypeEnum {
-		g.printf("%senc.WriteInt32(%d, int32(%s))\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteInt32(int32(%s))\n", indent, varName)
 		return
 	}
 
 	switch t.Kind {
 	case ast.TypeBool:
-		g.printf("%senc.WriteBool(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteBool(%s)\n", indent, varName)
 	case ast.TypeInt32:
-		g.printf("%senc.WriteInt32(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteInt32(%s)\n", indent, varName)
 	case ast.TypeInt64:
-		g.printf("%senc.WriteInt64(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteInt64(%s)\n", indent, varName)
 	case ast.TypeUint32:
-		g.printf("%senc.WriteUint32(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteUint32(%s)\n", indent, varName)
 	case ast.TypeUint64:
-		g.printf("%senc.WriteUint64(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteUint64(%s)\n", indent, varName)
 	case ast.TypeFloat32:
-		g.printf("%senc.WriteFloat32(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteFloat32(%s)\n", indent, varName)
 	case ast.TypeFloat64:
-		g.printf("%senc.WriteFloat64(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteFloat64(%s)\n", indent, varName)
 	case ast.TypeString:
-		g.printf("%senc.WriteString(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteString(%s)\n", indent, varName)
 	case ast.TypeBytes:
-		g.printf("%senc.WriteBytes(%d, %s)\n", indent, fieldNum, varName)
+		g.printf("%senc.WriteBytes(%s)\n", indent, varName)
 	case ast.TypeMessage:
 		g.printf("%snestedEnc := xpb.NewEncoder(64)\n", indent)
 		g.printf("%s%s.MarshalTo(nestedEnc)\n", indent, varName)
-		g.printf("%senc.WriteMessage(%d, nestedEnc.Bytes())\n", indent, fieldNum)
+		g.printf("%senc.WriteMessage(nestedEnc.Bytes())\n", indent)
 	}
 }
 
 func (g *Generator) generateFieldDecode(field *ast.Field) {
 	fieldName := toCamelCase(field.Name)
-	fieldNum := field.Number
 	isEnum := g.isEnumType(field.Type)
 
-	g.printf("\t\tcase %d:\n", fieldNum)
-
-	// Handle repeated fields
+	// Handle repeated fields - V2: read count then elements
 	if field.Repeated {
+		g.printf("\t{\n")
+		g.printf("\t\tcount, err := dec.ReadInt32()\n")
+		g.printf("\t\tif err != nil { return err }\n")
+		g.printf("\t\tm.%s = make(%s, count)\n", fieldName, g.goTypeName(field))
+		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
 		if isEnum {
 			g.printf("\t\t\tv, err := dec.ReadInt32()\n")
 			g.printf("\t\t\tif err != nil { return err }\n")
-			g.printf("\t\t\tm.%s = append(m.%s, %s(v))\n", fieldName, fieldName, field.Type.Message)
+			g.printf("\t\t\tm.%s[i] = %s(v)\n", fieldName, field.Type.Message)
 		} else {
-			g.generateScalarDecode("v", field.Type, "\t\t\t", isEnum)
-			g.printf("\t\t\tm.%s = append(m.%s, v)\n", fieldName, fieldName)
+			g.generateScalarDecodeInto(fmt.Sprintf("m.%s[i]", fieldName), field.Type, "\t\t\t", isEnum)
 		}
+		g.printf("\t\t}\n")
+		g.printf("\t}\n")
 		return
 	}
 
-	// Handle map fields
+	// Handle map fields - V2: read count then key-value pairs
 	if field.Type.Kind == ast.TypeMap {
-		g.printf("\t\t\tmapData, err := dec.ReadMessageBytes()\n")
-		g.printf("\t\t\tif err != nil { return err }\n")
-		g.printf("\t\t\tmapDec := xpb.NewDecoder(mapData)\n")
+		g.printf("\t{\n")
+		g.printf("\t\tcount, err := dec.ReadInt32()\n")
+		g.printf("\t\tif err != nil { return err }\n")
+		g.printf("\t\tm.%s = make(%s)\n", fieldName, g.goTypeName(field))
+		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
 		g.printf("\t\t\tvar mk %s\n", g.goBaseTypeName(*field.Type.KeyType))
 		g.printf("\t\t\tvar mv %s\n", g.goBaseTypeName(*field.Type.ValType))
-		g.printf("\t\t\tfor !mapDec.EOF() {\n")
-		g.printf("\t\t\t\tfn, _, _ := mapDec.ReadTag()\n")
-		g.printf("\t\t\t\tswitch fn {\n")
-		g.printf("\t\t\t\tcase 1:\n")
-		g.generateScalarDecodeInto("mk", *field.Type.KeyType, "\t\t\t\t\t", false)
-		g.printf("\t\t\t\tcase 2:\n")
-		g.generateScalarDecodeInto("mv", *field.Type.ValType, "\t\t\t\t\t", g.isEnumType(*field.Type.ValType))
-		g.printf("\t\t\t\t}\n")
-		g.printf("\t\t\t}\n")
-		g.printf("\t\t\tif m.%s == nil {\n", fieldName)
-		g.printf("\t\t\t\tm.%s = make(%s)\n", fieldName, g.goTypeName(field))
-		g.printf("\t\t\t}\n")
+		g.generateScalarDecodeInto("mk", *field.Type.KeyType, "\t\t\t", false)
+		g.generateScalarDecodeInto("mv", *field.Type.ValType, "\t\t\t", g.isEnumType(*field.Type.ValType))
 		g.printf("\t\t\tm.%s[mk] = mv\n", fieldName)
+		g.printf("\t\t}\n")
+		g.printf("\t}\n")
 		return
 	}
 
 	// Handle enum field
 	if isEnum {
-		g.printf("\t\t\tv, err := dec.ReadInt32()\n")
-		g.printf("\t\t\tif err != nil { return err }\n")
-		g.printf("\t\t\tm.%s = %s(v)\n", fieldName, field.Type.Message)
+		g.printf("\t{\n")
+		g.printf("\t\tv, err := dec.ReadInt32()\n")
+		g.printf("\t\tif err != nil { return err }\n")
+		g.printf("\t\tm.%s = %s(v)\n", fieldName, field.Type.Message)
+		g.printf("\t}\n")
 		return
 	}
 
-	// Regular field
-	g.generateScalarDecodeInto("m."+fieldName, field.Type, "\t\t\t", isEnum)
-}
-
-func (g *Generator) generateScalarDecode(varName string, t ast.FieldType, indent string, isEnum bool) {
-	switch t.Kind {
-	case ast.TypeBool:
-		g.printf("%s%s, err := dec.ReadBool()\n", indent, varName)
-	case ast.TypeInt32, ast.TypeEnum:
-		g.printf("%s%s, err := dec.ReadInt32()\n", indent, varName)
-	case ast.TypeInt64:
-		g.printf("%s%s, err := dec.ReadInt64()\n", indent, varName)
-	case ast.TypeUint32:
-		g.printf("%s%s, err := dec.ReadUint32()\n", indent, varName)
-	case ast.TypeUint64:
-		g.printf("%s%s, err := dec.ReadUint64()\n", indent, varName)
-	case ast.TypeFloat32:
-		g.printf("%s%s, err := dec.ReadFloat32()\n", indent, varName)
-	case ast.TypeFloat64:
-		g.printf("%s%s, err := dec.ReadFloat64()\n", indent, varName)
-	case ast.TypeString:
-		g.printf("%s%s, err := dec.ReadString()\n", indent, varName)
-	case ast.TypeBytes:
-		g.printf("%s%s, err := dec.ReadBytes()\n", indent, varName)
-	case ast.TypeMessage:
-		g.printf("%sdata, err := dec.ReadMessageBytes()\n", indent)
-	}
-	g.printf("%sif err != nil { return err }\n", indent)
-	if t.Kind == ast.TypeMessage && !isEnum {
-		g.printf("%s%s := &%s{}\n", indent, varName, t.Message)
-		g.printf("%sif err := %s.Unmarshal(data); err != nil { return err }\n", indent, varName)
-	}
+	// Regular field - V2: no tags, just read in order
+	g.printf("\t{\n")
+	g.generateScalarDecodeInto("m."+fieldName, field.Type, "\t\t", isEnum)
+	g.printf("\t}\n")
 }
 
 func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, indent string, isEnum bool) {
@@ -386,10 +317,6 @@ func (g *Generator) goTypeName(field *ast.Field) string {
 	if t.Kind == ast.TypeMap {
 		return fmt.Sprintf("map[%s]%s", g.goBaseTypeName(*t.KeyType), g.goBaseTypeName(*t.ValType))
 	}
-	// Optional scalar types (not string/bytes/message/enum) use pointers
-	if field.Optional && t.Kind != ast.TypeString && t.Kind != ast.TypeBytes && t.Kind != ast.TypeMessage && !g.isEnumType(t) {
-		return "*" + base
-	}
 	return base
 }
 
@@ -440,18 +367,17 @@ func toCamelCase(s string) string {
 func estimateSize(msg *ast.Message) int {
 	size := 0
 	for _, field := range msg.Fields {
-		size += 2
 		switch field.Type.Kind {
 		case ast.TypeBool:
-			size += 1
+			size += wire.SizeBool
 		case ast.TypeInt32, ast.TypeUint32, ast.TypeEnum:
-			size += wire.MaxVarintLen32
+			size += wire.SizeInt32
 		case ast.TypeInt64, ast.TypeUint64:
-			size += wire.MaxVarintLen64
+			size += wire.SizeInt64
 		case ast.TypeFloat32:
-			size += 4
+			size += wire.SizeFloat32
 		case ast.TypeFloat64:
-			size += 8
+			size += wire.SizeFloat64
 		case ast.TypeString, ast.TypeBytes:
 			size += 32
 		case ast.TypeMessage, ast.TypeMap:

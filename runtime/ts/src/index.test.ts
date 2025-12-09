@@ -1,199 +1,171 @@
-import { describe, it, expect } from 'vitest';
-import { Encoder, Decoder, WireType, zigzagEncode32, zigzagDecode32 } from '../src/index';
+/**
+ * XPB V2 TypeScript tests
+ */
 
-describe('Encoder/Decoder', () => {
-  it('should encode and decode boolean', () => {
-    const enc = new Encoder();
-    enc.writeBool(1, true);
-    enc.writeBool(2, false);
-    const data = enc.finish();
+import { describe, test, expect } from 'vitest';
+import { Encoder, Decoder, CompactLengthThreshold, CompactLengthMarker } from './index';
 
-    const dec = new Decoder(data);
-    const [fn1, wt1] = dec.readTag();
-    expect(fn1).toBe(1);
-    expect(wt1).toBe(WireType.Varint);
+describe('V2 Encoder/Decoder', () => {
+  test('bool roundtrip', () => {
+    const enc = new Encoder(16);
+    enc.writeBool(true);
+    enc.writeBool(false);
+    
+    const dec = new Decoder(enc.finish());
     expect(dec.readBool()).toBe(true);
-
-    const [fn2] = dec.readTag();
-    expect(fn2).toBe(2);
     expect(dec.readBool()).toBe(false);
   });
 
-  it('should encode and decode int32', () => {
-    const enc = new Encoder();
-    enc.writeInt32(1, 42);
-    enc.writeInt32(2, -42);
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    dec.readTag();
+  test('int32 roundtrip', () => {
+    const enc = new Encoder(32);
+    enc.writeInt32(42);
+    enc.writeInt32(-42);
+    enc.writeInt32(2147483647);
+    enc.writeInt32(-2147483648);
+    
+    const dec = new Decoder(enc.finish());
     expect(dec.readInt32()).toBe(42);
-    dec.readTag();
     expect(dec.readInt32()).toBe(-42);
+    expect(dec.readInt32()).toBe(2147483647);
+    expect(dec.readInt32()).toBe(-2147483648);
   });
 
-  it('should encode and decode string', () => {
-    const enc = new Encoder();
-    enc.writeString(1, 'hello xpb');
-    enc.writeString(2, '');
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    dec.readTag();
-    expect(dec.readString()).toBe('hello xpb');
-    dec.readTag();
-    expect(dec.readString()).toBe('');
+  test('uint32 roundtrip', () => {
+    const enc = new Encoder(16);
+    enc.writeUint32(0);
+    enc.writeUint32(4294967295);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readUint32()).toBe(0);
+    expect(dec.readUint32()).toBe(4294967295);
   });
 
-  it('should encode and decode bytes', () => {
-    const enc = new Encoder();
-    const bytes = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
-    enc.writeBytes(1, bytes);
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    dec.readTag();
-    const decoded = dec.readBytes();
-    expect(decoded).toEqual(bytes);
+  test('int64 roundtrip', () => {
+    const enc = new Encoder(32);
+    enc.writeInt64(42n);
+    enc.writeInt64(-42n);
+    enc.writeInt64(9223372036854775807n);
+    enc.writeInt64(-9223372036854775808n);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readInt64()).toBe(42n);
+    expect(dec.readInt64()).toBe(-42n);
+    expect(dec.readInt64()).toBe(9223372036854775807n);
+    expect(dec.readInt64()).toBe(-9223372036854775808n);
   });
 
-  it('should encode and decode float32', () => {
-    const enc = new Encoder();
-    enc.writeFloat32(1, 3.14);
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    const [fn, wt] = dec.readTag();
-    expect(fn).toBe(1);
-    expect(wt).toBe(WireType.Fixed32);
-    const value = dec.readFloat32();
-    expect(Math.abs(value - 3.14)).toBeLessThan(0.001);
+  test('float32 roundtrip', () => {
+    const enc = new Encoder(16);
+    enc.writeFloat32(3.14);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readFloat32()).toBeCloseTo(3.14, 5);
   });
 
-  it('should encode and decode float64', () => {
-    const enc = new Encoder();
-    enc.writeFloat64(1, 2.718281828);
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    dec.readTag();
+  test('float64 roundtrip', () => {
+    const enc = new Encoder(16);
+    enc.writeFloat64(2.718281828);
+    
+    const dec = new Decoder(enc.finish());
     expect(dec.readFloat64()).toBe(2.718281828);
   });
 
-  it('should encode and decode uint64', () => {
-    const enc = new Encoder();
-    enc.writeUint64(1, 18446744073709551615n);
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    dec.readTag();
-    expect(dec.readUint64()).toBe(18446744073709551615n);
+  test('string roundtrip', () => {
+    const enc = new Encoder(64);
+    enc.writeString('hello world');
+    enc.writeString('');
+    enc.writeString('🎉 emoji test');
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readString()).toBe('hello world');
+    expect(dec.readString()).toBe('');
+    expect(dec.readString()).toBe('🎉 emoji test');
   });
 
-  it('should skip unknown fields', () => {
-    const enc = new Encoder();
-    enc.writeString(1, 'known');
-    enc.writeInt32(2, 42); // unknown
-    enc.writeString(3, 'also known');
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    const results: Record<number, string> = {};
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      if (fn === 1 || fn === 3) {
-        results[fn] = dec.readString();
-      } else {
-        dec.skip(wt);
-      }
-    }
-    expect(results[1]).toBe('known');
-    expect(results[3]).toBe('also known');
-    expect(results[2]).toBeUndefined();
+  test('bytes roundtrip', () => {
+    const enc = new Encoder(32);
+    const testBytes = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
+    enc.writeBytes(testBytes);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readBytes()).toEqual(testBytes);
   });
 
-  it('should handle nested messages', () => {
+  test('compact length short', () => {
+    const enc = new Encoder(32);
+    const shortStr = 'hello';
+    enc.writeString(shortStr);
+    const data = enc.finish();
+    
+    // 1 byte length + 5 bytes content = 6 bytes
+    expect(data.length).toBe(6);
+    expect(data[0]).toBe(5); // length byte
+  });
+
+  test('compact length long', () => {
+    const enc = new Encoder(512);
+    const longStr = 'x'.repeat(300);
+    enc.writeString(longStr);
+    const data = enc.finish();
+    
+    // 5 bytes length (0xFF + 4 bytes) + 300 bytes content = 305 bytes
+    expect(data.length).toBe(305);
+    expect(data[0]).toBe(CompactLengthMarker);
+    
+    // Verify decode works
+    const dec = new Decoder(data);
+    expect(dec.readString()).toBe(longStr);
+  });
+
+  test('nested message roundtrip', () => {
     // Encode inner
-    const innerEnc = new Encoder();
-    innerEnc.writeString(1, 'inner value');
-    const innerData = innerEnc.finish();
-
-    // Encode outer with nested
-    const enc = new Encoder();
-    enc.writeString(1, 'outer');
-    enc.writeMessage(2, innerData);
-    const data = enc.finish();
-
+    const innerEnc = new Encoder(32);
+    innerEnc.writeString('New York');
+    innerEnc.writeString('USA');
+    
+    // Encode outer
+    const enc = new Encoder(64);
+    enc.writeString('Alice');
+    enc.writeMessage(innerEnc.finish());
+    
     // Decode
-    const dec = new Decoder(data);
-    dec.readTag();
-    const outer = dec.readString();
-    dec.readTag();
-    const nestedData = dec.readMessageBytes();
-    const nestedDec = new Decoder(nestedData);
-    nestedDec.readTag();
-    const inner = nestedDec.readString();
-
-    expect(outer).toBe('outer');
-    expect(inner).toBe('inner value');
-  });
-});
-
-describe('Zigzag encoding', () => {
-  it('should encode positive numbers', () => {
-    expect(zigzagEncode32(0)).toBe(0);
-    expect(zigzagEncode32(1)).toBe(2);
-    expect(zigzagEncode32(2)).toBe(4);
+    const dec = new Decoder(enc.finish());
+    expect(dec.readString()).toBe('Alice');
+    
+    const innerData = dec.readMessageBytes();
+    const innerDec = new Decoder(innerData);
+    expect(innerDec.readString()).toBe('New York');
+    expect(innerDec.readString()).toBe('USA');
   });
 
-  it('should encode negative numbers', () => {
-    expect(zigzagEncode32(-1)).toBe(1);
-    expect(zigzagEncode32(-2)).toBe(3);
+  test('reset and reuse', () => {
+    const enc = new Encoder(32);
+    enc.writeInt32(42);
+    expect(enc.finish().length).toBe(4);
+    
+    enc.reset();
+    enc.writeInt32(100);
+    expect(enc.finish().length).toBe(4);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.readInt32()).toBe(100);
   });
 
-  it('should round-trip', () => {
-    const values = [0, 1, -1, 127, -128, 32767, -32768];
-    for (const v of values) {
-      const encoded = zigzagEncode32(v);
-      const decoded = zigzagDecode32(encoded);
-      expect(decoded).toBe(v);
-    }
-  });
-});
-
-describe('Benchmark-style tests', () => {
-  it('should encode simple message compactly', () => {
-    const enc = new Encoder();
-    enc.writeString(1, 'Alice');
-    enc.writeInt32(2, 30);
-    enc.writeBool(3, true);
-    const data = enc.finish();
-
-    // Should be compact - around 11-15 bytes
-    expect(data.length).toBeLessThan(20);
-    console.log(`Simple message: ${data.length} bytes`);
-  });
-
-  it('should handle repeated fields', () => {
-    const enc = new Encoder();
-    const tags = ['go', 'typescript', 'xpb'];
-    for (const tag of tags) {
-      enc.writeString(1, tag);
-    }
-    const data = enc.finish();
-
-    const dec = new Decoder(data);
-    const decoded: string[] = [];
-    while (!dec.eof()) {
-      const [fn, wt] = dec.readTag();
-      if (fn === 1) {
-        decoded.push(dec.readString());
-      } else {
-        dec.skip(wt);
-      }
-    }
-
-    expect(decoded).toEqual(tags);
-    console.log(`Repeated ${tags.length} strings: ${data.length} bytes`);
+  test('eof and remaining', () => {
+    const enc = new Encoder(16);
+    enc.writeInt32(42);
+    enc.writeInt32(100);
+    
+    const dec = new Decoder(enc.finish());
+    expect(dec.eof()).toBe(false);
+    expect(dec.remaining()).toBe(8);
+    
+    dec.readInt32();
+    expect(dec.eof()).toBe(false);
+    expect(dec.remaining()).toBe(4);
+    
+    dec.readInt32();
+    expect(dec.eof()).toBe(true);
+    expect(dec.remaining()).toBe(0);
   });
 });

@@ -1,4 +1,5 @@
-// Package xpb provides the XPB runtime library for encoding and decoding.
+// Package xpb provides the XPB V2 runtime library for encoding and decoding.
+// V2 uses struct mode (no tags), fixed-width integers, and compact lengths.
 package xpb
 
 import (
@@ -13,11 +14,11 @@ import (
 // Common errors.
 var (
 	ErrBufferTooSmall = errors.New("xpb: buffer too small")
-	ErrOverflow       = errors.New("xpb: varint overflow")
 	ErrInvalidData    = errors.New("xpb: invalid data")
 )
 
-// Encoder encodes values into XPB binary format.
+// Encoder encodes values into XPB V2 binary format.
+// V2 uses fixed-width encoding with no tags.
 type Encoder struct {
 	buf []byte
 }
@@ -42,27 +43,8 @@ func (e *Encoder) Len() int {
 	return len(e.buf)
 }
 
-// WriteTag writes a field tag (field number + wire type).
-func (e *Encoder) WriteTag(fieldNumber uint32, wireType wire.WireType) {
-	tag := wire.MakeTag(fieldNumber, wireType)
-	e.WriteUvarint(tag)
-}
-
-// WriteUvarint writes an unsigned varint.
-func (e *Encoder) WriteUvarint(v uint64) {
-	var buf [wire.MaxVarintLen64]byte
-	n := binary.PutUvarint(buf[:], v)
-	e.buf = append(e.buf, buf[:n]...)
-}
-
-// WriteVarint writes a signed varint using zigzag encoding.
-func (e *Encoder) WriteVarint(v int64) {
-	e.WriteUvarint(wire.ZigZagEncode64(v))
-}
-
-// WriteBool writes a boolean value.
-func (e *Encoder) WriteBool(fieldNumber uint32, v bool) {
-	e.WriteTag(fieldNumber, wire.WireVarint)
+// WriteBool writes a boolean as 1 byte.
+func (e *Encoder) WriteBool(v bool) {
 	if v {
 		e.buf = append(e.buf, 1)
 	} else {
@@ -70,74 +52,86 @@ func (e *Encoder) WriteBool(fieldNumber uint32, v bool) {
 	}
 }
 
-// WriteInt32 writes a signed 32-bit integer.
-func (e *Encoder) WriteInt32(fieldNumber uint32, v int32) {
-	e.WriteTag(fieldNumber, wire.WireVarint)
-	e.WriteUvarint(wire.ZigZagEncode64(int64(v)))
+// WriteInt32 writes a signed 32-bit integer as 4 bytes (little-endian, two's complement).
+func (e *Encoder) WriteInt32(v int32) {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(v))
+	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteInt64 writes a signed 64-bit integer.
-func (e *Encoder) WriteInt64(fieldNumber uint32, v int64) {
-	e.WriteTag(fieldNumber, wire.WireVarint)
-	e.WriteUvarint(wire.ZigZagEncode64(v))
+// WriteInt64 writes a signed 64-bit integer as 8 bytes (little-endian, two's complement).
+func (e *Encoder) WriteInt64(v int64) {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(v))
+	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteUint32 writes an unsigned 32-bit integer.
-func (e *Encoder) WriteUint32(fieldNumber uint32, v uint32) {
-	e.WriteTag(fieldNumber, wire.WireVarint)
-	e.WriteUvarint(uint64(v))
+// WriteUint32 writes an unsigned 32-bit integer as 4 bytes (little-endian).
+func (e *Encoder) WriteUint32(v uint32) {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], v)
+	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteUint64 writes an unsigned 64-bit integer.
-func (e *Encoder) WriteUint64(fieldNumber uint32, v uint64) {
-	e.WriteTag(fieldNumber, wire.WireVarint)
-	e.WriteUvarint(v)
+// WriteUint64 writes an unsigned 64-bit integer as 8 bytes (little-endian).
+func (e *Encoder) WriteUint64(v uint64) {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], v)
+	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteFloat32 writes a 32-bit float.
-func (e *Encoder) WriteFloat32(fieldNumber uint32, v float32) {
-	e.WriteTag(fieldNumber, wire.WireFixed32)
+// WriteFloat32 writes a 32-bit float as 4 bytes.
+func (e *Encoder) WriteFloat32(v float32) {
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], math.Float32bits(v))
 	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteFloat64 writes a 64-bit float.
-func (e *Encoder) WriteFloat64(fieldNumber uint32, v float64) {
-	e.WriteTag(fieldNumber, wire.WireFixed64)
+// WriteFloat64 writes a 64-bit float as 8 bytes.
+func (e *Encoder) WriteFloat64(v float64) {
 	var buf [8]byte
 	binary.LittleEndian.PutUint64(buf[:], math.Float64bits(v))
 	e.buf = append(e.buf, buf[:]...)
 }
 
-// WriteString writes a string.
-func (e *Encoder) WriteString(fieldNumber uint32, v string) {
-	e.WriteTag(fieldNumber, wire.WireLengthDelimited)
-	e.WriteUvarint(uint64(len(v)))
+// writeCompactLength writes a length using compact encoding.
+// If length <= 254: 1 byte
+// Else: 0xFF marker + 4 bytes (little-endian)
+func (e *Encoder) writeCompactLength(length int) {
+	if length <= wire.CompactLengthThreshold {
+		e.buf = append(e.buf, byte(length))
+	} else {
+		e.buf = append(e.buf, wire.CompactLengthMarker)
+		var buf [4]byte
+		binary.LittleEndian.PutUint32(buf[:], uint32(length))
+		e.buf = append(e.buf, buf[:]...)
+	}
+}
+
+// WriteString writes a length-prefixed string.
+func (e *Encoder) WriteString(v string) {
+	e.writeCompactLength(len(v))
 	e.buf = append(e.buf, v...)
 }
 
-// WriteBytes writes a byte slice.
-func (e *Encoder) WriteBytes(fieldNumber uint32, v []byte) {
-	e.WriteTag(fieldNumber, wire.WireLengthDelimited)
-	e.WriteUvarint(uint64(len(v)))
+// WriteBytes writes a length-prefixed byte slice.
+func (e *Encoder) WriteBytes(v []byte) {
+	e.writeCompactLength(len(v))
 	e.buf = append(e.buf, v...)
 }
 
-// WriteMessage writes a nested message.
-// The message should already be encoded.
-func (e *Encoder) WriteMessage(fieldNumber uint32, data []byte) {
-	e.WriteTag(fieldNumber, wire.WireLengthDelimited)
-	e.WriteUvarint(uint64(len(data)))
+// WriteMessage writes a nested message (already encoded).
+func (e *Encoder) WriteMessage(data []byte) {
+	e.writeCompactLength(len(data))
 	e.buf = append(e.buf, data...)
 }
 
-// AppendRaw appends raw bytes directly (for pre-encoded data).
+// AppendRaw appends raw bytes directly.
 func (e *Encoder) AppendRaw(data []byte) {
 	e.buf = append(e.buf, data...)
 }
 
-// Decoder decodes XPB binary format.
+// Decoder decodes XPB V2 binary format.
 type Decoder struct {
 	buf []byte
 	pos int
@@ -164,78 +158,57 @@ func (d *Decoder) EOF() bool {
 	return d.pos >= len(d.buf)
 }
 
-// ReadTag reads a field tag and returns (fieldNumber, wireType).
-func (d *Decoder) ReadTag() (uint32, wire.WireType, error) {
-	tag, err := d.ReadUvarint()
-	if err != nil {
-		return 0, 0, err
-	}
-	return wire.TagFieldNumber(tag), wire.TagWireType(tag), nil
-}
-
-// ReadUvarint reads an unsigned varint.
-func (d *Decoder) ReadUvarint() (uint64, error) {
+// ReadBool reads a boolean from 1 byte.
+func (d *Decoder) ReadBool() (bool, error) {
 	if d.pos >= len(d.buf) {
-		return 0, io.ErrUnexpectedEOF
+		return false, io.ErrUnexpectedEOF
 	}
-	v, n := binary.Uvarint(d.buf[d.pos:])
-	if n == 0 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	if n < 0 {
-		return 0, ErrOverflow
-	}
-	d.pos += n
+	v := d.buf[d.pos] != 0
+	d.pos++
 	return v, nil
 }
 
-// ReadVarint reads a signed varint (zigzag encoded).
-func (d *Decoder) ReadVarint() (int64, error) {
-	v, err := d.ReadUvarint()
-	if err != nil {
-		return 0, err
-	}
-	return wire.ZigZagDecode64(v), nil
-}
-
-// ReadBool reads a boolean value.
-func (d *Decoder) ReadBool() (bool, error) {
-	v, err := d.ReadUvarint()
-	if err != nil {
-		return false, err
-	}
-	return v != 0, nil
-}
-
-// ReadInt32 reads a signed 32-bit integer.
+// ReadInt32 reads a signed 32-bit integer from 4 bytes.
 func (d *Decoder) ReadInt32() (int32, error) {
-	v, err := d.ReadVarint()
-	if err != nil {
-		return 0, err
+	if d.pos+4 > len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
 	}
-	return int32(v), nil
+	v := int32(binary.LittleEndian.Uint32(d.buf[d.pos:]))
+	d.pos += 4
+	return v, nil
 }
 
-// ReadInt64 reads a signed 64-bit integer.
+// ReadInt64 reads a signed 64-bit integer from 8 bytes.
 func (d *Decoder) ReadInt64() (int64, error) {
-	return d.ReadVarint()
-}
-
-// ReadUint32 reads an unsigned 32-bit integer.
-func (d *Decoder) ReadUint32() (uint32, error) {
-	v, err := d.ReadUvarint()
-	if err != nil {
-		return 0, err
+	if d.pos+8 > len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
 	}
-	return uint32(v), nil
+	v := int64(binary.LittleEndian.Uint64(d.buf[d.pos:]))
+	d.pos += 8
+	return v, nil
 }
 
-// ReadUint64 reads an unsigned 64-bit integer.
+// ReadUint32 reads an unsigned 32-bit integer from 4 bytes.
+func (d *Decoder) ReadUint32() (uint32, error) {
+	if d.pos+4 > len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	v := binary.LittleEndian.Uint32(d.buf[d.pos:])
+	d.pos += 4
+	return v, nil
+}
+
+// ReadUint64 reads an unsigned 64-bit integer from 8 bytes.
 func (d *Decoder) ReadUint64() (uint64, error) {
-	return d.ReadUvarint()
+	if d.pos+8 > len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	v := binary.LittleEndian.Uint64(d.buf[d.pos:])
+	d.pos += 8
+	return v, nil
 }
 
-// ReadFloat32 reads a 32-bit float.
+// ReadFloat32 reads a 32-bit float from 4 bytes.
 func (d *Decoder) ReadFloat32() (float32, error) {
 	if d.pos+4 > len(d.buf) {
 		return 0, io.ErrUnexpectedEOF
@@ -245,7 +218,7 @@ func (d *Decoder) ReadFloat32() (float32, error) {
 	return math.Float32frombits(bits), nil
 }
 
-// ReadFloat64 reads a 64-bit float.
+// ReadFloat64 reads a 64-bit float from 8 bytes.
 func (d *Decoder) ReadFloat64() (float64, error) {
 	if d.pos+8 > len(d.buf) {
 		return 0, io.ErrUnexpectedEOF
@@ -255,70 +228,64 @@ func (d *Decoder) ReadFloat64() (float64, error) {
 	return math.Float64frombits(bits), nil
 }
 
+// readCompactLength reads a compact-encoded length.
+func (d *Decoder) readCompactLength() (int, error) {
+	if d.pos >= len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	first := d.buf[d.pos]
+	d.pos++
+	if first != wire.CompactLengthMarker {
+		return int(first), nil
+	}
+	// Read 4-byte length
+	if d.pos+4 > len(d.buf) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	length := binary.LittleEndian.Uint32(d.buf[d.pos:])
+	d.pos += 4
+	return int(length), nil
+}
+
 // ReadString reads a length-prefixed string.
 func (d *Decoder) ReadString() (string, error) {
-	length, err := d.ReadUvarint()
+	length, err := d.readCompactLength()
 	if err != nil {
 		return "", err
 	}
-	if d.pos+int(length) > len(d.buf) {
+	if d.pos+length > len(d.buf) {
 		return "", io.ErrUnexpectedEOF
 	}
-	s := string(d.buf[d.pos : d.pos+int(length)])
-	d.pos += int(length)
+	s := string(d.buf[d.pos : d.pos+length])
+	d.pos += length
 	return s, nil
 }
 
 // ReadBytes reads a length-prefixed byte slice.
 func (d *Decoder) ReadBytes() ([]byte, error) {
-	length, err := d.ReadUvarint()
+	length, err := d.readCompactLength()
 	if err != nil {
 		return nil, err
 	}
-	if d.pos+int(length) > len(d.buf) {
+	if d.pos+length > len(d.buf) {
 		return nil, io.ErrUnexpectedEOF
 	}
-	// Return a copy to avoid retaining the original buffer
 	data := make([]byte, length)
-	copy(data, d.buf[d.pos:d.pos+int(length)])
-	d.pos += int(length)
+	copy(data, d.buf[d.pos:d.pos+length])
+	d.pos += length
 	return data, nil
 }
 
-// ReadMessageBytes reads a length-prefixed message and returns the raw bytes.
+// ReadMessageBytes reads a length-prefixed message.
 func (d *Decoder) ReadMessageBytes() ([]byte, error) {
 	return d.ReadBytes()
 }
 
-// Skip skips a field based on its wire type.
-func (d *Decoder) Skip(wireType wire.WireType) error {
-	switch wireType {
-	case wire.WireVarint:
-		_, err := d.ReadUvarint()
-		return err
-	case wire.WireFixed32:
-		if d.pos+4 > len(d.buf) {
-			return io.ErrUnexpectedEOF
-		}
-		d.pos += 4
-		return nil
-	case wire.WireFixed64:
-		if d.pos+8 > len(d.buf) {
-			return io.ErrUnexpectedEOF
-		}
-		d.pos += 8
-		return nil
-	case wire.WireLengthDelimited:
-		length, err := d.ReadUvarint()
-		if err != nil {
-			return err
-		}
-		if d.pos+int(length) > len(d.buf) {
-			return io.ErrUnexpectedEOF
-		}
-		d.pos += int(length)
-		return nil
-	default:
-		return ErrInvalidData
+// Skip skips n bytes.
+func (d *Decoder) Skip(n int) error {
+	if d.pos+n > len(d.buf) {
+		return io.ErrUnexpectedEOF
 	}
+	d.pos += n
+	return nil
 }

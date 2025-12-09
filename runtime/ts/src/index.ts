@@ -1,55 +1,36 @@
 /**
- * XPB Wire Types
+ * XPB V2 TypeScript Runtime
+ * 
+ * V2 uses:
+ * - Struct mode (no tags, fields in declaration order)
+ * - Fixed-width integers (4/8 bytes, little-endian, two's complement)
+ * - Compact length encoding (1 byte if < 255, else 0xFF + 4 bytes)
  */
-export const WireType = {
-  Varint: 0,
-  Fixed64: 1,
-  LengthDelimited: 2,
-  Fixed32: 5,
-} as const;
 
-export type WireType = (typeof WireType)[keyof typeof WireType];
+// Compact length constants
+export const CompactLengthThreshold = 254;
+export const CompactLengthMarker = 0xFF;
 
-// Cached encoder/decoder for strings (avoid creating new instances)
+// Fixed sizes
+export const SizeBool = 1;
+export const SizeInt32 = 4;
+export const SizeInt64 = 8;
+export const SizeUint32 = 4;
+export const SizeUint64 = 8;
+export const SizeFloat32 = 4;
+export const SizeFloat64 = 8;
+
+// Cached encoder/decoder for strings
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /**
- * Zigzag encodes a signed 32-bit integer.
- */
-export function zigzagEncode32(n: number): number {
-  return (n << 1) ^ (n >> 31);
-}
-
-/**
- * Zigzag decodes a 32-bit integer.
- */
-export function zigzagDecode32(n: number): number {
-  return (n >>> 1) ^ -(n & 1);
-}
-
-/**
- * Zigzag encodes a signed 64-bit integer (as bigint).
- */
-export function zigzagEncode64(n: bigint): bigint {
-  return (n << 1n) ^ (n >> 63n);
-}
-
-/**
- * Zigzag decodes a 64-bit integer (as bigint).
- */
-export function zigzagDecode64(n: bigint): bigint {
-  return (n >> 1n) ^ -(n & 1n);
-}
-
-/**
- * Optimized Encoder for XPB binary format.
- * Uses preallocated buffer and avoids BigInt for 32-bit operations.
+ * V2 Encoder - tagless, fixed-width, compact lengths.
  */
 export class Encoder {
   private buf: Uint8Array;
-  private pos = 0;
   private view: DataView;
+  private pos = 0;
 
   constructor(initialSize = 256) {
     this.buf = new Uint8Array(initialSize);
@@ -74,101 +55,97 @@ export class Encoder {
     this.pos = 0;
   }
 
-  // Fast 32-bit varint (avoids BigInt)
-  private writeVarint32(v: number): void {
-    this.ensureCapacity(5);
-    v = v >>> 0; // Convert to unsigned
-    while (v >= 0x80) {
-      this.buf[this.pos++] = (v & 0x7f) | 0x80;
-      v >>>= 7;
-    }
-    this.buf[this.pos++] = v;
-  }
-
-  // 64-bit varint (uses BigInt only when needed)
-  private writeVarint64(v: bigint): void {
-    this.ensureCapacity(10);
-    while (v >= 0x80n) {
-      this.buf[this.pos++] = Number((v & 0x7fn) | 0x80n);
-      v >>= 7n;
-    }
-    this.buf[this.pos++] = Number(v);
-  }
-
-  private writeTag(fieldNumber: number, wireType: number): void {
-    this.writeVarint32((fieldNumber << 3) | wireType);
-  }
-
-  writeBool(fieldNumber: number, v: boolean): void {
-    this.ensureCapacity(2);
-    this.writeTag(fieldNumber, WireType.Varint);
+  /** Write bool as 1 byte */
+  writeBool(v: boolean): void {
+    this.ensureCapacity(1);
     this.buf[this.pos++] = v ? 1 : 0;
   }
 
-  writeInt32(fieldNumber: number, v: number): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint32(zigzagEncode32(v));
+  /** Write int32 as 4 bytes (little-endian, two's complement) */
+  writeInt32(v: number): void {
+    this.ensureCapacity(4);
+    this.view.setInt32(this.pos, v, true);
+    this.pos += 4;
   }
 
-  writeInt64(fieldNumber: number, v: bigint): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint64(zigzagEncode64(v));
+  /** Write int64 as 8 bytes (little-endian, two's complement) */
+  writeInt64(v: bigint): void {
+    this.ensureCapacity(8);
+    this.view.setBigInt64(this.pos, v, true);
+    this.pos += 8;
   }
 
-  writeUint32(fieldNumber: number, v: number): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint32(v);
+  /** Write uint32 as 4 bytes (little-endian) */
+  writeUint32(v: number): void {
+    this.ensureCapacity(4);
+    this.view.setUint32(this.pos, v, true);
+    this.pos += 4;
   }
 
-  writeUint64(fieldNumber: number, v: bigint): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint64(v);
+  /** Write uint64 as 8 bytes (little-endian) */
+  writeUint64(v: bigint): void {
+    this.ensureCapacity(8);
+    this.view.setBigUint64(this.pos, v, true);
+    this.pos += 8;
   }
 
-  writeFloat32(fieldNumber: number, v: number): void {
-    this.ensureCapacity(6);
-    this.writeTag(fieldNumber, WireType.Fixed32);
+  /** Write float32 as 4 bytes */
+  writeFloat32(v: number): void {
+    this.ensureCapacity(4);
     this.view.setFloat32(this.pos, v, true);
     this.pos += 4;
   }
 
-  writeFloat64(fieldNumber: number, v: number): void {
-    this.ensureCapacity(10);
-    this.writeTag(fieldNumber, WireType.Fixed64);
+  /** Write float64 as 8 bytes */
+  writeFloat64(v: number): void {
+    this.ensureCapacity(8);
     this.view.setFloat64(this.pos, v, true);
     this.pos += 8;
   }
 
-  writeString(fieldNumber: number, v: string): void {
+  /** Write compact length prefix */
+  private writeCompactLength(length: number): void {
+    if (length <= CompactLengthThreshold) {
+      this.ensureCapacity(1);
+      this.buf[this.pos++] = length;
+    } else {
+      this.ensureCapacity(5);
+      this.buf[this.pos++] = CompactLengthMarker;
+      this.view.setUint32(this.pos, length, true);
+      this.pos += 4;
+    }
+  }
+
+  /** Write string with compact length prefix */
+  writeString(v: string): void {
     const bytes = textEncoder.encode(v);
-    this.ensureCapacity(bytes.length + 10);
-    this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeVarint32(bytes.length);
+    this.writeCompactLength(bytes.length);
+    this.ensureCapacity(bytes.length);
     this.buf.set(bytes, this.pos);
     this.pos += bytes.length;
   }
 
-  writeBytes(fieldNumber: number, v: Uint8Array): void {
-    this.ensureCapacity(v.length + 10);
-    this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeVarint32(v.length);
+  /** Write bytes with compact length prefix */
+  writeBytes(v: Uint8Array): void {
+    this.writeCompactLength(v.length);
+    this.ensureCapacity(v.length);
     this.buf.set(v, this.pos);
     this.pos += v.length;
   }
 
-  writeMessage(fieldNumber: number, data: Uint8Array): void {
-    this.writeBytes(fieldNumber, data);
+  /** Write nested message (already encoded) with compact length prefix */
+  writeMessage(data: Uint8Array): void {
+    this.writeBytes(data);
   }
 }
 
 /**
- * Optimized Decoder for XPB binary format.
- * Uses 32-bit path where possible to avoid BigInt overhead.
+ * V2 Decoder - tagless, fixed-width, compact lengths.
  */
 export class Decoder {
   private data: Uint8Array;
-  private pos = 0;
   private view: DataView;
+  private pos = 0;
 
   constructor(data: Uint8Array) {
     this.data = data;
@@ -179,123 +156,128 @@ export class Decoder {
     return this.pos >= this.data.length;
   }
 
-  // Fast 32-bit varint (avoids BigInt)
-  private readVarint32(): number {
-    let result = 0;
-    let shift = 0;
-    while (this.pos < this.data.length) {
-      const b = this.data[this.pos++];
-      result |= (b & 0x7f) << shift;
-      if ((b & 0x80) === 0) {
-        return result >>> 0;
-      }
-      shift += 7;
-      if (shift > 35) {
-        throw new Error("xpb: varint too long for 32-bit");
-      }
-    }
-    throw new Error("xpb: unexpected EOF reading varint");
+  remaining(): number {
+    return this.data.length - this.pos;
   }
 
-  // 64-bit varint (BigInt)
-  private readVarint64(): bigint {
-    let result = 0n;
-    let shift = 0n;
-    while (this.pos < this.data.length) {
-      const b = this.data[this.pos++];
-      result |= BigInt(b & 0x7f) << shift;
-      if ((b & 0x80) === 0) {
-        return result;
-      }
-      shift += 7n;
-    }
-    throw new Error("xpb: unexpected EOF reading varint");
-  }
-
-  readTag(): [number, WireType] {
-    const tag = this.readVarint32();
-    return [tag >>> 3, (tag & 0x7) as WireType];
-  }
-
+  /** Read bool from 1 byte */
   readBool(): boolean {
-    return this.readVarint32() !== 0;
+    if (this.pos >= this.data.length) {
+      throw new Error('xpb: unexpected EOF reading bool');
+    }
+    return this.data[this.pos++] !== 0;
   }
 
+  /** Read int32 from 4 bytes (little-endian, two's complement) */
   readInt32(): number {
-    return zigzagDecode32(this.readVarint32());
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading int32');
+    }
+    const v = this.view.getInt32(this.pos, true);
+    this.pos += 4;
+    return v;
   }
 
+  /** Read int64 from 8 bytes (little-endian, two's complement) */
   readInt64(): bigint {
-    return zigzagDecode64(this.readVarint64());
+    if (this.pos + 8 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading int64');
+    }
+    const v = this.view.getBigInt64(this.pos, true);
+    this.pos += 8;
+    return v;
   }
 
+  /** Read uint32 from 4 bytes (little-endian) */
   readUint32(): number {
-    return this.readVarint32();
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading uint32');
+    }
+    const v = this.view.getUint32(this.pos, true);
+    this.pos += 4;
+    return v;
   }
 
+  /** Read uint64 from 8 bytes (little-endian) */
   readUint64(): bigint {
-    return this.readVarint64();
+    if (this.pos + 8 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading uint64');
+    }
+    const v = this.view.getBigUint64(this.pos, true);
+    this.pos += 8;
+    return v;
   }
 
+  /** Read float32 from 4 bytes */
   readFloat32(): number {
     if (this.pos + 4 > this.data.length) {
-      throw new Error("xpb: unexpected EOF reading float32");
+      throw new Error('xpb: unexpected EOF reading float32');
     }
     const v = this.view.getFloat32(this.pos, true);
     this.pos += 4;
     return v;
   }
 
+  /** Read float64 from 8 bytes */
   readFloat64(): number {
     if (this.pos + 8 > this.data.length) {
-      throw new Error("xpb: unexpected EOF reading float64");
+      throw new Error('xpb: unexpected EOF reading float64');
     }
     const v = this.view.getFloat64(this.pos, true);
     this.pos += 8;
     return v;
   }
 
+  /** Read compact length prefix */
+  private readCompactLength(): number {
+    if (this.pos >= this.data.length) {
+      throw new Error('xpb: unexpected EOF reading length');
+    }
+    const first = this.data[this.pos++];
+    if (first !== CompactLengthMarker) {
+      return first;
+    }
+    // Read 4-byte length
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading extended length');
+    }
+    const length = this.view.getUint32(this.pos, true);
+    this.pos += 4;
+    return length;
+  }
+
+  /** Read string with compact length prefix */
   readString(): string {
-    const length = this.readVarint32();
+    const length = this.readCompactLength();
     if (this.pos + length > this.data.length) {
-      throw new Error("xpb: unexpected EOF reading string");
+      throw new Error('xpb: unexpected EOF reading string');
     }
     const bytes = this.data.subarray(this.pos, this.pos + length);
     this.pos += length;
     return textDecoder.decode(bytes);
   }
 
+  /** Read bytes with compact length prefix */
   readBytes(): Uint8Array {
-    const length = this.readVarint32();
+    const length = this.readCompactLength();
     if (this.pos + length > this.data.length) {
-      throw new Error("xpb: unexpected EOF reading bytes");
+      throw new Error('xpb: unexpected EOF reading bytes');
     }
     const bytes = this.data.slice(this.pos, this.pos + length);
     this.pos += length;
     return bytes;
   }
 
+  /** Read nested message bytes */
   readMessageBytes(): Uint8Array {
     return this.readBytes();
   }
 
-  skip(wireType: WireType): void {
-    switch (wireType) {
-      case WireType.Varint:
-        this.readVarint32();
-        break;
-      case WireType.Fixed32:
-        this.pos += 4;
-        break;
-      case WireType.Fixed64:
-        this.pos += 8;
-        break;
-      case WireType.LengthDelimited:
-        const length = this.readVarint32();
-        this.pos += length;
-        break;
-      default:
-        throw new Error(`xpb: unknown wire type ${wireType}`);
+  /** Skip n bytes */
+  skip(n: number): void {
+    if (this.pos + n > this.data.length) {
+      throw new Error('xpb: unexpected EOF during skip');
     }
+    this.pos += n;
   }
 }

@@ -1,4 +1,4 @@
-// Package benchmark compares XPB to other serialization formats.
+// Package benchmark compares XPB V2 to other serialization formats.
 package benchmark
 
 import (
@@ -6,13 +6,10 @@ import (
 	"testing"
 
 	pb "github.com/anthropic/xpb/benchmarks/go/proto"
-	"github.com/anthropic/xpb/pkg/wire"
 	"github.com/anthropic/xpb/runtime/go/xpb"
 	"github.com/vmihailenco/msgpack/v5"
 	"google.golang.org/protobuf/proto"
 )
-
-var _ = wire.WireVarint
 
 // Common test data structure
 type BenchUser struct {
@@ -21,47 +18,34 @@ type BenchUser struct {
 	Active bool   `json:"active" msgpack:"active"`
 }
 
-// ============= XPB Benchmarks =============
+// ============= XPB V2 Benchmarks =============
 
 func BenchmarkXPB_Encode_Simple(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		enc := xpb.NewEncoder(64)
-		enc.WriteString(1, "Alice Johnson")
-		enc.WriteInt32(2, 30)
-		enc.WriteBool(3, true)
+		enc.WriteString("Alice Johnson")
+		enc.WriteInt32(30)
+		enc.WriteBool(true)
 		_ = enc.Bytes()
 	}
 }
 
 func BenchmarkXPB_Decode_Simple(b *testing.B) {
 	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, "Alice Johnson")
-	enc.WriteInt32(2, 30)
-	enc.WriteBool(3, true)
+	enc.WriteString("Alice Johnson")
+	enc.WriteInt32(30)
+	enc.WriteBool(true)
 	data := enc.Bytes()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		dec := xpb.NewDecoder(data)
-		var name string
-		var age int32
-		var active bool
-		for !dec.EOF() {
-			fn, wt, _ := dec.ReadTag()
-			switch fn {
-			case 1:
-				name, _ = dec.ReadString()
-			case 2:
-				age, _ = dec.ReadInt32()
-			case 3:
-				active, _ = dec.ReadBool()
-			default:
-				dec.Skip(wt)
-			}
-		}
+		name, _ := dec.ReadString()
+		age, _ := dec.ReadInt32()
+		active, _ := dec.ReadBool()
 		_, _, _ = name, age, active
 	}
 }
@@ -138,11 +122,11 @@ func BenchmarkMsgpack_Decode_Simple(b *testing.B) {
 // ============= Size Comparison Test =============
 
 func TestEncodedSizes(t *testing.T) {
-	// XPB
+	// XPB V2 (no tags, fixed-width ints)
 	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, "Alice Johnson")
-	enc.WriteInt32(2, 30)
-	enc.WriteBool(3, true)
+	enc.WriteString("Alice Johnson")
+	enc.WriteInt32(30)
+	enc.WriteBool(true)
 	xpbData := enc.Bytes()
 
 	// Protobuf
@@ -157,12 +141,11 @@ func TestEncodedSizes(t *testing.T) {
 	msgpackData, _ := msgpack.Marshal(&user)
 
 	t.Logf("=== Encoded Sizes (Simple Message) ===")
-	t.Logf("XPB:      %d bytes", len(xpbData))
+	t.Logf("XPB V2:   %d bytes (tagless, fixed-width)", len(xpbData))
 	t.Logf("Protobuf: %d bytes", len(protoData))
 	t.Logf("JSON:     %d bytes", len(jsonData))
 	t.Logf("Msgpack:  %d bytes", len(msgpackData))
 	t.Logf("")
-	t.Logf("XPB vs Protobuf: %.2fx", float64(len(protoData))/float64(len(xpbData)))
 	t.Logf("XPB vs JSON:     %.2fx smaller", float64(len(jsonData))/float64(len(xpbData)))
 	t.Logf("XPB vs Msgpack:  %.2fx smaller", float64(len(msgpackData))/float64(len(xpbData)))
 }
@@ -184,13 +167,13 @@ func BenchmarkXPB_Encode_Large(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		enc := xpb.NewEncoder(256)
-		enc.WriteUint64(1, 12345678901234)
-		enc.WriteString(2, "Alice Johnson")
-		enc.WriteString(3, "alice.johnson@example.com")
-		enc.WriteInt32(4, 30)
-		enc.WriteFloat64(5, 95.5)
-		enc.WriteBool(6, true)
-		enc.WriteString(7, "This is a longer description field that contains more text.")
+		enc.WriteUint64(12345678901234)
+		enc.WriteString("Alice Johnson")
+		enc.WriteString("alice.johnson@example.com")
+		enc.WriteInt32(30)
+		enc.WriteFloat64(95.5)
+		enc.WriteBool(true)
+		enc.WriteString("This is a longer description field that contains more text.")
 		_ = enc.Bytes()
 	}
 }
@@ -247,15 +230,15 @@ func BenchmarkMsgpack_Encode_Large(b *testing.B) {
 }
 
 func TestLargeEncodedSizes(t *testing.T) {
-	// XPB
+	// XPB V2
 	enc := xpb.NewEncoder(256)
-	enc.WriteUint64(1, 12345678901234)
-	enc.WriteString(2, "Alice Johnson")
-	enc.WriteString(3, "alice.johnson@example.com")
-	enc.WriteInt32(4, 30)
-	enc.WriteFloat64(5, 95.5)
-	enc.WriteBool(6, true)
-	enc.WriteString(7, "This is a longer description field that contains more text.")
+	enc.WriteUint64(12345678901234)
+	enc.WriteString("Alice Johnson")
+	enc.WriteString("alice.johnson@example.com")
+	enc.WriteInt32(30)
+	enc.WriteFloat64(95.5)
+	enc.WriteBool(true)
+	enc.WriteString("This is a longer description field that contains more text.")
 	xpbData := enc.Bytes()
 
 	// Protobuf
@@ -286,12 +269,8 @@ func TestLargeEncodedSizes(t *testing.T) {
 	msgpackData, _ := msgpack.Marshal(&user)
 
 	t.Logf("=== Encoded Sizes (Large Message) ===")
-	t.Logf("XPB:      %d bytes", len(xpbData))
+	t.Logf("XPB V2:   %d bytes (tagless, fixed-width)", len(xpbData))
 	t.Logf("Protobuf: %d bytes", len(protoData))
 	t.Logf("JSON:     %d bytes", len(jsonData))
 	t.Logf("Msgpack:  %d bytes", len(msgpackData))
-	t.Logf("")
-	t.Logf("XPB vs Protobuf: %.2fx", float64(len(protoData))/float64(len(xpbData)))
-	t.Logf("XPB vs JSON:     %.2fx smaller", float64(len(jsonData))/float64(len(xpbData)))
-	t.Logf("XPB vs Msgpack:  %.2fx smaller", float64(len(msgpackData))/float64(len(xpbData)))
 }

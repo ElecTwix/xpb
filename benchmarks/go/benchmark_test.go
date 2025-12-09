@@ -1,66 +1,53 @@
-// Package benchmark provides benchmarks comparing XPB to other serialization formats.
+// Package benchmark provides benchmarks comparing XPB V2 to other serialization formats.
 package benchmark
 
 import (
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/wire"
 	"github.com/anthropic/xpb/runtime/go/xpb"
 )
 
 // SimpleUser represents a simple test message for benchmarking.
+// V2: Fields are encoded/decoded in order without tags.
 type SimpleUser struct {
 	Name   string
 	Age    int32
 	Active bool
 }
 
-// Marshal encodes the SimpleUser to XPB format.
+// Marshal encodes the SimpleUser to XPB V2 format (no tags).
 func (u *SimpleUser) Marshal() ([]byte, error) {
 	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, u.Name)
-	enc.WriteInt32(2, u.Age)
-	enc.WriteBool(3, u.Active)
+	enc.WriteString(u.Name)
+	enc.WriteInt32(u.Age)
+	enc.WriteBool(u.Active)
 	return enc.Bytes(), nil
 }
 
-// Unmarshal decodes XPB format into SimpleUser.
+// Unmarshal decodes XPB V2 format into SimpleUser (reads fields in order).
 func (u *SimpleUser) Unmarshal(data []byte) error {
 	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
-		if err != nil {
-			return err
-		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			u.Name = v
-		case 2:
-			v, err := dec.ReadInt32()
-			if err != nil {
-				return err
-			}
-			u.Age = v
-		case 3:
-			v, err := dec.ReadBool()
-			if err != nil {
-				return err
-			}
-			u.Active = v
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
-		}
+
+	name, err := dec.ReadString()
+	if err != nil {
+		return err
 	}
+	u.Name = name
+
+	age, err := dec.ReadInt32()
+	if err != nil {
+		return err
+	}
+	u.Age = age
+
+	active, err := dec.ReadBool()
+	if err != nil {
+		return err
+	}
+	u.Active = active
+
 	return nil
 }
-
-var _ = wire.WireVarint // suppress unused import warning
 
 func BenchmarkXPB_Encode(b *testing.B) {
 	user := &SimpleUser{
@@ -148,84 +135,73 @@ type LargerMessage struct {
 	Score       float64
 	Active      bool
 	Description string
-	Tags        string // Would be repeated in full implementation
+	Tags        string
 }
 
 func (m *LargerMessage) Marshal() ([]byte, error) {
 	enc := xpb.NewEncoder(256)
-	enc.WriteUint64(1, m.ID)
-	enc.WriteString(2, m.Name)
-	enc.WriteString(3, m.Email)
-	enc.WriteInt32(4, m.Age)
-	enc.WriteFloat64(5, m.Score)
-	enc.WriteBool(6, m.Active)
-	enc.WriteString(7, m.Description)
-	enc.WriteString(8, m.Tags)
+	enc.WriteUint64(m.ID)
+	enc.WriteString(m.Name)
+	enc.WriteString(m.Email)
+	enc.WriteInt32(m.Age)
+	enc.WriteFloat64(m.Score)
+	enc.WriteBool(m.Active)
+	enc.WriteString(m.Description)
+	enc.WriteString(m.Tags)
 	return enc.Bytes(), nil
 }
 
 func (m *LargerMessage) Unmarshal(data []byte) error {
 	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
-		if err != nil {
-			return err
-		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadUint64()
-			if err != nil {
-				return err
-			}
-			m.ID = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Name = v
-		case 3:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Email = v
-		case 4:
-			v, err := dec.ReadInt32()
-			if err != nil {
-				return err
-			}
-			m.Age = v
-		case 5:
-			v, err := dec.ReadFloat64()
-			if err != nil {
-				return err
-			}
-			m.Score = v
-		case 6:
-			v, err := dec.ReadBool()
-			if err != nil {
-				return err
-			}
-			m.Active = v
-		case 7:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Description = v
-		case 8:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Tags = v
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
-		}
+
+	id, err := dec.ReadUint64()
+	if err != nil {
+		return err
 	}
+	m.ID = id
+
+	name, err := dec.ReadString()
+	if err != nil {
+		return err
+	}
+	m.Name = name
+
+	email, err := dec.ReadString()
+	if err != nil {
+		return err
+	}
+	m.Email = email
+
+	age, err := dec.ReadInt32()
+	if err != nil {
+		return err
+	}
+	m.Age = age
+
+	score, err := dec.ReadFloat64()
+	if err != nil {
+		return err
+	}
+	m.Score = score
+
+	active, err := dec.ReadBool()
+	if err != nil {
+		return err
+	}
+	m.Active = active
+
+	desc, err := dec.ReadString()
+	if err != nil {
+		return err
+	}
+	m.Description = desc
+
+	tags, err := dec.ReadString()
+	if err != nil {
+		return err
+	}
+	m.Tags = tags
+
 	return nil
 }
 

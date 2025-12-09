@@ -1,16 +1,19 @@
 /**
- * XPB JIT Compiler & Slab Allocator
+ * XPB V2 JIT Compiler & Slab Allocator
  * 
- * Generates highly optimized, unsafe code for specific schemas.
- * Uses a shared slab allocator to avoid GC.
+ * Generates highly optimized code for V2 format:
+ * - Struct mode (no tags, fields in order)
+ * - Fixed-width integers (4/8 bytes)
+ * - Compact length encoding
  */
 
-import { WireType, zigzagEncode32, zigzagDecode32 } from './index';
+import { CompactLengthThreshold, CompactLengthMarker } from './index';
 
 // ============= SLAB ALLOCATOR =============
 
 export class SlabAllocator {
   public buf: Uint8Array;
+  public view: DataView;
   public pos: number;
   public size: number;
 
@@ -20,6 +23,7 @@ export class SlabAllocator {
     } else {
       this.buf = new Uint8Array(size);
     }
+    this.view = new DataView(this.buf.buffer, this.buf.byteOffset, this.buf.byteLength);
     this.pos = 0;
     this.size = size;
   }
@@ -27,10 +31,6 @@ export class SlabAllocator {
   reset(): void {
     this.pos = 0;
   }
-
-  // Ensure space and return current position
-  // In a real system, might cycle buffers. Here we crash or reset for benchmarks.
-  // We expose direct property access for JIT speed.
 }
 
 // ============= SCHEMA DEFINITION =============
@@ -49,7 +49,7 @@ export enum FieldType {
 }
 
 export interface FieldDef {
-  tag: number;
+  tag: number;  // Not used in V2, kept for schema compatibility
   type: FieldType;
   name: string;
   repeated?: boolean;
@@ -59,79 +59,55 @@ export interface SchemaDef {
   fields: FieldDef[];
 }
 
-// ============= JIT COMPILER =============
+// ============= CACHED TEXT CODECS =============
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-export interface JITOptions {
-  fixedInts?: boolean;
-  structMode?: boolean; // No tags, implicit order (like C structs)
-  aligned?: boolean;    // Force 4-byte alignment (implies fixedInts + structMode)
-  target?: 'node' | 'browser'; // Optimized generation target
-}
+// Detect Node.js Buffer for fast string operations
+const isNode = typeof Buffer !== 'undefined';
 
-export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (slab: SlabAllocator, obj: T) => void {
-  // Enforce Struct Mode options for maximum speed
-  opts.structMode = true;
-  opts.fixedInts = true;
+// ============= JIT V2 ENCODER =============
 
-  // Auto-detect node if not specified and buffer exists
-  if (!opts.target && typeof Buffer !== 'undefined') {
-      opts.target = 'node';
-  }
-
+export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj: T) => void {
   const lines: string[] = [];
   
   lines.push(`
     var buf = slab.buf;
+    var view = slab.view;
     var pos = slab.pos;
-    var val;
+    var val, str, strLen, i, c, isAscii, written, lenPos;
   `);
 
   for (const field of schema.fields) {
-    // STRUCT MODE: No Tags. Strict Order.
     const access = `obj.${field.name}`;
     
     if (field.repeated) {
-        // Repeated Field (Array)
-        // 1. Get Array
-        // 2. Write Length (Fixed Int32)
-        // 3. Write Elements
-        lines.push(`
-          var arr = ${access};
-          if (arr) {
-             // Write Length
-             var arrLen = arr.length;
-             ${opts.fixedInts ? 
-               'buf[pos++] = arrLen; buf[pos++] = arrLen >> 8; buf[pos++] = arrLen >> 16; buf[pos++] = arrLen >> 24;' : 
-               '// Varint length not implemented for struct mode benchmark'
-             }
-             
-             // Write Elements
-             for (var i = 0; i < arrLen; i++) {
-                 val = arr[i];
-                 ${generateFieldWrite(field, 'val', true, opts)}
-             }
-          } else {
-             // Write 0 Length
-             ${opts.fixedInts ? 
-               'buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0;' : 
-               '// Varint 0'
-             }
+      // V2: Write count (int32) then elements
+      lines.push(`
+        var arr = ${access};
+        if (arr) {
+          // Write count as fixed int32
+          buf[pos++] = arr.length;
+          buf[pos++] = arr.length >> 8;
+          buf[pos++] = arr.length >> 16;
+          buf[pos++] = arr.length >> 24;
+          
+          // Write elements
+          for (var ri = 0; ri < arr.length; ri++) {
+            val = arr[ri];
+            ${generateFieldWrite(field, 'val')}
           }
-        `);
+        } else {
+          // Write 0 count
+          buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0;
+        }
+      `);
     } else {
-        // Singular Field
-        lines.push(`
-          val = ${access};
-          if (val !== undefined) {
-             ${generateFieldWrite(field, 'val', false, opts)}
-          } else {
-             // Missing: Write Default/Zero
-             ${generateDefaultWrite(field, opts)}
-          }
-        `);
+      lines.push(`
+        val = ${access};
+        ${generateFieldWrite(field, 'val')}
+      `);
     }
   }
 
@@ -139,483 +115,202 @@ export function compileEncoder<T>(schema: SchemaDef, opts: JITOptions = {}): (sl
     slab.pos = pos;
   `);
 
-  // Create function with dependencies
-  // Arg order: WireType, textEncoder, slab, obj
-  // We bind the first two so the returned function is (slab, obj)
-  return new Function('WireType', 'textEncoder', 'slab', 'obj', lines.join('\n'))
-    .bind(null, WireType, textEncoder) as any;
+  // Bind dependencies
+  return new Function('textEncoder', 'isNode', 'slab', 'obj', lines.join('\n'))
+    .bind(null, textEncoder, isNode) as any;
 }
 
-function generateDefaultWrite(field: FieldDef, opts: JITOptions): string {
-    // Basic zeroes
-    if (opts.fixedInts) {
-        if (field.type === FieldType.Int64 || field.type === FieldType.Float64) return 'pos+=8;';
-        return 'pos+=4;';
-    }
-    return 'buf[pos++] = 0;';
-}
-
-function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean, opts: JITOptions): string {
-  let code = '';
-  
-  // Tag only if NOT struct mode
-  if (!opts.structMode) {
-      const tagVarint = (field.tag << 3) | getWireType(field.type);
-      const tagBytes = encodeVarint32(tagVarint);
-      // Inline tag write
-      code += `
-        // Tag: ${field.tag} (${field.name})
-      `;
-      for (const b of tagBytes) {
-          code += `buf[pos++] = ${b};\n`;
-      }
-  }
-
-  // Padding for Aligned mode (before value)
-  // This is simplistic; real alignment requires checking pos % 4.
-  // Ideally slab.pos is always aligned at start of message, and we just pad.
-  if (opts.aligned) {
-      code += `while ((pos & 3) !== 0) pos++;\n`;
-  }
-
+function generateFieldWrite(field: FieldDef, valVar: string): string {
   switch (field.type) {
     case FieldType.Bool:
-      if (opts.fixedInts) {
-          // write 4 bytes
-          return code + `buf[pos++] = ${valVar} ? 1 : 0; buf[pos++] = 0; buf[pos++] = 0; buf[pos++] = 0;`;
-      }
-      return code + `buf[pos++] = ${valVar} ? 1 : 0;`;
+      return `buf[pos++] = ${valVar} ? 1 : 0;`;
     
     case FieldType.Int32:
     case FieldType.Uint32:
-      if (opts.fixedInts) {
-          // Fixed 32
-          return code + `
-            var v = ${valVar};
-            buf[pos++] = v;
-            buf[pos++] = v >> 8;
-            buf[pos++] = v >> 16;
-            buf[pos++] = v >> 24;
-          `;
-      }
-      
-      // Inline Zigzag + Varint (Optimistic)
-      return code + `
-        var z = (${valVar} << 1) ^ (${valVar} >> 31);
-        if (z < 128) {
-          buf[pos++] = z;
-        } else {
-          while (z >= 0x80) {
-            buf[pos++] = (z & 0x7f) | 0x80;
-            z >>>= 7;
-          }
-          buf[pos++] = z;
-        }
+      // Inline fixed32 write (faster than DataView)
+      return `
+        var v = ${valVar};
+        buf[pos++] = v;
+        buf[pos++] = v >> 8;
+        buf[pos++] = v >> 16;
+        buf[pos++] = v >> 24;
       `;
-      
+    
     case FieldType.Int64:
     case FieldType.Uint64:
-      // BigInt
-       if (opts.fixedInts) {
-          // Fixed 64
-          return code + `
-            var v = ${valVar};
-            var lo = Number(v & 0xffffffffn);
-            var hi = Number(v >> 32n);
-            buf[pos++] = lo;
-            buf[pos++] = lo >> 8;
-            buf[pos++] = lo >> 16;
-            buf[pos++] = lo >> 24;
-            buf[pos++] = hi;
-            buf[pos++] = hi >> 8;
-            buf[pos++] = hi >> 16;
-            buf[pos++] = hi >> 24;
-          `;
-       }
-       return code + `
-        var z = (${valVar} << 1n) ^ (${valVar} >> 63n);
-        if (z < 128n) {
-          buf[pos++] = Number(z);
-        } else {
-          while (z >= 0x80n) {
-            buf[pos++] = Number((z & 0x7fn) | 0x80n);
-            z >>= 7n;
-          }
-          buf[pos++] = Number(z);
-        }
+      return `
+        var v = ${valVar};
+        var lo = Number(v & 0xffffffffn);
+        var hi = Number(v >> 32n);
+        buf[pos++] = lo;
+        buf[pos++] = lo >> 8;
+        buf[pos++] = lo >> 16;
+        buf[pos++] = lo >> 24;
+        buf[pos++] = hi;
+        buf[pos++] = hi >> 8;
+        buf[pos++] = hi >> 16;
+        buf[pos++] = hi >> 24;
+      `;
+
+    case FieldType.Float32:
+      return `
+        view.setFloat32(pos, ${valVar}, true);
+        pos += 4;
+      `;
+
+    case FieldType.Float64:
+      return `
+        view.setFloat64(pos, ${valVar}, true);
+        pos += 8;
       `;
 
     case FieldType.String:
-       // String handling
-       // Standard: Varint Length + Bytes
-       // Fixed/Struct: Still need length! Strings are variable.
-       // Aligned: Length (Fixed32) + Bytes + Padding.
-       
-       // Optimistic Length Write for String
-       // 1. Write Tag (done)
-       // 2. Reserve 1 byte for length (common case)
-       // 3. EncodeInto
-       // 4. Fixup length if needed
-       
-       let lenWriteCode = '';
-       if (opts.fixedInts) {
-           lenWriteCode = `
-             var lenPos = pos;
-             pos += 4; // Reserve Fixed32 length
-           `;
-           
-           // ASCII Optimization for Fixed Ints (Struct Mode)
-           return code + `
-             // String: ${field.name}
-             ${lenWriteCode}
-             
-             var str = ${valVar};
-             var strLen = str.length;
-             var written = 0;
-             
-             // ASCII Fast Path (Heuristic < 40 chars)
-             if (strLen < 40) {
-                 var isAscii = true;
-                 for (var i = 0; i < strLen; i++) {
-                     var c = str.charCodeAt(i);
-                     if (c > 127) { isAscii = false; break; }
-                     buf[pos + i] = c;
-                 }
-                 if (isAscii) {
-                     written = strLen;
-                     pos += strLen;
-                 } else {
-                     // Fallback
-                     ${opts.target === 'node' ? 'written = buf.write(str, pos);' : 'var res = textEncoder.encodeInto(str, buf.subarray(pos)); written = res.written;'}
-                     pos += written;
-                 }
-             } else {
-                 ${opts.target === 'node' ? 'written = buf.write(str, pos);' : 'var res = textEncoder.encodeInto(str, buf.subarray(pos)); written = res.written;'}
-                 pos += written;
-             }
-             
-             // Write Length back
-             buf[lenPos] = written;
-             buf[lenPos+1] = written >> 8;
-             buf[lenPos+2] = written >> 16;
-             buf[lenPos+3] = written >> 24;
-             
-             ${opts.aligned ? 'while ((pos & 3) !== 0) buf[pos++] = 0;' : ''}
-           `;
-       }
-
-       // Standard implementation (with optimistic update)
-       // We can also apply ASCII path here for standard varints
-       return code + `
-          // String: ${field.name}
-          // Note: Tag written above if needed.
-          
-          var str = ${valVar};
-          var strLen = str.length;
-          
-          if (strLen < 40) {
-              // Try ASCII
-              var isAscii = true;
-              var savePos = pos;
-              // Reserve 1 byte len
-              pos++; 
-              
-              for (var i = 0; i < strLen; i++) {
-                  var c = str.charCodeAt(i);
-                  if (c > 127) { isAscii = false; break; }
-                  buf[pos + i] = c;
-              }
-              
-              if (isAscii) {
-                  buf[savePos] = strLen;
-                  pos += strLen;
-              } else {
-                  // Fallback: Reset and use standard
-                  pos = savePos;
-                  ${opts.target === 'node' ? 
-                  `var written = buf.write(str, pos + 1);` : 
-                  `var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
-                   var written = res.written;`
-                  }
-                  
-                  if (written < 128) {
-                     buf[pos] = written;
-                     pos += written + 1;
-                  } else {
-                     // Fallback deep
-                     var lenBytes = 0;
-                     var t = written;
-                     while(t >= 0x80) { t >>= 7; lenBytes++; }
-                     lenBytes++; 
-                     
-                     buf.copyWithin(pos + lenBytes, pos + 1, pos + 1 + written);
-                     
-                     var l = written;
-                     while (l >= 0x80) {
-                        buf[pos++] = (l & 0x7f) | 0x80;
-                        l >>>= 7;
-                     }
-                     buf[pos++] = l;
-                     pos += written;
-                  }
-              }
-          } else {
-              // Long string standard path
-              ${opts.target === 'node' ? 
-              `var written = buf.write(str, pos + 1);` : 
-              `var res = textEncoder.encodeInto(str, buf.subarray(pos + 1));
-               var written = res.written;`
-              }
-              
-              // ... same fallback logic ...
-              if (written < 128) {
-                 buf[pos] = written;
-                 pos += written + 1;
-              } else {
-                 var lenBytes = 0;
-                 var t = written;
-                 while(t >= 0x80) { t >>= 7; lenBytes++; }
-                 lenBytes++; 
-                 
-                 buf.copyWithin(pos + lenBytes, pos + 1, pos + 1 + written);
-                 
-                 var l = written;
-                 while (l >= 0x80) {
-                    buf[pos++] = (l & 0x7f) | 0x80;
-                    l >>>= 7;
-                 }
-                 buf[pos++] = l;
-                 pos += written;
-              }
+      // FAST PATH: ASCII optimization + Buffer.write() for Node.js
+      return `
+        str = ${valVar} || '';
+        strLen = str.length;
+        
+        // Reserve space for compact length (1 byte for short strings)
+        lenPos = pos++;
+        
+        // ASCII Fast Path (< 40 chars)
+        if (strLen < 40) {
+          isAscii = true;
+          for (i = 0; i < strLen; i++) {
+            c = str.charCodeAt(i);
+            if (c > 127) { isAscii = false; break; }
+            buf[pos + i] = c;
           }
-       `;
+          if (isAscii) {
+            buf[lenPos] = strLen;
+            pos += strLen;
+          } else {
+            // Fallback to Buffer.write or TextEncoder
+            pos = lenPos + 1;
+            if (isNode) {
+              written = buf.write(str, pos);
+            } else {
+              var enc = textEncoder.encodeInto(str, buf.subarray(pos));
+              written = enc.written;
+            }
+            buf[lenPos] = written;
+            pos += written;
+          }
+        } else {
+          // Long string: use Buffer.write or TextEncoder
+          if (isNode) {
+            written = buf.write(str, pos);
+          } else {
+            var enc = textEncoder.encodeInto(str, buf.subarray(pos));
+            written = enc.written;
+          }
+          buf[lenPos] = written;
+          pos += written;
+        }
+      `;
 
     default:
-        // TODO: Implement other types
-        return `// TODO: ${field.type}`;
+      return `// TODO: ${field.type}`;
   }
 }
 
-export function compileDecoder<T>(schema: SchemaDef, opts: JITOptions = {}): (buf: Uint8Array, end: number) => T {
-    // Aligned implies structMode + fixedInts
-    if (opts.aligned) {
-      opts.structMode = true;
-      opts.fixedInts = true;
-    }
-    // Auto-detect node if not specified and buffer exists
-    if (!opts.target && typeof Buffer !== 'undefined') {
-        opts.target = 'node';
-    }
+// ============= JIT V2 DECODER =============
 
-    const lines: string[] = [];
-    lines.push(`
-      var pos = 0;
-      var obj = {};
-      var tag, wire, val;
-    `);
+export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
+  const lines: string[] = [];
+  
+  lines.push(`
+    var pos = 0;
+    var obj = {};
+    var val, len, first;
+  `);
 
-    // ==========================================
-    // STRUCT MODE (No Tags, Strict Order, Fixed Ints)
-    // ==========================================
-    if (opts.structMode) {
-      // In Struct Mode, we simply generate code to read fields A, B, C... in order.
-      // We assume correct data. No tag parsing.
-      
-      for (const field of schema.fields) {
-        const assignment = field.repeated 
-            ? `if (!obj.${field.name}) obj.${field.name} = []; obj.${field.name}.push(val);` 
-            : `obj.${field.name} = val;`;
-
-        switch (field.type) {
-            case FieldType.Int32:
-            case FieldType.Uint32:
-                 // In StructMode+FixedInts, this is just a 4-byte read
-                 // We can use DataView or manual read. Manual is usually faster or same.
-                 // Little Endian
-                 lines.push(`
-                    val = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
-                    pos += 4;
-                    ${assignment}
-                 `);
-                 break;
-            case FieldType.Int64:
-            case FieldType.Uint64:
-                 // 8 bytes. JS BigInt? Or just number if small?
-                 // For benchmark user field (age: int32), this won't be hit.
-                 // Implementing dummy skip or basic number read for now.
-                 lines.push(`pos += 8; val = 0; ${assignment}`); 
-                 break;
-            case FieldType.Bool:
-                 lines.push(`
-                    val = buf[pos++] !== 0;
-                    ${assignment}
-                 `);
-                 break;
-            case FieldType.String:
-                 // String in StructMode is: [Varint Length][Bytes]
-                 // We need to read the Varint Length first.
-                 lines.push(`
-                   // Read Varint Length
-                   var len = 0, shift = 0;
-                   while(true) {
-                      var b = buf[pos++];
-                      len |= (b & 0x7f) << shift;
-                      if ((b & 0x80) === 0) break;
-                      shift += 7;
-                   }
-                   
-                   // Read Bytes
-                   ${opts.target === 'node' 
-                      ? `val = buf.toString('utf8', pos, pos + len);` // Node Buffer slice is fast? toString() might seek.
-                      // Actually better: buf.toString('utf8', start, end)
-                      : `val = textDecoder.decode(buf.subarray(pos, pos + len));` 
-                   }
-                   pos += len;
-                   ${assignment}
-                 `);
-                 break;
-            default:
-                 // Skip? Or error?
-                 lines.push(`// Unknown type in struct mode`);
+  for (const field of schema.fields) {
+    if (field.repeated) {
+      // V2: Read count then elements
+      lines.push(`
+        {
+          // Read fixed int32 count (ensure unsigned)
+          var count = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          pos += 4;
+          obj.${field.name} = new Array(count);
+          for (var i = 0; i < count; i++) {
+            ${generateFieldRead(field)}
+            obj.${field.name}[i] = val;
+          }
         }
-      }
-      
-      lines.push(`return obj;`);
-      return new Function('WireType', 'textDecoder', 'buf', 'end', lines.join('\n'))
-        .bind(null, WireType, textDecoder) as any;
+      `);
+    } else {
+      lines.push(`
+        ${generateFieldRead(field)}
+        obj.${field.name} = val;
+      `);
     }
+  }
 
-    // ==========================================
-    // STANDARD MODE (Tag Parsing)
-    // ==========================================
+  lines.push(`return obj;`);
 
-    // We use a while loop and a switch
-    lines.push(`while (pos < end) {`);
+  return new Function('textDecoder', 'isNode', 'buf', 'end', lines.join('\n'))
+    .bind(null, textDecoder, isNode) as any;
+}
+
+function generateFieldRead(field: FieldDef): string {
+  switch (field.type) {
+    case FieldType.Bool:
+      return `val = buf[pos++] !== 0;`;
     
-    // Inline Read Tag
-    lines.push(`
-      var b = buf[pos++];
-      tag = b & 0x7f;
-      if (b >= 0x80) {
-        b = buf[pos++];
-        tag |= (b & 0x7f) << 7;
-        // Assume < 128 field IDs for speed
-      }
-      wire = tag & 7;
-      tag = tag >>> 3;
-    `);
+    case FieldType.Int32:
+      // Inline fixed32 read (faster than DataView)
+      return `
+        val = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+        pos += 4;
+      `;
+    
+    case FieldType.Uint32:
+      return `
+        val = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+        pos += 4;
+      `;
+    
+    case FieldType.Int64:
+    case FieldType.Uint64:
+      return `
+        var lo = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+        var hi = buf[pos+4] | (buf[pos+5] << 8) | (buf[pos+6] << 16) | (buf[pos+7] << 24);
+        val = BigInt(lo >>> 0) | (BigInt(hi >>> 0) << 32n);
+        pos += 8;
+      `;
 
-    lines.push(`switch(tag) {`);
+    case FieldType.Float32:
+      return `
+        var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        val = view.getFloat32(pos, true);
+        pos += 4;
+      `;
 
-    for (const field of schema.fields) {
-        lines.push(`case ${field.tag}:`);
+    case FieldType.Float64:
+      return `
+        var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        val = view.getFloat64(pos, true);
+        pos += 8;
+      `;
+
+    case FieldType.String:
+      // V2: Compact length + string bytes
+      return `
+        // Read compact length (1 byte for short strings)
+        len = buf[pos++];
         
-        const assignment = field.repeated 
-            ? `if (!obj.${field.name}) obj.${field.name} = []; obj.${field.name}.push(val);` 
-            : `obj.${field.name} = val;`;
-
-        switch (field.type) {
-            case FieldType.String:
-                lines.push(`
-                   // Inline Read String
-                   var len = 0, shift = 0;
-                   while(true) {
-                      b = buf[pos++];
-                      len |= (b & 0x7f) << shift;
-                      if ((b & 0x80) === 0) break;
-                      shift += 7;
-                   }
-                   ${opts.target === 'node' 
-                      ? `val = buf.toString('utf8', pos, pos + len);`
-                      : `val = textDecoder.decode(buf.subarray(pos, pos + len));` 
-                   }
-                   pos += len;
-                   ${assignment}
-                `);
-                break;
-            case FieldType.Int32:
-                 lines.push(`
-                   // Inline Read Int32
-                   var v = 0, shift = 0;
-                   while(true) {
-                      b = buf[pos++];
-                      v |= (b & 0x7f) << shift;
-                      if ((b & 0x80) === 0) break;
-                      shift += 7;
-                   }
-                   // Zigzag
-                   val = (v >>> 1) ^ -(v & 1);
-                   ${assignment}
-                 `);
-                 break;
-            case FieldType.Bool:
-                 lines.push(`
-                    b = buf[pos++];
-                    // if (b >= 80) ... handle varint bool ...
-                    val = b !== 0;
-                    ${assignment}
-                 `);
-                 break;
-            default:
-                 lines.push(`// Skip unknown`);
+        // Fast path: Buffer.toString for Node
+        if (isNode) {
+          val = buf.toString('utf8', pos, pos + len);
+        } else {
+          val = textDecoder.decode(buf.subarray(pos, pos + len));
         }
-        lines.push(`break;`);
-    }
+        pos += len;
+      `;
 
-    lines.push(`default: // Skip unknown
-       // minimal check
-       if (wire === 0) { while(buf[pos++] >= 0x80); }
-       else if (wire === 2) { 
-           var len = 0, shift = 0;
-           while(true) {
-              b = buf[pos++];
-              len |= (b & 0x7f) << shift;
-              if ((b & 0x80) === 0) break;
-              shift += 7;
-           }
-           pos += len;
-       }
-       // ... other wires
-    `);
-
-    lines.push(`}`); // end switch
-    lines.push(`}`); // end while
-    lines.push(`return obj;`);
-
-    return new Function('WireType', 'textDecoder', 'buf', 'end', lines.join('\n'))
-        .bind(null, WireType, textDecoder) as any;
-}
-
-
-// --- Helpers ---
-
-function getWireType(t: FieldType): number {
-    switch (t) {
-        case FieldType.Int32: 
-        case FieldType.Bool:
-        case FieldType.Int64:
-        case FieldType.Uint32:
-        case FieldType.Uint64:
-            return WireType.Varint;
-        case FieldType.String:
-        case FieldType.Bytes:
-        case FieldType.Message:
-            return WireType.LengthDelimited;
-        case FieldType.Float32:
-            return WireType.Fixed32;
-        case FieldType.Float64:
-            return WireType.Fixed64;
-    }
-    return 0;
-}
-
-function encodeVarint32(v: number): number[] {
-    const bytes: number[] = [];
-    v = v >>> 0;
-    while (v >= 0x80) {
-        bytes.push((v & 0x7f) | 0x80);
-        v >>>= 7;
-    }
-    bytes.push(v);
-    return bytes;
+    default:
+      return `val = null; // TODO: ${field.type}`;
+  }
 }
