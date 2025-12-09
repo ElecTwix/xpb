@@ -211,28 +211,25 @@ function benchXPB_JIT_Struct(): BenchResult {
   const iterations = 100000;
   
   // Compile with Struct Mode (No Tags) + Fixed Ints
-  const jitEncode = compileEncoder<typeof smallUser>(userSchema, { structMode: true, fixedInts: true });
-  // We haven't implemented a Struct Decoder yet, so we only benchmark encode
+  const jitEncode = compileEncoder<typeof smallUser>(userSchema, { structMode: true, fixedInts: true, target: 'node' });
+  const jitDecode = compileDecoder<typeof smallUser>(userSchema, { structMode: true, fixedInts: true, target: 'node' });
   const slab = new SlabAllocator(65536);
   
   // Warmup
   slab.pos = 0;
   jitEncode(slab, smallUser);
+  const encoded = Buffer.from(slab.buf.subarray(0, slab.pos));
 
-  const encodeNs = bench("JIT Struct encode", iterations, () => {
-    if (slab.pos > 60000) slab.pos = 0;
+  const encodeNs = bench("Struct encode", iterations, () => {
+    slab.pos = 0;
     jitEncode(slab, smallUser);
   });
-  
-  // Size measure
-  slab.pos = 0;
-  jitEncode(slab, smallUser);
-  const size = slab.pos;
-  
-  // Dummy decode 0
-  const decodeNs = 0;
 
-  return { name: "XPB (Struct)", encodeNs, decodeNs, sizeBytes: size };
+  const decodeNs = bench("Struct decode", iterations, () => {
+    jitDecode(encoded, encoded.length);
+  });
+
+  return { name: "XPB (Struct)", encodeNs, decodeNs, sizeBytes: encoded.length };
 }
 
 function benchXPB_JIT_Aligned(): BenchResult {
@@ -322,7 +319,7 @@ function benchXPB_JIT_Large(): BenchResult {
     // Warmup & Size Capture
     slab.pos = 0;
     jitEncode(slab, testDataLarge);
-    const encoded = new Uint8Array(slab.buf.subarray(0, slab.pos));
+    const encoded = Buffer.from(slab.buf.subarray(0, slab.pos));
 
     const encodeNs = bench("JIT Large encode", iters, () => {
         if (slab.pos > 60000) slab.pos = 0;

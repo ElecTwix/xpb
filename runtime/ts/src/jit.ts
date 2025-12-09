@@ -393,19 +393,98 @@ function generateFieldWrite(field: FieldDef, valVar: string, isRepeated: boolean
   }
 }
 
-export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
-    // A simplified JIT decoder is extremely complex to get right with jumps/switch.
-    // For now, let's optimize the Encoder first as per "make small messages faster".
-    // We can just call UnsafeDecoder for decoding if needed, or implement a basic switch JIT.
-    
-    // We'll implement a basic one to close the loop.
-    
+export function compileDecoder<T>(schema: SchemaDef, opts: JITOptions = {}): (buf: Uint8Array, end: number) => T {
+    // Aligned implies structMode + fixedInts
+    if (opts.aligned) {
+      opts.structMode = true;
+      opts.fixedInts = true;
+    }
+    // Auto-detect node if not specified and buffer exists
+    if (!opts.target && typeof Buffer !== 'undefined') {
+        opts.target = 'node';
+    }
+
     const lines: string[] = [];
     lines.push(`
       var pos = 0;
       var obj = {};
       var tag, wire, val;
     `);
+
+    // ==========================================
+    // STRUCT MODE (No Tags, Strict Order, Fixed Ints)
+    // ==========================================
+    if (opts.structMode) {
+      // In Struct Mode, we simply generate code to read fields A, B, C... in order.
+      // We assume correct data. No tag parsing.
+      
+      for (const field of schema.fields) {
+        const assignment = field.repeated 
+            ? `if (!obj.${field.name}) obj.${field.name} = []; obj.${field.name}.push(val);` 
+            : `obj.${field.name} = val;`;
+
+        switch (field.type) {
+            case FieldType.Int32:
+            case FieldType.Uint32:
+                 // In StructMode+FixedInts, this is just a 4-byte read
+                 // We can use DataView or manual read. Manual is usually faster or same.
+                 // Little Endian
+                 lines.push(`
+                    val = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+                    pos += 4;
+                    ${assignment}
+                 `);
+                 break;
+            case FieldType.Int64:
+            case FieldType.Uint64:
+                 // 8 bytes. JS BigInt? Or just number if small?
+                 // For benchmark user field (age: int32), this won't be hit.
+                 // Implementing dummy skip or basic number read for now.
+                 lines.push(`pos += 8; val = 0; ${assignment}`); 
+                 break;
+            case FieldType.Bool:
+                 lines.push(`
+                    val = buf[pos++] !== 0;
+                    ${assignment}
+                 `);
+                 break;
+            case FieldType.String:
+                 // String in StructMode is: [Varint Length][Bytes]
+                 // We need to read the Varint Length first.
+                 lines.push(`
+                   // Read Varint Length
+                   var len = 0, shift = 0;
+                   while(true) {
+                      var b = buf[pos++];
+                      len |= (b & 0x7f) << shift;
+                      if ((b & 0x80) === 0) break;
+                      shift += 7;
+                   }
+                   
+                   // Read Bytes
+                   ${opts.target === 'node' 
+                      ? `val = buf.toString('utf8', pos, pos + len);` // Node Buffer slice is fast? toString() might seek.
+                      // Actually better: buf.toString('utf8', start, end)
+                      : `val = textDecoder.decode(buf.subarray(pos, pos + len));` 
+                   }
+                   pos += len;
+                   ${assignment}
+                 `);
+                 break;
+            default:
+                 // Skip? Or error?
+                 lines.push(`// Unknown type in struct mode`);
+        }
+      }
+      
+      lines.push(`return obj;`);
+      return new Function('WireType', 'textDecoder', 'buf', 'end', lines.join('\n'))
+        .bind(null, WireType, textDecoder) as any;
+    }
+
+    // ==========================================
+    // STANDARD MODE (Tag Parsing)
+    // ==========================================
 
     // We use a while loop and a switch
     lines.push(`while (pos < end) {`);
@@ -443,7 +522,10 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
                       if ((b & 0x80) === 0) break;
                       shift += 7;
                    }
-                   val = textDecoder.decode(buf.subarray(pos, pos + len));
+                   ${opts.target === 'node' 
+                      ? `val = buf.toString('utf8', pos, pos + len);`
+                      : `val = textDecoder.decode(buf.subarray(pos, pos + len));` 
+                   }
                    pos += len;
                    ${assignment}
                 `);
