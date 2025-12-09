@@ -8,6 +8,12 @@
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { Encoder, Decoder } from '../../../runtime/ts/src/index.js';
 import { SlabAllocator, compileEncoder, compileDecoder, FieldType } from '../../../runtime/ts/src/jit.js';
+import { 
+  encodeStringArray, decodeStringArray,
+  encodeInt32Array, decodeInt32Array,
+  encodeStringMap, decodeStringMap,
+  CollectionSlab
+} from '../../../runtime/ts/src/collections.js';
 import protobuf from 'protobufjs';
 
 // ============= Benchmark Utilities =============
@@ -471,36 +477,27 @@ function runCollectionBenchmarks() {
   const strMap = generateStringMap(COLL_SIZE);
   const strMapObj = Object.fromEntries(strMap);
   
+  // Pre-allocate slabs for XPB (key optimization!)
+  const strArrSlab = new CollectionSlab(COLL_SIZE * 30);
+  const intArrSlab = new CollectionSlab(COLL_SIZE * 5);
+  const strMapSlab = new CollectionSlab(COLL_SIZE * 60);
+  
   // ============= String Array =============
   const stringArrayResults: BenchResult[] = [];
   
-  // XPB String Array
+  // XPB String Array - OPTIMIZED
   {
-    const encoder = new Encoder(COLL_SIZE * 20);
-    const encodeXPB = () => {
-      encoder.reset();
-      encoder.writeInt32(strArr.length);
-      for (const s of strArr) {
-        encoder.writeString(s);
-      }
-      return encoder.finish();
-    };
+    // Warmup
+    const warmup = encodeStringArray(strArr, strArrSlab);
+    const size = warmup.length;
+    const encoded = new Uint8Array(warmup); // Copy for decode benchmark
     
-    const encoded = encodeXPB();
-    const size = encoded.length;
-    
-    const decodeXPB = (data: Uint8Array) => {
-      const dec = new Decoder(data);
-      const count = dec.readInt32();
-      const arr: string[] = [];
-      for (let i = 0; i < count; i++) {
-        arr.push(dec.readString());
-      }
-      return arr;
-    };
-    
-    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
-    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    const encResult = benchMultiple("XPB encode", COLL_ITER, () => {
+      encodeStringArray(strArr, strArrSlab);
+    });
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => {
+      decodeStringArray(encoded);
+    });
     stringArrayResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
   }
   
@@ -523,33 +520,19 @@ function runCollectionBenchmarks() {
   // ============= Int32 Array =============
   const intArrayResults: BenchResult[] = [];
   
-  // XPB Int32 Array
+  // XPB Int32 Array - OPTIMIZED
   {
-    const encoder = new Encoder(COLL_SIZE * 4 + 4);
-    const encodeXPB = () => {
-      encoder.reset();
-      encoder.writeInt32(intArr.length);
-      for (const v of intArr) {
-        encoder.writeInt32(v);
-      }
-      return encoder.finish();
-    };
+    // Warmup
+    const warmup = encodeInt32Array(intArr, intArrSlab);
+    const size = warmup.length;
+    const encoded = new Uint8Array(warmup); // Copy for decode benchmark
     
-    const encoded = encodeXPB();
-    const size = encoded.length;
-    
-    const decodeXPB = (data: Uint8Array) => {
-      const dec = new Decoder(data);
-      const count = dec.readInt32();
-      const arr: number[] = [];
-      for (let i = 0; i < count; i++) {
-        arr.push(dec.readInt32());
-      }
-      return arr;
-    };
-    
-    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
-    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    const encResult = benchMultiple("XPB encode", COLL_ITER, () => {
+      encodeInt32Array(intArr, intArrSlab);
+    });
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => {
+      decodeInt32Array(encoded);
+    });
     intArrayResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
   }
   
@@ -572,36 +555,19 @@ function runCollectionBenchmarks() {
   // ============= String Map =============
   const stringMapResults: BenchResult[] = [];
   
-  // XPB String Map
+  // XPB String Map - OPTIMIZED
   {
-    const encoder = new Encoder(COLL_SIZE * 40);
-    const encodeXPB = () => {
-      encoder.reset();
-      encoder.writeInt32(strMap.size);
-      for (const [k, v] of strMap) {
-        encoder.writeString(k);
-        encoder.writeString(v);
-      }
-      return encoder.finish();
-    };
+    // Warmup
+    const warmup = encodeStringMap(strMap, strMapSlab);
+    const size = warmup.length;
+    const encoded = new Uint8Array(warmup); // Copy for decode benchmark
     
-    const encoded = encodeXPB();
-    const size = encoded.length;
-    
-    const decodeXPB = (data: Uint8Array) => {
-      const dec = new Decoder(data);
-      const count = dec.readInt32();
-      const m = new Map<string, string>();
-      for (let i = 0; i < count; i++) {
-        const k = dec.readString();
-        const v = dec.readString();
-        m.set(k, v);
-      }
-      return m;
-    };
-    
-    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
-    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    const encResult = benchMultiple("XPB encode", COLL_ITER, () => {
+      encodeStringMap(strMap, strMapSlab);
+    });
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => {
+      decodeStringMap(encoded);
+    });
     stringMapResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
   }
   
