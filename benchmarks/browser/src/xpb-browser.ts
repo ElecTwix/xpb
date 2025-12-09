@@ -81,7 +81,7 @@ export class Encoder {
 }
 
 /**
- * Browser-optimized Decoder
+ * Browser-optimized Decoder with ASCII fast path
  */
 export class Decoder {
   private data: Uint8Array;
@@ -105,6 +105,26 @@ export class Decoder {
 
   readString(): string {
     const len = this.data[this.pos++];
+    
+    // ASCII fast path: most strings are ASCII, avoid TextDecoder overhead
+    if (len < 64) {
+      let isAscii = true;
+      const start = this.pos;
+      for (let i = 0; i < len; i++) {
+        if (this.data[start + i] > 127) {
+          isAscii = false;
+          break;
+        }
+      }
+      if (isAscii) {
+        // Use apply with typed array slice - fastest ASCII decode
+        const str = String.fromCharCode.apply(null, this.data.subarray(start, start + len) as any);
+        this.pos += len;
+        return str;
+      }
+    }
+    
+    // Fallback: TextDecoder for UTF-8
     const str = textDecoder.decode(this.data.subarray(this.pos, this.pos + len));
     this.pos += len;
     return str;
@@ -223,10 +243,28 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         `);
         break;
       case FieldType.String:
+        // ASCII fast path for decoding - avoids slow TextDecoder for most strings
         lines.push(`
           len = buf[pos++];
-          obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
-          pos += len;
+          
+          // ASCII fast path with String.fromCharCode.apply
+          if (len < 64) {
+            var isAscii = true;
+            var start = pos;
+            for (var si = 0; si < len; si++) {
+              if (buf[start + si] > 127) { isAscii = false; break; }
+            }
+            if (isAscii) {
+              obj.${field.name} = String.fromCharCode.apply(null, buf.subarray(start, start + len));
+              pos += len;
+            } else {
+              obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
+              pos += len;
+            }
+          } else {
+            obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
+            pos += len;
+          }
         `);
         break;
     }
