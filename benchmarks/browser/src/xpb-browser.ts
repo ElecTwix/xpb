@@ -278,10 +278,20 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
 }
 
 export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
+  // V8 Optimization: Pre-initialize all properties for consistent hidden class
+  const propInits = schema.fields.map(f => {
+    switch (f.type) {
+      case FieldType.Bool: return `${f.name}: false`;
+      case FieldType.Int32: return `${f.name}: 0`;
+      case FieldType.String: return `${f.name}: ''`;
+      default: return `${f.name}: null`;
+    }
+  }).join(', ');
+  
   const lines: string[] = [`
     var pos = 0;
-    var obj = {};
-    var val, len;
+    var obj = { ${propInits} };
+    var len, isAscii, i;
   `];
 
   for (const field of schema.fields) {
@@ -290,34 +300,32 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         lines.push(`obj.${field.name} = buf[pos++] !== 0;`);
         break;
       case FieldType.Int32:
+        // Inline int32 read - avoid function call overhead
         lines.push(`
           obj.${field.name} = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           pos += 4;
         `);
         break;
       case FieldType.String:
-        // ASCII fast path for decoding - avoids slow TextDecoder for most strings
+        // ASCII fast path - String.fromCharCode.apply is V8-optimized
         lines.push(`
           len = buf[pos++];
           
-          // ASCII fast path with String.fromCharCode.apply
-          if (len < 64) {
-            var isAscii = true;
-            var start = pos;
-            for (var si = 0; si < len; si++) {
-              if (buf[start + si] > 127) { isAscii = false; break; }
+          // ASCII fast path with String.fromCharCode.apply (V8-optimized)
+          if (len <= 64) {
+            isAscii = true;
+            for (i = 0; i < len; i++) {
+              if (buf[pos + i] > 127) { isAscii = false; break; }
             }
             if (isAscii) {
-              obj.${field.name} = String.fromCharCode.apply(null, buf.subarray(start, start + len));
-              pos += len;
+              obj.${field.name} = String.fromCharCode.apply(null, buf.subarray(pos, pos + len));
             } else {
               obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
-              pos += len;
             }
           } else {
             obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
-            pos += len;
           }
+          pos += len;
         `);
         break;
     }
