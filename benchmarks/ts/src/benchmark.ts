@@ -406,7 +406,219 @@ async function main() {
   printSummary("Large", xpbLarge, jsonLarge, "JSON");
   printSummary("Large", xpbLarge, protoLarge, "Protobuf");
 
+  // ============= Collection Benchmarks =============
+  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  📦 Collections (Arrays and Maps with 100 elements)");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  
+  const collectionResults = runCollectionBenchmarks();
+  
+  printResults("String Array (100 elements)", collectionResults.stringArray);
+  printSummary("StringArray", collectionResults.stringArray[0], collectionResults.stringArray[1], "JSON");
+  
+  printResults("Int32 Array (100 elements)", collectionResults.intArray);
+  printSummary("Int32Array", collectionResults.intArray[0], collectionResults.intArray[1], "JSON");
+  
+  printResults("String Map (100 entries)", collectionResults.stringMap);
+  printSummary("StringMap", collectionResults.stringMap[0], collectionResults.stringMap[1], "JSON");
+
   console.log("\n✅ Benchmark complete!");
+}
+
+// ============= Collection Data Generators =============
+
+function generateStringArray(size: number): string[] {
+  const arr: string[] = [];
+  for (let i = 0; i < size; i++) {
+    arr.push(`item_${String.fromCharCode(65 + (i % 26))}_value`);
+  }
+  return arr;
+}
+
+function generateInt32Array(size: number): number[] {
+  const arr: number[] = [];
+  for (let i = 0; i < size; i++) {
+    arr.push(i * 17);
+  }
+  return arr;
+}
+
+function generateStringMap(size: number): Map<string, string> {
+  const m = new Map<string, string>();
+  for (let i = 0; i < size; i++) {
+    const key = `key_${String.fromCharCode(65 + (i % 26))}_${i % 10}`;
+    m.set(key, `value_for_${key}`);
+  }
+  return m;
+}
+
+// ============= Collection Benchmarks =============
+
+function runCollectionBenchmarks() {
+  const COLL_SIZE = 100;
+  const COLL_ITER = 10000;
+  
+  // Generate test data
+  const strArr = generateStringArray(COLL_SIZE);
+  const intArr = generateInt32Array(COLL_SIZE);
+  const strMap = generateStringMap(COLL_SIZE);
+  const strMapObj = Object.fromEntries(strMap);
+  
+  // ============= String Array =============
+  const stringArrayResults: BenchResult[] = [];
+  
+  // XPB String Array
+  {
+    const encoder = new Encoder(COLL_SIZE * 20);
+    const encodeXPB = () => {
+      encoder.reset();
+      encoder.writeInt32(strArr.length);
+      for (const s of strArr) {
+        encoder.writeString(s);
+      }
+      return encoder.finish();
+    };
+    
+    const encoded = encodeXPB();
+    const size = encoded.length;
+    
+    const decodeXPB = (data: Uint8Array) => {
+      const dec = new Decoder(data);
+      const count = dec.readInt32();
+      const arr: string[] = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(dec.readString());
+      }
+      return arr;
+    };
+    
+    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    stringArrayResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
+  }
+  
+  // JSON String Array
+  {
+    let encoded = "";
+    const encResult = benchMultiple("JSON encode", COLL_ITER, () => { encoded = JSON.stringify(strArr); });
+    const decResult = benchMultiple("JSON decode", COLL_ITER, () => JSON.parse(encoded));
+    stringArrayResults.push({ name: "JSON", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  // Msgpack String Array
+  {
+    let encoded: Uint8Array = new Uint8Array(0);
+    const encResult = benchMultiple("Msgpack encode", COLL_ITER, () => { encoded = msgpackEncode(strArr); });
+    const decResult = benchMultiple("Msgpack decode", COLL_ITER, () => msgpackDecode(encoded));
+    stringArrayResults.push({ name: "Msgpack", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  // ============= Int32 Array =============
+  const intArrayResults: BenchResult[] = [];
+  
+  // XPB Int32 Array
+  {
+    const encoder = new Encoder(COLL_SIZE * 4 + 4);
+    const encodeXPB = () => {
+      encoder.reset();
+      encoder.writeInt32(intArr.length);
+      for (const v of intArr) {
+        encoder.writeInt32(v);
+      }
+      return encoder.finish();
+    };
+    
+    const encoded = encodeXPB();
+    const size = encoded.length;
+    
+    const decodeXPB = (data: Uint8Array) => {
+      const dec = new Decoder(data);
+      const count = dec.readInt32();
+      const arr: number[] = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(dec.readInt32());
+      }
+      return arr;
+    };
+    
+    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    intArrayResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
+  }
+  
+  // JSON Int32 Array
+  {
+    let encoded = "";
+    const encResult = benchMultiple("JSON encode", COLL_ITER, () => { encoded = JSON.stringify(intArr); });
+    const decResult = benchMultiple("JSON decode", COLL_ITER, () => JSON.parse(encoded));
+    intArrayResults.push({ name: "JSON", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  // Msgpack Int32 Array
+  {
+    let encoded: Uint8Array = new Uint8Array(0);
+    const encResult = benchMultiple("Msgpack encode", COLL_ITER, () => { encoded = msgpackEncode(intArr); });
+    const decResult = benchMultiple("Msgpack decode", COLL_ITER, () => msgpackDecode(encoded));
+    intArrayResults.push({ name: "Msgpack", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  // ============= String Map =============
+  const stringMapResults: BenchResult[] = [];
+  
+  // XPB String Map
+  {
+    const encoder = new Encoder(COLL_SIZE * 40);
+    const encodeXPB = () => {
+      encoder.reset();
+      encoder.writeInt32(strMap.size);
+      for (const [k, v] of strMap) {
+        encoder.writeString(k);
+        encoder.writeString(v);
+      }
+      return encoder.finish();
+    };
+    
+    const encoded = encodeXPB();
+    const size = encoded.length;
+    
+    const decodeXPB = (data: Uint8Array) => {
+      const dec = new Decoder(data);
+      const count = dec.readInt32();
+      const m = new Map<string, string>();
+      for (let i = 0; i < count; i++) {
+        const k = dec.readString();
+        const v = dec.readString();
+        m.set(k, v);
+      }
+      return m;
+    };
+    
+    const encResult = benchMultiple("XPB encode", COLL_ITER, encodeXPB);
+    const decResult = benchMultiple("XPB decode", COLL_ITER, () => decodeXPB(encoded));
+    stringMapResults.push({ name: "XPB V2", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: size });
+  }
+  
+  // JSON String Map (using object)
+  {
+    let encoded = "";
+    const encResult = benchMultiple("JSON encode", COLL_ITER, () => { encoded = JSON.stringify(strMapObj); });
+    const decResult = benchMultiple("JSON decode", COLL_ITER, () => JSON.parse(encoded));
+    stringMapResults.push({ name: "JSON", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  // Msgpack String Map
+  {
+    let encoded: Uint8Array = new Uint8Array(0);
+    const encResult = benchMultiple("Msgpack encode", COLL_ITER, () => { encoded = msgpackEncode(strMapObj); });
+    const decResult = benchMultiple("Msgpack decode", COLL_ITER, () => msgpackDecode(encoded));
+    stringMapResults.push({ name: "Msgpack", encodeNs: encResult.min, decodeNs: decResult.min, sizeBytes: encoded.length });
+  }
+  
+  return {
+    stringArray: stringArrayResults,
+    intArray: intArrayResults,
+    stringMap: stringMapResults
+  };
 }
 
 main().catch(console.error);
