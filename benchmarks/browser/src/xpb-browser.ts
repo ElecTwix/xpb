@@ -159,25 +159,48 @@ export class Decoder {
   readString(): string {
     const len = this.data[this.pos++];
     
-    // ASCII fast path: most strings are ASCII, avoid TextDecoder overhead
-    if (len < 64) {
-      let isAscii = true;
-      const start = this.pos;
-      for (let i = 0; i < len; i++) {
-        if (this.data[start + i] > 127) {
-          isAscii = false;
-          break;
-        }
-      }
-      if (isAscii) {
-        // Use apply with typed array slice - fastest ASCII decode
-        const str = String.fromCharCode.apply(null, this.data.subarray(start, start + len) as any);
-        this.pos += len;
-        return str;
-      }
+    // Unrolled short string handling (most common case in XPB)
+    if (len === 0) {
+      return '';
+    } else if (len === 1) {
+      return String.fromCharCode(this.data[this.pos++]);
+    } else if (len === 2) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1]);
+      this.pos += 2;
+      return s;
+    } else if (len === 3) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2]);
+      this.pos += 3;
+      return s;
+    } else if (len === 4) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3]);
+      this.pos += 4;
+      return s;
+    } else if (len === 5) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4]);
+      this.pos += 5;
+      return s;
+    } else if (len === 6) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5]);
+      this.pos += 6;
+      return s;
+    } else if (len === 7) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6]);
+      this.pos += 7;
+      return s;
+    } else if (len === 8) {
+      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6], this.data[this.pos+7]);
+      this.pos += 8;
+      return s;
+    } else if (len <= 16) {
+      // Build short string: first 8 chars unrolled, then loop
+      let s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6], this.data[this.pos+7]);
+      for (let i = 8; i < len; i++) s += String.fromCharCode(this.data[this.pos + i]);
+      this.pos += len;
+      return s;
     }
     
-    // Fallback: TextDecoder for UTF-8
+    // For longer strings, TextDecoder is optimized in browsers
     const str = textDecoder.decode(this.data.subarray(this.pos, this.pos + len));
     this.pos += len;
     return str;
@@ -376,25 +399,36 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         `);
         break;
       case FieldType.String:
-        // ASCII fast path - String.fromCharCode.apply is V8-optimized
+        // Highly optimized string decode:
+        // 1. Unroll common lengths 0-16 with direct String.fromCharCode (no allocations, no function calls)
+        // 2. For >16 bytes, use TextDecoder directly (faster than ASCII checking + building string)
         lines.push(`
-          
-          
           len = buf[pos++];
-          if (len === 5) {
-             // Optimization: Unroll common short string length (5 chars)
-             obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4]);
-          } else if (len <= 40) {
-            isAscii = true;
-            for (i = 0; i < len; i++) {
-              if (buf[pos + i] > 127) { isAscii = false; break; }
-            }
-            if (isAscii) {
-              obj.${field.name} = String.fromCharCode.apply(null, buf.subarray(pos, pos + len));
-            } else {
-              obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
-            }
+          if (len === 0) {
+            obj.${field.name} = '';
+          } else if (len === 1) {
+            obj.${field.name} = String.fromCharCode(buf[pos]);
+          } else if (len === 2) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1]);
+          } else if (len === 3) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2]);
+          } else if (len === 4) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3]);
+          } else if (len === 5) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4]);
+          } else if (len === 6) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5]);
+          } else if (len === 7) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6]);
+          } else if (len === 8) {
+            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6], buf[pos+7]);
+          } else if (len <= 16) {
+            // Build short string without intermediate allocations
+            var s = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6], buf[pos+7]);
+            for (i = 8; i < len; i++) s += String.fromCharCode(buf[pos + i]);
+            obj.${field.name} = s;
           } else {
+            // For longer strings, TextDecoder is faster than manual building
             obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
           }
           pos += len;

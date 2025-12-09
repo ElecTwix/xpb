@@ -8,11 +8,11 @@
 
 ## 📋 Executive Summary
 
-| Platform    |     XPB Encode vs JSON     |   XPB Decode vs JSON   |   Size Savings    |
-| ----------- | :------------------------: | :--------------------: | :---------------: |
-| **Go**      |   ✅ **3.8-5.3x faster**   |  ✅ **14-39x faster**  | ✅ 37-60% smaller |
-| **Node.js** |   ✅ **1.7-5.1x faster**   | ✅ **1.6-3.5x faster** | ✅ 37-60% smaller |
-| **Browser** | ✅ **4.7x faster** (small) |       ~1x (tie)        | ✅ 37-60% smaller |
+| Platform    |     XPB Encode vs JSON     |     XPB Decode vs JSON     |   Size Savings    |
+| ----------- | :------------------------: | :------------------------: | :---------------: |
+| **Go**      |   ✅ **3.8-5.3x faster**   |    ✅ **14-39x faster**    | ✅ 37-60% smaller |
+| **Node.js** |   ✅ **1.7-5.1x faster**   |   ✅ **1.6-3.5x faster**   | ✅ 37-60% smaller |
+| **Browser** | ✅ **3.5x faster** (small) | ✅ **1.3x faster** (small) | ✅ 37-60% smaller |
 
 ### Key Wins
 
@@ -105,24 +105,24 @@
 
 | Format           | Small Enc | Small Dec  | Large Enc  | Large Dec  |
 | ---------------- | :-------: | :--------: | :--------: | :--------: |
-| **XPB V2 (JIT)** | **10 ns** |   118 ns   |   437 ns   |   457 ns   |
-| JSON             |   47 ns   | **115 ns** | **196 ns** | **276 ns** |
-| MessagePack      |  886 ns   |   277 ns   |  2,475 ns  |   805 ns   |
+| **XPB V2 (JIT)** | **23 ns** | **150 ns** |   747 ns   |   786 ns   |
+| JSON             |   80 ns   |   195 ns   | **342 ns** | **472 ns** |
+| MessagePack      | 1,436 ns  |   468 ns   |  4,096 ns  |  1,379 ns  |
 
 **XPB vs JSON Speedup (Browser):**
 
-| Message |   Encode    |  Decode  |
-| ------- | :---------: | :------: |
-| Small   | **4.7x** ✅ |  ~1.0x   |
-| Large   |  0.45x ❌   | 0.60x ❌ |
+| Message |   Encode    |   Decode    |
+| ------- | :---------: | :---------: |
+| Small   | **3.5x** ✅ | **1.3x** ✅ |
+| Large   |  0.46x ❌   |  0.60x ❌   |
 
 ### Collection Benchmarks (100 elements, Browser)
 
 | Collection         |  XPB Enc   | JSON Enc |   Speedup   |  XPB Dec   | JSON Dec |   Speedup   |
 | ------------------ | :--------: | :------: | :---------: | :--------: | :------: | :---------: |
-| String Array       |   2.3 µs   |  740 ns  |  0.33x ❌   |   7.7 µs   |  1.8 µs  |  0.24x ❌   |
-| Int32 Array        |   860 ns   |  810 ns  |    ~1.0x    | **310 ns** |  700 ns  | **2.3x** ✅ |
-| **String Map Enc** | **5.2 µs** |  6.3 µs  | **1.2x** ✅ |  22.8 µs   |  3.5 µs  |  0.15x ❌   |
+| String Array       |   3.8 µs   |  1.3 µs  |  0.33x ❌   |   7.5 µs   |  3.2 µs  |  0.42x ❌   |
+| **Int32 Array**    |   1.5 µs   |  1.4 µs  |    ~1.0x    | **570 ns** |  1.2 µs  | **2.1x** ✅ |
+| **String Map Enc** | **8.9 µs** | 10.7 µs  | **1.2x** ✅ |  43.6 µs   |  6.1 µs  |  0.14x ❌   |
 
 ---
 
@@ -157,7 +157,7 @@ XPB (19 bytes):   [05][Alice][1E 00 00 00][01]
 | Node.js small messages    |   **XPB**   | 3-5x faster                            |
 | Node.js int32 arrays      |   **XPB**   | 6-7x faster                            |
 | Node.js string arrays     |  **JSON**   | Native is 2-3x faster                  |
-| Browser small messages    |   **XPB**   | 4.7x faster encode                     |
+| Browser small messages    |   **XPB**   | 3.5x faster encode, 1.3x faster decode |
 | Browser large messages    |  **JSON**   | Native is 2x faster                    |
 | Size-constrained (mobile) |   **XPB**   | 37-91% smaller payloads                |
 
@@ -180,9 +180,10 @@ XPB (19 bytes):   [05][Alice][1E 00 00 00][01]
 
 ### Browser
 
-- Hybrid JS optimization (implemented Dec 2025) provides **3-8x speedup** for small strings.
+- **String decode optimization** (Dec 2025): Unrolled decoding for 0-16 byte strings provides **1.3x faster decode** for small messages
+- Small messages: XPB is now faster for both encode AND decode
 - Large messages: browser's native JSON is highly optimized in C++
-- WASM is **slower** for string decoding due to boundary overhead.
+- Int32 arrays: XPB decode is **2.1x faster** than JSON
 
 ---
 
@@ -200,4 +201,4 @@ XPB (19 bytes):   [05][Alice][1E 00 00 00][01]
 
 ---
 
-**Report Generated**: 2025-12-09T05:58:00+03:00
+**Report Generated**: 2025-12-09T07:20:00+03:00

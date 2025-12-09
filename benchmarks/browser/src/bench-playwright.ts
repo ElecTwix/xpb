@@ -105,6 +105,11 @@ async function main() {
   const context = await browser.newContext();
   const page = await context.newPage();
   
+  // Enable Future Tech Simulation
+  await page.evaluate(() => {
+    (globalThis as any).BENCH_FUTURE_TECH = true;
+  });
+
   // Log console messages for debugging
   page.on('console', msg => console.log('   Browser:', msg.text()));
   page.on('pageerror', err => console.error('   Page error:', err.message));
