@@ -118,6 +118,37 @@ export class Encoder {
 
   /** Write string with compact length prefix */
   writeString(v: string): void {
+    const len = v.length;
+    // Optimization: For short strings (likely ASCII), try manual encoding
+    // This avoids the heavy overhead of TextEncoder.encode()
+    if (len < 64) {
+      // Optimistically assume 1 byte per char + 1 byte length
+      this.ensureCapacity(len + 1);
+      
+      let isAscii = true;
+      const startPos = this.pos;
+      
+      // Write length (assuming < 128 for now, but space is reserved)
+      // If we fail ASCII check, we rewind.
+      this.buf[this.pos++] = len;
+
+      for (let i = 0; i < len; i++) {
+        const c = v.charCodeAt(i);
+        if (c > 127) {
+          isAscii = false;
+          break;
+        }
+        this.buf[this.pos++] = c;
+      }
+
+      if (isAscii) {
+        return;
+      }
+      
+      // Rewind and fallback to TextEncoder
+      this.pos = startPos;
+    }
+
     const bytes = textEncoder.encode(v);
     this.writeCompactLength(bytes.length);
     this.ensureCapacity(bytes.length);
@@ -252,6 +283,27 @@ export class Decoder {
     if (this.pos + length > this.data.length) {
       throw new Error('xpb: unexpected EOF reading string');
     }
+    
+    // Optimization: For short strings, manual decode is faster than TextDecoder
+    if (length < 20) {
+      let result = "";
+      let isAscii = true;
+      // Peek to see if we can use fast path
+      for (let i = 0; i < length; i++) {
+        const b = this.data[this.pos + i];
+        if (b > 127) {
+          isAscii = false;
+          break;
+        }
+        result += String.fromCharCode(b);
+      }
+      
+      if (isAscii) {
+        this.pos += length;
+        return result;
+      }
+    }
+
     const bytes = this.data.subarray(this.pos, this.pos + length);
     this.pos += length;
     return textDecoder.decode(bytes);

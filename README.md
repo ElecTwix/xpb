@@ -12,39 +12,34 @@ A speed-optimized binary serialization format that beats JSON and Protobuf.
 
 ## Features
 
-- **Faster than JSON** - 3-7x faster encode, 1.4-38x faster decode
-- **Smaller than JSON** - 2.5x smaller payloads
+- **Blazing Fast** - Up to **5x faster encode** and **39x faster decode** than JSON
+- **Tiny Payloads** - Up to **90% smaller** than JSON
+- **Zero-Copy Decode** - (Go) Direct memory access for ultimate performance
 - **Multi-platform** - Go, Node.js, and Browser support
-- **JIT Compilation** - Runtime-generated optimized encoders/decoders
+- **JIT Compilation** - Runtime-generated optimized encoders/decoders for JS
 - **V2 Wire Format** - Struct mode, fixed-width integers, compact lengths
 
-## Performance (Best of 5 Rounds)
+## Performance (2025 Benchmarks)
 
-### Node.js
+Benchmarks run on Linux (Intel Core i9-13900H).
 
-| Format     |    Encode |     Decode |     Size |
-| :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **21 ns** | **109 ns** | **19 B** |
-| JSON       |    149 ns |     371 ns |     47 B |
+### 🏆 Executive Summary
 
-**XPB is 7x faster encode, 3.4x faster decode vs JSON**
+| Platform    |     XPB Encode vs JSON     |   XPB Decode vs JSON   |   Size Savings    |
+| ----------- | :------------------------: | :--------------------: | :---------------: |
+| **Go**      |   ✅ **3.8-5.3x faster**   |  ✅ **14-39x faster**  | ✅ 37-90% smaller |
+| **Node.js** |   ✅ **1.7-5.1x faster**   | ✅ **1.6-3.5x faster** | ✅ 37-90% smaller |
+| **Browser** | ✅ **4.7x faster** (small) |       ~1x (tie)        | ✅ 37-90% smaller |
 
-### Browser (Chromium)
+### 🚀 Small Message Benchmarks
 
-| Format     |    Encode |     Decode |     Size |
-| :--------- | --------: | ---------: | -------: |
-| **XPB V2** | **22 ns** | **138 ns** | **19 B** |
-| JSON       |     79 ns |     194 ns |     47 B |
+| Format     | Go Encode | Go Decode | Node Encode | Node Decode |   Size   |
+| :--------- | :-------: | :-------: | :---------: | :---------: | :------: |
+| **XPB V2** | **40 ns** | **23 ns** |  **16 ns**  |  **61 ns**  | **19 B** |
+| Protobuf   |   98 ns   |  164 ns   |   162 ns    |    86 ns    |   19 B   |
+| JSON       |  153 ns   |  901 ns   |    83 ns    |   211 ns    |   47 B   |
 
-**XPB is 3.6x faster encode, 1.4x faster decode vs JSON**
-
-### Go
-
-| Format     |    Encode |    Decode |     Size |
-| :--------- | --------: | --------: | -------: |
-| **XPB V2** | **53 ns** | **40 ns** | **19 B** |
-| Protobuf   |    169 ns |    247 ns |     19 B |
-| JSON       |    259 ns |  1,501 ns |     47 B |
+> **Note**: For massive string arrays in JS, native JSON is currently faster. XPB excels at structured data and integers.
 
 ## Quick Start
 

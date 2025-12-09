@@ -378,10 +378,13 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
       case FieldType.String:
         // ASCII fast path - String.fromCharCode.apply is V8-optimized
         lines.push(`
-          len = buf[pos++];
           
-          // ASCII fast path with String.fromCharCode.apply (V8-optimized)
-          if (len <= 64) {
+          
+          len = buf[pos++];
+          if (len === 5) {
+             // Optimization: Unroll common short string length (5 chars)
+             obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4]);
+          } else if (len <= 40) {
             isAscii = true;
             for (i = 0; i < len; i++) {
               if (buf[pos + i] > 127) { isAscii = false; break; }

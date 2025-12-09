@@ -307,7 +307,21 @@ function generateFieldRead(field: FieldDef): string {
         if (isNode) {
           val = buf.toString('utf8', pos, pos + len);
         } else {
-          val = textDecoder.decode(buf.subarray(pos, pos + len));
+          // Browser optimization: Manual decode for short strings (< 20 chars)
+          if (len < 20) {
+            val = "";
+            var isAscii = true;
+            for (var i = 0; i < len; i++) {
+              var b = buf[pos + i];
+              if (b > 127) { isAscii = false; break; }
+              val += String.fromCharCode(b);
+            }
+            if (!isAscii) {
+              val = textDecoder.decode(buf.subarray(pos, pos + len));
+            }
+          } else {
+            val = textDecoder.decode(buf.subarray(pos, pos + len));
+          }
         }
         pos += len;
       `;

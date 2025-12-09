@@ -180,9 +180,9 @@ XPB (19 bytes):   [05][Alice][1E 00 00 00][01]
 
 ### Browser
 
-- Small message encoding is 4.7x faster than JSON
+- Hybrid JS optimization (implemented Dec 2025) provides **3-8x speedup** for small strings.
 - Large messages: browser's native JSON is highly optimized in C++
-- Consider WASM for string-heavy workloads in the future
+- WASM is **slower** for string decoding due to boundary overhead.
 
 ---
 
