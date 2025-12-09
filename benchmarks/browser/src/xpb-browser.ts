@@ -10,6 +10,59 @@ const CompactLengthMarker = 0xFF;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+// ============= BUFFER POOL =============
+
+/**
+ * BufferPool for reusing ArrayBuffers to reduce GC pressure.
+ * Maintains a pool of pre-allocated buffers for encoding.
+ */
+export class BufferPool {
+  private pool: Uint8Array[] = [];
+  private size: number;
+  
+  constructor(poolSize = 8, bufferSize = 1024) {
+    this.size = bufferSize;
+    // Pre-allocate buffers
+    for (let i = 0; i < poolSize; i++) {
+      this.pool.push(new Uint8Array(bufferSize));
+    }
+  }
+  
+  /**
+   * Get a buffer from the pool (or create new if empty)
+   */
+  acquire(): Uint8Array {
+    return this.pool.pop() || new Uint8Array(this.size);
+  }
+  
+  /**
+   * Return a buffer to the pool
+   */
+  release(buf: Uint8Array): void {
+    if (buf.length === this.size && this.pool.length < 16) {
+      this.pool.push(buf);
+    }
+  }
+  
+  /**
+   * Encode with pooled buffer - returns the encoded data (copy)
+   */
+  encode<T>(encodeFn: (buf: Uint8Array) => number, copyResult = true): Uint8Array {
+    const buf = this.acquire();
+    const len = encodeFn(buf);
+    if (copyResult) {
+      const result = new Uint8Array(len);
+      result.set(buf.subarray(0, len));
+      this.release(buf);
+      return result;
+    }
+    return buf.subarray(0, len);
+  }
+}
+
+// Global buffer pool
+export const bufferPool = new BufferPool();
+
 /**
  * Browser-optimized Encoder
  */
@@ -281,6 +334,8 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
   Encoder,
   Decoder,
   SlabAllocator,
+  BufferPool,
+  bufferPool,
   compileEncoder,
   compileDecoder,
   FieldType

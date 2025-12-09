@@ -107,7 +107,7 @@
         ],
       };
 
-      // Benchmark function
+      // Benchmark function - runs multiple rounds and returns best result
       function bench(name, iterations, fn) {
         // Warmup
         for (let i = 0; i < 1000; i++) fn();
@@ -119,8 +119,23 @@
         return ((end - start) * 1_000_000) / iterations;
       }
 
+      // Run benchmark multiple times and get min/avg
+      function benchMultiple(name, iterations, fn, rounds = 5) {
+        const results = [];
+        for (let r = 0; r < rounds; r++) {
+          results.push(bench(name, iterations, fn));
+        }
+        results.sort((a, b) => a - b);
+        return {
+          min: results[0],
+          avg: results.reduce((a, b) => a + b, 0) / results.length,
+          max: results[results.length - 1]
+        };
+      }
+
       async function runBenchmarks() {
         const iterations = 100000;
+        const rounds = 5;
         const results = [];
 
         // XPB JIT Benchmark
@@ -132,31 +147,33 @@
         jitEncode(slab, smallUser);
         const encoded = new Uint8Array(slab.buf.subarray(0, slab.pos));
 
-        const xpbEncodeNs = bench("XPB encode", iterations, () => {
+        const xpbEncode = benchMultiple("XPB encode", iterations, () => {
           slab.pos = 0;
           jitEncode(slab, smallUser);
-        });
+        }, rounds);
 
-        const xpbDecodeNs = bench("XPB decode", iterations, () => {
+        const xpbDecode = benchMultiple("XPB decode", iterations, () => {
           jitDecode(encoded, encoded.length);
-        });
+        }, rounds);
 
         results.push({
           name: "XPB V2 (JIT)",
-          encodeNs: xpbEncodeNs,
-          decodeNs: xpbDecodeNs,
+          encodeNs: xpbEncode.min,
+          encodeAvg: xpbEncode.avg,
+          decodeNs: xpbDecode.min,
+          decodeAvg: xpbDecode.avg,
           sizeBytes: encoded.length,
         });
 
         // XPB Manual Benchmark
         const manualEncoder = new Encoder(64);
-        const manualEncodeNs = bench("XPB Manual encode", iterations, () => {
+        const manualEncode = benchMultiple("XPB Manual encode", iterations, () => {
           manualEncoder.reset();
           manualEncoder.writeString(smallUser.name);
           manualEncoder.writeInt32(smallUser.age);
           manualEncoder.writeBool(smallUser.active);
           manualEncoder.finish();
-        });
+        }, rounds);
 
         manualEncoder.reset();
         manualEncoder.writeString(smallUser.name);
@@ -164,34 +181,38 @@
         manualEncoder.writeBool(smallUser.active);
         const manualEncoded = manualEncoder.finish();
 
-        const manualDecodeNs = bench("XPB Manual decode", iterations, () => {
+        const manualDecode = benchMultiple("XPB Manual decode", iterations, () => {
           const dec = new Decoder(manualEncoded);
           dec.readString();
           dec.readInt32();
           dec.readBool();
-        });
+        }, rounds);
 
         results.push({
           name: "XPB V2 (Manual)",
-          encodeNs: manualEncodeNs,
-          decodeNs: manualDecodeNs,
+          encodeNs: manualEncode.min,
+          encodeAvg: manualEncode.avg,
+          decodeNs: manualDecode.min,
+          decodeAvg: manualDecode.avg,
           sizeBytes: manualEncoded.length,
         });
 
         // JSON Benchmark
         let jsonEncoded = "";
-        const jsonEncodeNs = bench("JSON encode", iterations, () => {
+        const jsonEncode = benchMultiple("JSON encode", iterations, () => {
           jsonEncoded = JSON.stringify(smallUser);
-        });
+        }, rounds);
 
-        const jsonDecodeNs = bench("JSON decode", iterations, () => {
+        const jsonDecode = benchMultiple("JSON decode", iterations, () => {
           JSON.parse(jsonEncoded);
-        });
+        }, rounds);
 
         results.push({
           name: "JSON",
-          encodeNs: jsonEncodeNs,
-          decodeNs: jsonDecodeNs,
+          encodeNs: jsonEncode.min,
+          encodeAvg: jsonEncode.avg,
+          decodeNs: jsonDecode.min,
+          decodeAvg: jsonDecode.avg,
           sizeBytes: jsonEncoded.length,
         });
 
