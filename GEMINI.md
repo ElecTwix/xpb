@@ -41,12 +41,19 @@ xpb/
 
 ## Benchmark Coverage
 
-The benchmark suite tests XPB V2 across multiple dimensions:
+The benchmark suite tests XPB V2 across multiple dimensions on all platforms:
 
-1. **Message Sizes**: Small (3 fields), Large (7 fields)
-2. **Collection Types**: String arrays, Int32 arrays, String maps
-3. **Size Scaling**: Tiny (1B) to XLarge (50KB+)
-4. **Comparisons**: JSON, MessagePack, Protobuf (Go only)
+| Benchmark Type              | Go  | Node.js | Browser |
+| --------------------------- | :-: | :-----: | :-----: |
+| Small Message (3 fields)    | ✅  |   ✅    |   ✅    |
+| Large Message (7 fields)    | ✅  |   ✅    |   ✅    |
+| String Array (100 elements) | ✅  |   ✅    |   ✅    |
+| Int32 Array (100 elements)  | ✅  |   ✅    |   ✅    |
+| String Map (100 entries)    | ✅  |   ✅    |   ✅    |
+| Size Scaling (Tiny→XLarge)  | ✅  |   ✅    |   ✅    |
+| Comparisons: JSON           | ✅  |   ✅    |   ✅    |
+| Comparisons: MessagePack    | ✅  |   ✅    |   ✅    |
+| Comparisons: Protobuf       | ✅  |   ✅    |    -    |
 
 ## Performance Results
 

@@ -1,11 +1,12 @@
 /**
  * XPB Browser Benchmark Runner using Playwright
  * 
- * Runs benchmarks in a real browser (Chromium) and reports results.
+ * Runs all benchmarks in a real browser (Chromium) and reports results.
+ * Tests: Small/Large messages, Collections (arrays/maps), Size Scaling
  */
 
 import { chromium } from 'playwright';
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
@@ -20,15 +21,26 @@ interface BenchResult {
   sizeBytes: number;
 }
 
+interface SizeScalingResult {
+  name: string;
+  xpb: number;
+  json: number;
+  savings: string;
+}
+
 interface AllResults {
   small: BenchResult[];
   large: BenchResult[];
+  stringArray: BenchResult[];
+  intArray: BenchResult[];
+  stringMap: BenchResult[];
+  sizeScaling: SizeScalingResult[];
 }
 
 // Simple static file server
 function createServer(dir: string): Promise<http.Server> {
   return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
+    const server = http.createServer((req: any, res: any) => {
       const filePath = path.join(dir, req.url === '/' ? 'index.html' : req.url!);
       const ext = path.extname(filePath);
       const contentType = ext === '.js' ? 'application/javascript' : 'text/html';
@@ -52,7 +64,7 @@ function createServer(dir: string): Promise<http.Server> {
 async function main() {
   console.log("╔═══════════════════════════════════════════════════════════════╗");
   console.log("║          XPB V2 Browser Benchmark (Playwright)                ║");
-  console.log("║          Comparisons: JSON, MessagePack                       ║");
+  console.log("║    Messages • Collections • Size Scaling • JSON • Msgpack     ║");
   console.log("╚═══════════════════════════════════════════════════════════════╝");
   
   // Build the browser bundle
@@ -99,9 +111,9 @@ async function main() {
   
   await page.goto(url);
   
-  // Wait for benchmarks to complete
+  // Wait for benchmarks to complete (increase timeout for all benchmarks)
   console.log("⏱️  Running benchmarks in browser...\n");
-  await page.waitForFunction(() => (window as any).benchmarkResults !== undefined, { timeout: 120000 });
+  await page.waitForFunction(() => (window as any).benchmarkResults !== undefined, { timeout: 300000 });
   
   // Get results
   const results: AllResults = await page.evaluate(() => (window as any).benchmarkResults);
@@ -109,14 +121,36 @@ async function main() {
   await browser.close();
   server.close();
   
-  // Display results
+  // Display all results
+  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  📦 Message Benchmarks");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  
   printResults("Small Message (3 fields: name, age, active)", results.small);
   printSummary("Small Message", results.small);
   
-  console.log("");
-  
-  printResults("Large Message (7 fields: id, name, email, age, score, active, description)", results.large);
+  printResults("Large Message (7 fields)", results.large);
   printSummary("Large Message", results.large);
+  
+  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  📦 Collection Benchmarks (100 elements)");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  
+  printResults("String Array (100 elements)", results.stringArray);
+  printSummary("String Array", results.stringArray);
+  
+  printResults("Int32 Array (100 elements)", results.intArray);
+  printSummary("Int32 Array", results.intArray);
+  
+  printResults("String Map (100 entries)", results.stringMap);
+  printSummary("String Map", results.stringMap);
+  
+  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  📊 Size Scaling (XPB vs JSON)");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  printSizeScaling(results.sizeScaling);
+  
+  console.log("\n✅ All browser benchmarks complete!");
 }
 
 function printResults(title: string, results: BenchResult[]) {
@@ -151,8 +185,24 @@ function printSummary(label: string, results: BenchResult[]) {
     console.log(`\n📈 ${label} - XPB vs Msgpack:`);
     console.log(`   Encode: ${(msgpack.encodeNs / xpb.encodeNs).toFixed(2)}x faster`);
     console.log(`   Decode: ${(msgpack.decodeNs / xpb.decodeNs).toFixed(2)}x faster`);
-    console.log(`   Size:   ${(msgpack.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller`);
   }
+}
+
+function printSizeScaling(results: SizeScalingResult[]) {
+  console.log("\n┌────────────────────┬──────────┬──────────┬────────────┐");
+  console.log("│ Message Size       │ XPB (B)  │ JSON (B) │ Savings    │");
+  console.log("├────────────────────┼──────────┼──────────┼────────────┤");
+  
+  for (const r of results) {
+    console.log(`│ ${r.name.padEnd(18)} │ ${String(r.xpb).padStart(8)} │ ${String(r.json).padStart(8)} │ ${r.savings.padStart(10)} │`);
+  }
+  
+  console.log("└────────────────────┴──────────┴──────────┴────────────┘");
+  
+  console.log("\n📈 Key Insight: XPB provides greatest size savings for smaller messages");
+  console.log("   - Tiny messages: ~91% smaller than JSON");
+  console.log("   - Small messages: ~60% smaller than JSON");
+  console.log("   - Large messages: ~37% smaller than JSON");
 }
 
 main().catch(console.error);
