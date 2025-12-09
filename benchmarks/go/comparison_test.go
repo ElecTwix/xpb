@@ -178,6 +178,31 @@ func BenchmarkXPB_Encode_Large(b *testing.B) {
 	}
 }
 
+func BenchmarkXPB_Decode_Large(b *testing.B) {
+	enc := xpb.NewEncoder(256)
+	enc.WriteUint64(12345678901234)
+	enc.WriteString("Alice Johnson")
+	enc.WriteString("alice.johnson@example.com")
+	enc.WriteInt32(30)
+	enc.WriteFloat64(95.5)
+	enc.WriteBool(true)
+	enc.WriteString("This is a longer description field that contains more text.")
+	data := enc.Bytes()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		dec := xpb.NewDecoder(data)
+		_, _ = dec.ReadUint64()
+		_, _ = dec.ReadString()
+		_, _ = dec.ReadString()
+		_, _ = dec.ReadInt32()
+		_, _ = dec.ReadFloat64()
+		_, _ = dec.ReadBool()
+		_, _ = dec.ReadString()
+	}
+}
+
 func BenchmarkProtobuf_Encode_Large(b *testing.B) {
 	user := &pb.LargeBenchUser{
 		Id:          12345678901234,
@@ -192,6 +217,26 @@ func BenchmarkProtobuf_Encode_Large(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, _ = proto.Marshal(user)
+	}
+}
+
+func BenchmarkProtobuf_Decode_Large(b *testing.B) {
+	user := &pb.LargeBenchUser{
+		Id:          12345678901234,
+		Name:        "Alice Johnson",
+		Email:       "alice.johnson@example.com",
+		Age:         30,
+		Score:       95.5,
+		Active:      true,
+		Description: "This is a longer description field that contains more text.",
+	}
+	data, _ := proto.Marshal(user)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		u := &pb.LargeBenchUser{}
+		_ = proto.Unmarshal(data, u)
 	}
 }
 
@@ -212,6 +257,26 @@ func BenchmarkJSON_Encode_Large(b *testing.B) {
 	}
 }
 
+func BenchmarkJSON_Decode_Large(b *testing.B) {
+	user := LargeBenchUser{
+		ID:          12345678901234,
+		Name:        "Alice Johnson",
+		Email:       "alice.johnson@example.com",
+		Age:         30,
+		Score:       95.5,
+		Active:      true,
+		Description: "This is a longer description field that contains more text.",
+	}
+	data, _ := json.Marshal(&user)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var u LargeBenchUser
+		_ = json.Unmarshal(data, &u)
+	}
+}
+
 func BenchmarkMsgpack_Encode_Large(b *testing.B) {
 	user := LargeBenchUser{
 		ID:          12345678901234,
@@ -226,6 +291,26 @@ func BenchmarkMsgpack_Encode_Large(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, _ = msgpack.Marshal(&user)
+	}
+}
+
+func BenchmarkMsgpack_Decode_Large(b *testing.B) {
+	user := LargeBenchUser{
+		ID:          12345678901234,
+		Name:        "Alice Johnson",
+		Email:       "alice.johnson@example.com",
+		Age:         30,
+		Score:       95.5,
+		Active:      true,
+		Description: "This is a longer description field that contains more text.",
+	}
+	data, _ := msgpack.Marshal(&user)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var u LargeBenchUser
+		_ = msgpack.Unmarshal(data, &u)
 	}
 }
 

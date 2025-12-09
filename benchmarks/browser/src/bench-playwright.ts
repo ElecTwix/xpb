@@ -20,6 +20,11 @@ interface BenchResult {
   sizeBytes: number;
 }
 
+interface AllResults {
+  small: BenchResult[];
+  large: BenchResult[];
+}
+
 // Simple static file server
 function createServer(dir: string): Promise<http.Server> {
   return new Promise((resolve) => {
@@ -47,6 +52,7 @@ function createServer(dir: string): Promise<http.Server> {
 async function main() {
   console.log("╔═══════════════════════════════════════════════════════════════╗");
   console.log("║          XPB V2 Browser Benchmark (Playwright)                ║");
+  console.log("║          Comparisons: JSON, MessagePack                       ║");
   console.log("╚═══════════════════════════════════════════════════════════════╝");
   
   // Build the browser bundle
@@ -58,6 +64,18 @@ async function main() {
     });
   } catch (e) {
     console.error("Build failed:", e);
+    process.exit(1);
+  }
+
+  // Build MessagePack bundle
+  console.log("\n📦 Building MessagePack bundle...");
+  try {
+    execSync('npx esbuild node_modules/@msgpack/msgpack/dist.esm/index.mjs --bundle --outfile=dist/msgpack.js --format=esm --target=es2020', {
+      cwd: path.join(__dirname, '..'),
+      stdio: 'inherit'
+    });
+  } catch (e) {
+    console.error("MessagePack build failed:", e);
     process.exit(1);
   }
   
@@ -83,20 +101,26 @@ async function main() {
   
   // Wait for benchmarks to complete
   console.log("⏱️  Running benchmarks in browser...\n");
-  await page.waitForFunction(() => (window as any).benchmarkResults !== undefined, { timeout: 60000 });
+  await page.waitForFunction(() => (window as any).benchmarkResults !== undefined, { timeout: 120000 });
   
   // Get results
-  const results: BenchResult[] = await page.evaluate(() => (window as any).benchmarkResults);
+  const results: AllResults = await page.evaluate(() => (window as any).benchmarkResults);
   
   await browser.close();
   server.close();
   
   // Display results
-  printResults(results);
+  printResults("Small Message (3 fields: name, age, active)", results.small);
+  printSummary("Small Message", results.small);
+  
+  console.log("");
+  
+  printResults("Large Message (7 fields: id, name, email, age, score, active, description)", results.large);
+  printSummary("Large Message", results.large);
 }
 
-function printResults(results: BenchResult[]) {
-  console.log("Browser Results:");
+function printResults(title: string, results: BenchResult[]) {
+  console.log(`\n${title}:`);
   console.log("┌─────────────────┬────────────┬────────────┬────────────┐");
   console.log("│ Format          │ Encode     │ Decode     │ Size       │");
   console.log("├─────────────────┼────────────┼────────────┼────────────┤");
@@ -109,15 +133,25 @@ function printResults(results: BenchResult[]) {
   }
   
   console.log("└─────────────────┴────────────┴────────────┴────────────┘");
-  
-  // Summary
-  const xpb = results.find(r => r.name.includes("JIT"));
+}
+
+function printSummary(label: string, results: BenchResult[]) {
+  const xpb = results.find(r => r.name.includes("XPB"));
   const json = results.find(r => r.name === "JSON");
+  const msgpack = results.find(r => r.name === "Msgpack");
+  
   if (xpb && json) {
-    console.log(`\n📈 XPB vs JSON:`);
+    console.log(`\n📈 ${label} - XPB vs JSON:`);
     console.log(`   Encode: ${(json.encodeNs / xpb.encodeNs).toFixed(2)}x faster`);
     console.log(`   Decode: ${(json.decodeNs / xpb.decodeNs).toFixed(2)}x faster`);
     console.log(`   Size:   ${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller`);
+  }
+  
+  if (xpb && msgpack) {
+    console.log(`\n📈 ${label} - XPB vs Msgpack:`);
+    console.log(`   Encode: ${(msgpack.encodeNs / xpb.encodeNs).toFixed(2)}x faster`);
+    console.log(`   Decode: ${(msgpack.decodeNs / xpb.decodeNs).toFixed(2)}x faster`);
+    console.log(`   Size:   ${(msgpack.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller`);
   }
 }
 

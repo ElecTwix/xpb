@@ -4,9 +4,11 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/xpb-browser.ts --bundle --outfile=dist/xpb-browser.js --format=esm --target=es2020",
-    "bench": "npm run build && npx tsx src/bench-playwright.ts"
+    "build:msgpack": "esbuild node_modules/@msgpack/msgpack/dist.esm/index.mjs --bundle --outfile=dist/msgpack.js --format=esm --target=es2020",
+    "bench": "npm run build && npm run build:msgpack && npx tsx src/bench-playwright.ts"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "^3.0.0",
     "@types/node": "^24.10.2",
     "esbuild": "^0.20.0",
     "playwright": "^1.40.0",

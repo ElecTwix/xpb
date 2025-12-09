@@ -187,7 +187,7 @@ export class Decoder {
 // ============= JIT Compiler (Browser-optimized) =============
 
 export enum FieldType {
-  Bool, Int32, String
+  Bool, Int32, Int64, Uint32, Uint64, Float32, Float64, String
 }
 
 export interface FieldDef {
@@ -220,7 +220,7 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
     var buf = slab.buf;
     var view = slab.view;
     var pos = slab.pos;
-    var val, str, strLen, i, c, isAscii, lenPos;
+    var val, str, strLen, i, c, isAscii, lenPos, lo, hi;
   `];
 
   for (const field of schema.fields) {
@@ -231,12 +231,48 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
         lines.push(`buf[pos++] = ${access} ? 1 : 0;`);
         break;
       case FieldType.Int32:
+      case FieldType.Uint32:
         lines.push(`
           val = ${access};
           buf[pos++] = val;
           buf[pos++] = val >> 8;
           buf[pos++] = val >> 16;
           buf[pos++] = val >> 24;
+        `);
+        break;
+      case FieldType.Int64:
+      case FieldType.Uint64:
+        // For browser, handle both BigInt and Number (for large numbers)
+        lines.push(`
+          val = ${access};
+          if (typeof val === 'bigint') {
+            lo = Number(val & 0xffffffffn);
+            hi = Number(val >> 32n);
+          } else {
+            // Convert number to lo/hi parts
+            lo = val >>> 0;
+            hi = Math.floor(val / 0x100000000) >>> 0;
+          }
+          buf[pos++] = lo;
+          buf[pos++] = lo >> 8;
+          buf[pos++] = lo >> 16;
+          buf[pos++] = lo >> 24;
+          buf[pos++] = hi;
+          buf[pos++] = hi >> 8;
+          buf[pos++] = hi >> 16;
+          buf[pos++] = hi >> 24;
+        `);
+        break;
+      case FieldType.Float32:
+        lines.push(`
+          view.setFloat32(pos, ${access}, true);
+          pos += 4;
+        `);
+        break;
+      case FieldType.Float64:
+        lines.push(`
+          view.setFloat64(pos, ${access}, true);
+          pos += 8;
         `);
         break;
       case FieldType.String:
@@ -282,7 +318,12 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
   const propInits = schema.fields.map(f => {
     switch (f.type) {
       case FieldType.Bool: return `${f.name}: false`;
-      case FieldType.Int32: return `${f.name}: 0`;
+      case FieldType.Int32:
+      case FieldType.Uint32:
+      case FieldType.Float32:
+      case FieldType.Float64: return `${f.name}: 0`;
+      case FieldType.Int64:
+      case FieldType.Uint64: return `${f.name}: 0n`;
       case FieldType.String: return `${f.name}: ''`;
       default: return `${f.name}: null`;
     }
@@ -291,7 +332,8 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
   const lines: string[] = [`
     var pos = 0;
     var obj = { ${propInits} };
-    var len, isAscii, i;
+    var len, isAscii, i, lo, hi, view;
+    view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   `];
 
   for (const field of schema.fields) {
@@ -304,6 +346,33 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         lines.push(`
           obj.${field.name} = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           pos += 4;
+        `);
+        break;
+      case FieldType.Uint32:
+        lines.push(`
+          obj.${field.name} = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          pos += 4;
+        `);
+        break;
+      case FieldType.Int64:
+      case FieldType.Uint64:
+        lines.push(`
+          lo = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+          hi = buf[pos+4] | (buf[pos+5] << 8) | (buf[pos+6] << 16) | (buf[pos+7] << 24);
+          obj.${field.name} = BigInt(lo >>> 0) | (BigInt(hi >>> 0) << 32n);
+          pos += 8;
+        `);
+        break;
+      case FieldType.Float32:
+        lines.push(`
+          obj.${field.name} = view.getFloat32(pos, true);
+          pos += 4;
+        `);
+        break;
+      case FieldType.Float64:
+        lines.push(`
+          obj.${field.name} = view.getFloat64(pos, true);
+          pos += 8;
         `);
         break;
       case FieldType.String:

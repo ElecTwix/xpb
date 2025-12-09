@@ -24,8 +24,12 @@
         -webkit-text-fill-color: transparent;
         margin-bottom: 2rem;
       }
+      h2 {
+        color: #00d2ff;
+        margin-top: 2rem;
+      }
       .container {
-        max-width: 800px;
+        max-width: 900px;
         margin: 0 auto;
       }
       table {
@@ -75,6 +79,15 @@
           transform: rotate(360deg);
         }
       }
+      .summary {
+        background: rgba(0, 210, 255, 0.1);
+        border-radius: 12px;
+        padding: 1rem 1.5rem;
+        margin: 1rem 0;
+      }
+      .summary p {
+        margin: 0.5rem 0;
+      }
     </style>
   </head>
   <body>
@@ -85,8 +98,10 @@
     </div>
 
     <script type="module">
-      // Import the bundled XPB browser runtime (built to same directory)
+      // Import the bundled XPB browser runtime
       import './dist/xpb-browser.js';
+      // Import MessagePack
+      import { encode as msgpackEncode, decode as msgpackDecode } from './dist/msgpack.js';
 
       const {
         Encoder,
@@ -97,9 +112,11 @@
         FieldType,
       } = window.XPB;
 
-      // Test data
+      // ============= Test Data =============
+      
+      // Small message (3 fields) - matches Go/Node.js benchmarks
       const smallUser = { name: "Alice Johnson", age: 30, active: true };
-      const userSchema = {
+      const smallUserSchema = {
         fields: [
           { tag: 1, type: FieldType.String, name: "name" },
           { tag: 2, type: FieldType.Int32, name: "age" },
@@ -107,7 +124,41 @@
         ],
       };
 
-      // Benchmark function - runs multiple rounds and returns best result
+      // Large message (7 fields) - matches Go/Node.js LargeBenchUser
+      const largeUser = {
+        id: 12345678901234n,  // BigInt for uint64
+        name: "Alice Johnson",
+        email: "alice.johnson@example.com",
+        age: 30,
+        score: 95.5,
+        active: true,
+        description: "This is a longer description field that contains more text."
+      };
+      const largeUserSchema = {
+        fields: [
+          { tag: 1, type: FieldType.Uint64, name: "id" },
+          { tag: 2, type: FieldType.String, name: "name" },
+          { tag: 3, type: FieldType.String, name: "email" },
+          { tag: 4, type: FieldType.Int32, name: "age" },
+          { tag: 5, type: FieldType.Float64, name: "score" },
+          { tag: 6, type: FieldType.Bool, name: "active" },
+          { tag: 7, type: FieldType.String, name: "description" },
+        ],
+      };
+
+      // For JSON/Msgpack, we need a version with Number instead of BigInt
+      const largeUserJSON = {
+        id: 12345678901234,
+        name: "Alice Johnson",
+        email: "alice.johnson@example.com",
+        age: 30,
+        score: 95.5,
+        active: true,
+        description: "This is a longer description field that contains more text."
+      };
+
+      // ============= Benchmark Utilities =============
+      
       function bench(name, iterations, fn) {
         // Warmup
         for (let i = 0; i < 1000; i++) fn();
@@ -119,7 +170,6 @@
         return ((end - start) * 1_000_000) / iterations;
       }
 
-      // Run benchmark multiple times and get min/avg
       function benchMultiple(name, iterations, fn, rounds = 5) {
         const results = [];
         for (let r = 0; r < rounds; r++) {
@@ -133,93 +183,97 @@
         };
       }
 
-      async function runBenchmarks() {
-        const iterations = 100000;
-        const rounds = 5;
-        const results = [];
-
-        // XPB JIT Benchmark
-        const jitEncode = compileEncoder(userSchema);
-        const jitDecode = compileDecoder(userSchema);
+      // ============= XPB Benchmarks =============
+      
+      function benchXPB_JIT(schema, data, iterations) {
+        const jitEncode = compileEncoder(schema);
+        const jitDecode = compileDecoder(schema);
         const slab = new SlabAllocator(65536);
 
         slab.pos = 0;
-        jitEncode(slab, smallUser);
+        jitEncode(slab, data);
         const encoded = new Uint8Array(slab.buf.subarray(0, slab.pos));
 
-        const xpbEncode = benchMultiple("XPB encode", iterations, () => {
+        const encodeResult = benchMultiple("XPB JIT encode", iterations, () => {
           slab.pos = 0;
-          jitEncode(slab, smallUser);
-        }, rounds);
+          jitEncode(slab, data);
+        });
 
-        const xpbDecode = benchMultiple("XPB decode", iterations, () => {
+        const decodeResult = benchMultiple("XPB JIT decode", iterations, () => {
           jitDecode(encoded, encoded.length);
-        }, rounds);
+        });
 
-        results.push({
+        return {
           name: "XPB V2 (JIT)",
-          encodeNs: xpbEncode.min,
-          encodeAvg: xpbEncode.avg,
-          decodeNs: xpbDecode.min,
-          decodeAvg: xpbDecode.avg,
+          encodeNs: encodeResult.min,
+          decodeNs: decodeResult.min,
           sizeBytes: encoded.length,
-        });
-
-        // XPB Manual Benchmark
-        const manualEncoder = new Encoder(64);
-        const manualEncode = benchMultiple("XPB Manual encode", iterations, () => {
-          manualEncoder.reset();
-          manualEncoder.writeString(smallUser.name);
-          manualEncoder.writeInt32(smallUser.age);
-          manualEncoder.writeBool(smallUser.active);
-          manualEncoder.finish();
-        }, rounds);
-
-        manualEncoder.reset();
-        manualEncoder.writeString(smallUser.name);
-        manualEncoder.writeInt32(smallUser.age);
-        manualEncoder.writeBool(smallUser.active);
-        const manualEncoded = manualEncoder.finish();
-
-        const manualDecode = benchMultiple("XPB Manual decode", iterations, () => {
-          const dec = new Decoder(manualEncoded);
-          dec.readString();
-          dec.readInt32();
-          dec.readBool();
-        }, rounds);
-
-        results.push({
-          name: "XPB V2 (Manual)",
-          encodeNs: manualEncode.min,
-          encodeAvg: manualEncode.avg,
-          decodeNs: manualDecode.min,
-          decodeAvg: manualDecode.avg,
-          sizeBytes: manualEncoded.length,
-        });
-
-        // JSON Benchmark
-        let jsonEncoded = "";
-        const jsonEncode = benchMultiple("JSON encode", iterations, () => {
-          jsonEncoded = JSON.stringify(smallUser);
-        }, rounds);
-
-        const jsonDecode = benchMultiple("JSON decode", iterations, () => {
-          JSON.parse(jsonEncoded);
-        }, rounds);
-
-        results.push({
-          name: "JSON",
-          encodeNs: jsonEncode.min,
-          encodeAvg: jsonEncode.avg,
-          decodeNs: jsonDecode.min,
-          decodeAvg: jsonDecode.avg,
-          sizeBytes: jsonEncoded.length,
-        });
-
-        return results;
+        };
       }
 
-      function displayResults(results) {
+      function benchJSON(data, iterations) {
+        let jsonEncoded = "";
+        const encodeResult = benchMultiple("JSON encode", iterations, () => {
+          jsonEncoded = JSON.stringify(data);
+        });
+
+        const decodeResult = benchMultiple("JSON decode", iterations, () => {
+          JSON.parse(jsonEncoded);
+        });
+
+        return {
+          name: "JSON",
+          encodeNs: encodeResult.min,
+          decodeNs: decodeResult.min,
+          sizeBytes: jsonEncoded.length,
+        };
+      }
+
+      function benchMsgpack(data, iterations) {
+        let msgpackEncoded = new Uint8Array(0);
+        const encodeResult = benchMultiple("Msgpack encode", iterations, () => {
+          msgpackEncoded = msgpackEncode(data);
+        });
+
+        const decodeResult = benchMultiple("Msgpack decode", iterations, () => {
+          msgpackDecode(msgpackEncoded);
+        });
+
+        return {
+          name: "Msgpack",
+          encodeNs: encodeResult.min,
+          decodeNs: decodeResult.min,
+          sizeBytes: msgpackEncoded.length,
+        };
+      }
+
+      // ============= Run Benchmarks =============
+      
+      async function runBenchmarks() {
+        const iterations = 100000;
+        const rounds = 5;
+        
+        const allResults = {
+          small: [],
+          large: []
+        };
+
+        // Small message benchmarks
+        allResults.small.push(benchXPB_JIT(smallUserSchema, smallUser, iterations));
+        allResults.small.push(benchJSON(smallUser, iterations));
+        allResults.small.push(benchMsgpack(smallUser, iterations));
+
+        // Large message benchmarks
+        allResults.large.push(benchXPB_JIT(largeUserSchema, largeUser, iterations));
+        allResults.large.push(benchJSON(largeUserJSON, iterations));
+        allResults.large.push(benchMsgpack(largeUserJSON, iterations));
+
+        return allResults;
+      }
+
+      // ============= Display Results =============
+      
+      function formatTable(results) {
         let html = `
         <table>
           <tr>
@@ -228,7 +282,7 @@
             <th>Decode</th>
             <th>Size</th>
           </tr>
-      `;
+        `;
 
         for (const r of results) {
           const isXPB = r.name.includes("XPB");
@@ -239,28 +293,60 @@
             <td class="${isXPB ? "highlight" : ""}">${r.decodeNs.toFixed(0)} ns</td>
             <td>${r.sizeBytes} B</td>
           </tr>
-        `;
+          `;
         }
 
         html += `</table>`;
+        return html;
+      }
 
-        // Summary
-        const xpb = results.find((r) => r.name.includes("JIT"));
-        const json = results.find((r) => r.name === "JSON");
-        if (xpb && json) {
-          html += `
-          <p>📊 <strong>Summary:</strong></p>
-          <p>XPB vs JSON Encode: <span class="highlight">${(json.encodeNs / xpb.encodeNs).toFixed(2)}x faster</span></p>
-          <p>XPB vs JSON Decode: <span class="highlight">${(json.decodeNs / xpb.decodeNs).toFixed(2)}x faster</span></p>
-          <p>XPB vs JSON Size: <span class="highlight">${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller</span></p>
-        `;
+      function formatSummary(label, xpb, json, msgpack) {
+        if (!xpb || !json) return '';
+        
+        let html = `<div class="summary">`;
+        html += `<p><strong>📊 ${label} Summary:</strong></p>`;
+        html += `<p>XPB vs JSON Encode: <span class="highlight">${(json.encodeNs / xpb.encodeNs).toFixed(2)}x faster</span></p>`;
+        html += `<p>XPB vs JSON Decode: <span class="highlight">${(json.decodeNs / xpb.decodeNs).toFixed(2)}x faster</span></p>`;
+        html += `<p>XPB vs JSON Size: <span class="highlight">${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller</span></p>`;
+        
+        if (msgpack) {
+          html += `<p>XPB vs Msgpack Encode: <span class="highlight">${(msgpack.encodeNs / xpb.encodeNs).toFixed(2)}x faster</span></p>`;
+          html += `<p>XPB vs Msgpack Decode: <span class="highlight">${(msgpack.decodeNs / xpb.decodeNs).toFixed(2)}x faster</span></p>`;
         }
+        
+        html += `</div>`;
+        return html;
+      }
+
+      function displayResults(allResults) {
+        let html = '';
+        
+        // Small message results
+        html += `<h2>📦 Small Message (3 fields: name, age, active)</h2>`;
+        html += formatTable(allResults.small);
+        
+        const xpbSmall = allResults.small.find(r => r.name.includes("XPB"));
+        const jsonSmall = allResults.small.find(r => r.name === "JSON");
+        const msgpackSmall = allResults.small.find(r => r.name === "Msgpack");
+        html += formatSummary("Small Message", xpbSmall, jsonSmall, msgpackSmall);
+        
+        // Large message results
+        html += `<h2>📦 Large Message (7 fields: id, name, email, age, score, active, description)</h2>`;
+        html += formatTable(allResults.large);
+        
+        const xpbLarge = allResults.large.find(r => r.name.includes("XPB"));
+        const jsonLarge = allResults.large.find(r => r.name === "JSON");
+        const msgpackLarge = allResults.large.find(r => r.name === "Msgpack");
+        html += formatSummary("Large Message", xpbLarge, jsonLarge, msgpackLarge);
 
         document.getElementById("results").innerHTML = html;
         document.getElementById("status").style.display = "none";
 
         // Expose results for Playwright
-        window.benchmarkResults = results;
+        window.benchmarkResults = {
+          small: allResults.small,
+          large: allResults.large
+        };
       }
 
       // Run on load

@@ -138,10 +138,12 @@ function generateFieldWrite(field: FieldDef, valVar: string): string {
     
     case FieldType.Int64:
     case FieldType.Uint64:
+      // Handle both BigInt and Number inputs
       return `
         var v = ${valVar};
-        var lo = Number(v & 0xffffffffn);
-        var hi = Number(v >> 32n);
+        var bv = typeof v === 'bigint' ? v : BigInt(v);
+        var lo = Number(bv & 0xffffffffn);
+        var hi = Number(bv >> 32n);
         buf[pos++] = lo;
         buf[pos++] = lo >> 8;
         buf[pos++] = lo >> 16;
