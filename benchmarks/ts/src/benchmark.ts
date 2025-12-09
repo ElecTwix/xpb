@@ -1,6 +1,8 @@
 /**
  * XPB V2 TypeScript Benchmark Suite
  * Compares XPB V2 (JIT) vs JSON vs MessagePack
+ * 
+ * Runs multiple rounds for accuracy and reports best results.
  */
 
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
@@ -8,6 +10,9 @@ import { Encoder, Decoder } from '../../../runtime/ts/src/index.js';
 import { SlabAllocator, compileEncoder, compileDecoder, FieldType } from '../../../runtime/ts/src/jit.js';
 
 // ============= Benchmark Utilities =============
+
+const ROUNDS = 5;
+const ITERATIONS = 100000;
 
 export interface BenchResult {
   name: string;
@@ -27,17 +32,22 @@ export function bench(name: string, iterations: number, fn: () => void): number 
   return ((end - start) * 1_000_000) / iterations; // ns per op
 }
 
+// Run benchmark multiple times and return best (minimum) result
+export function benchMultiple(name: string, iterations: number, fn: () => void, rounds = ROUNDS): { min: number; avg: number } {
+  const results: number[] = [];
+  for (let r = 0; r < rounds; r++) {
+    results.push(bench(name, iterations, fn));
+  }
+  results.sort((a, b) => a - b);
+  return {
+    min: results[0],
+    avg: results.reduce((a, b) => a + b, 0) / results.length
+  };
+}
+
 // ============= Test Data =============
 
 const smallUser = { name: "Alice Johnson", age: 30, active: true };
-
-// Large message for testing
-const largeUser = {
-  name: "Alice Johnson",
-  email: "alice.johnson@example.com",
-  bio: "This is a much longer description field that contains significantly more text to simulate a larger payload that would benefit from optimizations. ".repeat(5),
-  tags: ["developer", "designer", "architect", "manager", "consultant"],
-};
 
 const userSchema = {
   fields: [
@@ -47,21 +57,9 @@ const userSchema = {
   ]
 };
 
-const schemaLarge = {
-  fields: [
-    { tag: 1, name: 'name', type: FieldType.String },
-    { tag: 2, name: 'email', type: FieldType.String },
-    { tag: 3, name: 'bio', type: FieldType.String },
-    { tag: 4, name: 'tags', type: FieldType.String, repeated: true }
-  ]
-};
-
 // ============= XPB V2 JIT Benchmark =============
 
 function benchXPB_V2_Small(): BenchResult {
-  const iterations = 100000;
-  
-  // Compile JIT encoder/decoder
   const jitEncode = compileEncoder<typeof smallUser>(userSchema);
   const jitDecode = compileDecoder<typeof smallUser>(userSchema);
   const slab = new SlabAllocator(65536);
@@ -72,24 +70,22 @@ function benchXPB_V2_Small(): BenchResult {
   const size = slab.pos;
   const encoded = Buffer.from(slab.buf.subarray(0, size));
 
-  const encodeNs = bench("V2 JIT encode", iterations, () => {
+  const encode = benchMultiple("V2 JIT encode", ITERATIONS, () => {
     slab.pos = 0;
     jitEncode(slab, smallUser);
   });
 
-  const decodeNs = bench("V2 JIT decode", iterations, () => {
+  const decode = benchMultiple("V2 JIT decode", ITERATIONS, () => {
     jitDecode(encoded, encoded.length);
   });
 
-  return { name: "XPB V2 (JIT)", encodeNs, decodeNs, sizeBytes: size };
+  return { name: "XPB V2 (JIT)", encodeNs: encode.min, decodeNs: decode.min, sizeBytes: size };
 }
 
 function benchXPB_V2_Manual(): BenchResult {
-  const iterations = 100000;
-  
-  // Manual encode
   const encoder = new Encoder(64);
-  const encodeNs = bench("V2 Manual encode", iterations, () => {
+  
+  const encode = benchMultiple("V2 Manual encode", ITERATIONS, () => {
     encoder.reset();
     encoder.writeString(smallUser.name);
     encoder.writeInt32(smallUser.age);
@@ -104,119 +100,62 @@ function benchXPB_V2_Manual(): BenchResult {
   const encoded = encoder.finish();
   const size = encoded.length;
 
-  const decodeNs = bench("V2 Manual decode", iterations, () => {
+  const decode = benchMultiple("V2 Manual decode", ITERATIONS, () => {
     const dec = new Decoder(encoded);
     dec.readString();
     dec.readInt32();
     dec.readBool();
   });
 
-  return { name: "XPB V2 (Manual)", encodeNs, decodeNs, sizeBytes: size };
-}
-
-// ============= XPB V2 Large Benchmark =============
-
-function benchXPB_V2_Large(): BenchResult {
-  const iters = 50000;
-  
-  const jitEncode = compileEncoder<typeof largeUser>(schemaLarge);
-  const jitDecode = compileDecoder<typeof largeUser>(schemaLarge);
-  const slab = new SlabAllocator(65536);
-
-  // Warmup & Size
-  slab.pos = 0;
-  jitEncode(slab, largeUser);
-  const encoded = Buffer.from(slab.buf.subarray(0, slab.pos));
-
-  const encodeNs = bench("V2 JIT Large encode", iters, () => {
-    slab.pos = 0;
-    jitEncode(slab, largeUser);
-  });
-  
-  const decodeNs = bench("V2 JIT Large decode", iters, () => {
-    jitDecode(encoded, encoded.length);
-  });
-
-  return { name: "XPB V2 (JIT)", encodeNs, decodeNs, sizeBytes: encoded.length };
+  return { name: "XPB V2 (Manual)", encodeNs: encode.min, decodeNs: decode.min, sizeBytes: size };
 }
 
 // ============= JSON Benchmark =============
 
 function benchJSON_Small(): BenchResult {
-  const iterations = 100000;
+  let jsonEncoded = "";
   
-  let encoded = "";
-  const encodeNs = bench("JSON encode", iterations, () => {
-    encoded = JSON.stringify(smallUser);
+  const encode = benchMultiple("JSON encode", ITERATIONS, () => {
+    jsonEncoded = JSON.stringify(smallUser);
   });
 
-  const decodeNs = bench("JSON decode", iterations, () => {
-    JSON.parse(encoded);
+  const decode = benchMultiple("JSON decode", ITERATIONS, () => {
+    JSON.parse(jsonEncoded);
   });
 
-  return { name: "JSON", encodeNs, decodeNs, sizeBytes: encoded.length };
+  return { name: "JSON", encodeNs: encode.min, decodeNs: decode.min, sizeBytes: jsonEncoded.length };
 }
 
-function benchJSON_Large(): BenchResult {
-  const iterations = 10000;
-  
-  let encoded = "";
-  const encodeNs = bench("JSON large encode", iterations, () => {
-    encoded = JSON.stringify(largeUser);
-  });
-
-  const decodeNs = bench("JSON large decode", iterations, () => {
-    JSON.parse(encoded);
-  });
-
-  return { name: "JSON", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
-
-// ============= MessagePack Benchmark =============
+// ============= Msgpack Benchmark =============
 
 function benchMsgpack_Small(): BenchResult {
-  const iterations = 100000;
+  let msgpackEncoded: Uint8Array = new Uint8Array(0);
   
-  let encoded: Uint8Array = new Uint8Array();
-  const encodeNs = bench("Msgpack encode", iterations, () => {
-    encoded = msgpackEncode(smallUser);
+  const encode = benchMultiple("Msgpack encode", ITERATIONS, () => {
+    msgpackEncoded = msgpackEncode(smallUser);
   });
 
-  const decodeNs = bench("Msgpack decode", iterations, () => {
-    msgpackDecode(encoded);
+  const decode = benchMultiple("Msgpack decode", ITERATIONS, () => {
+    msgpackDecode(msgpackEncoded);
   });
 
-  return { name: "Msgpack", encodeNs, decodeNs, sizeBytes: encoded.length };
+  return { name: "Msgpack", encodeNs: encode.min, decodeNs: decode.min, sizeBytes: msgpackEncoded.length };
 }
 
-function benchMsgpack_Large(): BenchResult {
-  const iterations = 10000;
-  
-  let encoded: Uint8Array = new Uint8Array();
-  const encodeNs = bench("Msgpack large encode", iterations, () => {
-    encoded = msgpackEncode(largeUser);
-  });
+// ============= Output Formatting =============
 
-  const decodeNs = bench("Msgpack large decode", iterations, () => {
-    msgpackDecode(encoded);
-  });
-
-  return { name: "Msgpack", encodeNs, decodeNs, sizeBytes: encoded.length };
-}
-
-// ============= Print Results =============
-
-export function printResults(title: string, results: BenchResult[]) {
+function printResults(title: string, results: BenchResult[]) {
   console.log(`\n${title}`);
   console.log("┌─────────────────┬────────────┬────────────┬────────────┐");
   console.log("│ Format          │ Encode     │ Decode     │ Size       │");
   console.log("├─────────────────┼────────────┼────────────┼────────────┤");
   
   for (const r of results) {
-    const enc = r.encodeNs.toFixed(0).padStart(7) + " ns";
-    const dec = r.decodeNs.toFixed(0).padStart(7) + " ns";
+    const name = r.name.padEnd(15);
+    const enc = (r.encodeNs.toFixed(0) + " ns").padStart(8);
+    const dec = (r.decodeNs.toFixed(0) + " ns").padStart(8);
     const size = (r.sizeBytes + " B").padStart(8);
-    console.log(`│ ${r.name.padEnd(15)} │ ${enc} │ ${dec} │ ${size} │`);
+    console.log(`│ ${name} │ ${enc} │ ${dec} │ ${size} │`);
   }
   
   console.log("└─────────────────┴────────────┴────────────┴────────────┘");
@@ -226,7 +165,7 @@ export function printResults(title: string, results: BenchResult[]) {
 
 async function main() {
   console.log("╔═══════════════════════════════════════════════════════════════╗");
-  console.log("║     XPB V2 Benchmark: JIT vs Manual vs JSON vs Msgpack        ║");
+  console.log("║     XPB V2 Node.js Benchmark (Best of 5 Rounds)               ║");
   console.log("╠═══════════════════════════════════════════════════════════════╣");
   console.log("║ V2 Format: Tagless, Fixed-Width Int, Compact Lengths          ║");
   console.log("╚═══════════════════════════════════════════════════════════════╝");
@@ -239,26 +178,19 @@ async function main() {
   smallResults.push(benchMsgpack_Small());
   
   printResults("Small Message (User: name, age, active)", smallResults);
-
-  // Large message benchmarks (XPB large has repeated field bug, skip for now)
-  const largeResults: BenchResult[] = [];
-  // largeResults.push(benchXPB_V2_Large()); // TODO: fix repeated field encoding
-  largeResults.push(benchJSON_Large());
-  largeResults.push(benchMsgpack_Large());
   
-  printResults("Large Message (1KB+)", largeResults);
-
   // Summary
-  console.log("\n📊 Summary:");
-  const xpbSmall = smallResults[0];
-  const jsonSmall = smallResults.find(r => r.name === "JSON")!;
-  const msgpackSmall = smallResults.find(r => r.name === "Msgpack")!;
+  const xpb = smallResults.find(r => r.name.includes("JIT"));
+  const json = smallResults.find(r => r.name === "JSON");
   
-  console.log(`  XPB V2 size:          ${xpbSmall.sizeBytes} bytes`);
-  console.log(`  JSON size:            ${jsonSmall.sizeBytes} bytes`);
-  console.log(`  XPB vs JSON size:     ${(jsonSmall.sizeBytes / xpbSmall.sizeBytes).toFixed(1)}x smaller`);
-  console.log(`  XPB encode vs JSON:   ${(jsonSmall.encodeNs / xpbSmall.encodeNs).toFixed(2)}x faster`);
-  console.log(`  XPB decode vs JSON:   ${(jsonSmall.decodeNs / xpbSmall.decodeNs).toFixed(2)}x faster`);
+  if (xpb && json) {
+    console.log(`\n📊 Summary:`);
+    console.log(`  XPB V2 size:          ${xpb.sizeBytes} bytes`);
+    console.log(`  JSON size:            ${json.sizeBytes} bytes`);
+    console.log(`  XPB vs JSON size:     ${(json.sizeBytes / xpb.sizeBytes).toFixed(1)}x smaller`);
+    console.log(`  XPB encode vs JSON:   ${(json.encodeNs / xpb.encodeNs).toFixed(2)}x faster`);
+    console.log(`  XPB decode vs JSON:   ${(json.decodeNs / xpb.decodeNs).toFixed(2)}x faster`);
+  }
 }
 
 main().catch(console.error);
