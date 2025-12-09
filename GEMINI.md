@@ -136,7 +136,26 @@ go build -o xpbc ./cmd/xpbc
 # Run all benchmarks
 ./benchmarks/run-all.sh
 
-# Run specific benchmarks
+# Run selective benchmarks by platform
+./benchmarks/run-all.sh --go              # Go only
+./benchmarks/run-all.sh --nodejs          # Node.js only
+./benchmarks/run-all.sh --browser         # Browser only
+./benchmarks/run-all.sh --nodejs --go     # Multiple platforms
+
+# Run selective benchmarks by test type
+./benchmarks/run-all.sh --small           # Small message tests
+./benchmarks/run-all.sh --large           # Large message tests
+./benchmarks/run-all.sh --collections     # Collection tests (arrays/maps)
+./benchmarks/run-all.sh --scaling         # Size scaling comparison
+
+# Combine platform and test type filters
+./benchmarks/run-all.sh --nodejs --small  # Node.js small tests only
+./benchmarks/run-all.sh --go --collections # Go collection tests only
+
+# Show benchmark help
+./benchmarks/run-all.sh --help
+
+# Run platform-specific benchmarks directly
 cd benchmarks/go && go test -bench=. -count=1
 cd benchmarks/ts && npm run bench
 cd benchmarks/browser && npm run bench

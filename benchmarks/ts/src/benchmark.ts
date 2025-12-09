@@ -360,9 +360,87 @@ function printSummary(label: string, xpb: BenchResult | undefined, baseline: Ben
   }
 }
 
+// ============= CLI Argument Parsing =============
+
+interface TestFilter {
+  small: boolean;
+  large: boolean;
+  collections: boolean;
+  scaling: boolean;
+}
+
+function parseArgs(): TestFilter {
+  const args = process.argv.slice(2);
+  const filter: TestFilter = {
+    small: false,
+    large: false,
+    collections: false,
+    scaling: false
+  };
+  
+  // If no args, run all tests
+  let hasFilter = false;
+  
+  for (const arg of args) {
+    if (arg.startsWith('--tests=')) {
+      hasFilter = true;
+      const tests = arg.slice(8).split(',');
+      for (const test of tests) {
+        const t = test.trim().toLowerCase();
+        if (t === 'small') filter.small = true;
+        else if (t === 'large') filter.large = true;
+        else if (t === 'collections' || t === 'coll') filter.collections = true;
+        else if (t === 'scaling' || t === 'size') filter.scaling = true;
+      }
+    } else if (arg === '--small') {
+      hasFilter = true;
+      filter.small = true;
+    } else if (arg === '--large') {
+      hasFilter = true;
+      filter.large = true;
+    } else if (arg === '--collections' || arg === '--coll') {
+      hasFilter = true;
+      filter.collections = true;
+    } else if (arg === '--scaling' || arg === '--size') {
+      hasFilter = true;
+      filter.scaling = true;
+    } else if (arg === '--help' || arg === '-h') {
+      console.log('XPB V2 Node.js Benchmark');
+      console.log('');
+      console.log('Usage: npx tsx src/benchmark.ts [OPTIONS]');
+      console.log('');
+      console.log('Options:');
+      console.log('  --tests=small,large,collections,scaling  Run specific tests');
+      console.log('  --small           Run small message benchmarks');
+      console.log('  --large           Run large message benchmarks');
+      console.log('  --collections     Run collection benchmarks');
+      console.log('  --scaling         Run size scaling comparison');
+      console.log('  --help, -h        Show this help');
+      console.log('');
+      console.log('Examples:');
+      console.log('  npx tsx src/benchmark.ts                  # Run all');
+      console.log('  npx tsx src/benchmark.ts --small          # Small only');
+      console.log('  npx tsx src/benchmark.ts --tests=small,large');
+      process.exit(0);
+    }
+  }
+  
+  // If no filter specified, run all
+  if (!hasFilter) {
+    filter.small = true;
+    filter.large = true;
+    filter.collections = true;
+    filter.scaling = true;
+  }
+  
+  return filter;
+}
+
 // ============= Main =============
 
 async function main() {
+  const filter = parseArgs();
+  
   console.log("╔═══════════════════════════════════════════════════════════════╗");
   console.log("║     XPB V2 Node.js Benchmark (Best of 5 Rounds)               ║");
   console.log("╠═══════════════════════════════════════════════════════════════╣");
@@ -371,69 +449,77 @@ async function main() {
   console.log("╚═══════════════════════════════════════════════════════════════╝");
 
   // ============= Small Message Benchmarks =============
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📦 Small Message (3 fields: name, age, active)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  const smallResults: BenchResult[] = [];
-  smallResults.push(benchXPB_V2_Small());
-  smallResults.push(benchXPB_V2_Manual_Small());
-  smallResults.push(benchJSON_Small());
-  smallResults.push(benchMsgpack_Small());
-  smallResults.push(benchProtobuf_Small());
-  
-  printResults("Small Message Results", smallResults);
-  
-  const xpbSmall = smallResults.find(r => r.name.includes("JIT"));
-  const jsonSmall = smallResults.find(r => r.name === "JSON");
-  const protoSmall = smallResults.find(r => r.name === "Protobuf");
-  
-  printSummary("Small", xpbSmall, jsonSmall, "JSON");
-  printSummary("Small", xpbSmall, protoSmall, "Protobuf");
+  if (filter.small) {
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📦 Small Message (3 fields: name, age, active)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    const smallResults: BenchResult[] = [];
+    smallResults.push(benchXPB_V2_Small());
+    smallResults.push(benchXPB_V2_Manual_Small());
+    smallResults.push(benchJSON_Small());
+    smallResults.push(benchMsgpack_Small());
+    smallResults.push(benchProtobuf_Small());
+    
+    printResults("Small Message Results", smallResults);
+    
+    const xpbSmall = smallResults.find(r => r.name.includes("JIT"));
+    const jsonSmall = smallResults.find(r => r.name === "JSON");
+    const protoSmall = smallResults.find(r => r.name === "Protobuf");
+    
+    printSummary("Small", xpbSmall, jsonSmall, "JSON");
+    printSummary("Small", xpbSmall, protoSmall, "Protobuf");
+  }
 
   // ============= Large Message Benchmarks =============
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📦 Large Message (7 fields: id, name, email, age, score, active, description)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  const largeResults: BenchResult[] = [];
-  largeResults.push(benchXPB_V2_Large());
-  largeResults.push(benchXPB_V2_Manual_Large());
-  largeResults.push(benchJSON_Large());
-  largeResults.push(benchMsgpack_Large());
-  largeResults.push(benchProtobuf_Large());
-  
-  printResults("Large Message Results", largeResults);
-  
-  const xpbLarge = largeResults.find(r => r.name.includes("JIT"));
-  const jsonLarge = largeResults.find(r => r.name === "JSON");
-  const protoLarge = largeResults.find(r => r.name === "Protobuf");
-  
-  printSummary("Large", xpbLarge, jsonLarge, "JSON");
-  printSummary("Large", xpbLarge, protoLarge, "Protobuf");
+  if (filter.large) {
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📦 Large Message (7 fields: id, name, email, age, score, active, description)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    const largeResults: BenchResult[] = [];
+    largeResults.push(benchXPB_V2_Large());
+    largeResults.push(benchXPB_V2_Manual_Large());
+    largeResults.push(benchJSON_Large());
+    largeResults.push(benchMsgpack_Large());
+    largeResults.push(benchProtobuf_Large());
+    
+    printResults("Large Message Results", largeResults);
+    
+    const xpbLarge = largeResults.find(r => r.name.includes("JIT"));
+    const jsonLarge = largeResults.find(r => r.name === "JSON");
+    const protoLarge = largeResults.find(r => r.name === "Protobuf");
+    
+    printSummary("Large", xpbLarge, jsonLarge, "JSON");
+    printSummary("Large", xpbLarge, protoLarge, "Protobuf");
+  }
 
   // ============= Collection Benchmarks =============
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📦 Collections (Arrays and Maps with 100 elements)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  const collectionResults = runCollectionBenchmarks();
-  
-  printResults("String Array (100 elements)", collectionResults.stringArray);
-  printSummary("StringArray", collectionResults.stringArray[0], collectionResults.stringArray[1], "JSON");
-  
-  printResults("Int32 Array (100 elements)", collectionResults.intArray);
-  printSummary("Int32Array", collectionResults.intArray[0], collectionResults.intArray[1], "JSON");
-  
-  printResults("String Map (100 entries)", collectionResults.stringMap);
-  printSummary("StringMap", collectionResults.stringMap[0], collectionResults.stringMap[1], "JSON");
+  if (filter.collections) {
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📦 Collections (Arrays and Maps with 100 elements)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    const collectionResults = runCollectionBenchmarks();
+    
+    printResults("String Array (100 elements)", collectionResults.stringArray);
+    printSummary("StringArray", collectionResults.stringArray[0], collectionResults.stringArray[1], "JSON");
+    
+    printResults("Int32 Array (100 elements)", collectionResults.intArray);
+    printSummary("Int32Array", collectionResults.intArray[0], collectionResults.intArray[1], "JSON");
+    
+    printResults("String Map (100 entries)", collectionResults.stringMap);
+    printSummary("StringMap", collectionResults.stringMap[0], collectionResults.stringMap[1], "JSON");
+  }
 
   // ============= Size Scaling Comparison =============
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📊 Size Scaling Comparison (XPB vs JSON)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  printSizeScaling();
+  if (filter.scaling) {
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📊 Size Scaling Comparison (XPB vs JSON)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    printSizeScaling();
+  }
 
   console.log("\n✅ Benchmark complete!");
 }
