@@ -8,9 +8,12 @@
     "bench:all": "tsx src/benchmark.ts && cd ../.. && go test -bench=. -benchmem ./benchmarks/go/..."
   },
   "devDependencies": {
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0",
     "@msgpack/msgpack": "^3.0.0",
-    "protobufjs": "^7.2.0"
+    "protobufjs": "^7.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "playwright": "^1.57.0"
   }
 }
