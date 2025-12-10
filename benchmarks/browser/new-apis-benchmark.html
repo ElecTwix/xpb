@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New Chrome APIs Benchmark for XPB</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        color: #eee;
+        min-height: 100vh;
+        margin: 0;
+        padding: 2rem;
+      }
+      h1 {
+        text-align: center;
+        background: linear-gradient(90deg, #ff6b6b, #feca57);
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 1rem;
+      }
+      h2 { color: #feca57; margin-top: 2rem; }
+      h3 { color: #ff6b6b; margin-top: 1.5rem; }
+      .container { max-width: 1000px; margin: 0 auto; }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        overflow: hidden;
+        margin: 1rem 0;
+      }
+      th, td {
+        padding: 0.8rem;
+        text-align: right;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      th { background: rgba(254, 202, 87, 0.2); text-align: left; }
+      td:first-child { text-align: left; font-weight: bold; }
+      .highlight { color: #feca57; font-weight: bold; }
+      .faster { color: #26de81; font-weight: bold; }
+      .slower { color: #ff6b6b; font-weight: bold; }
+      #status {
+        text-align: center;
+        padding: 2rem;
+        font-size: 1.2rem;
+        color: #888;
+      }
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #feca57;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 10px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .summary {
+        background: rgba(254, 202, 87, 0.1);
+        border-radius: 12px;
+        padding: 1rem 1.5rem;
+        margin: 1rem 0;
+      }
+      .summary p { margin: 0.5rem 0; }
+      .feature-box {
+        background: rgba(255, 107, 107, 0.1);
+        border-radius: 12px;
+        padding: 1rem 1.5rem;
+        margin: 1rem 0;
+        border-left: 4px solid #ff6b6b;
+      }
+      .feature-box h4 { margin: 0 0 0.5rem 0; color: #ff6b6b; }
+      .support-yes { color: #26de81; }
+      .support-no { color: #ff6b6b; }
+      code {
+        background: rgba(255,255,255,0.1);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🧪 New Chrome APIs Benchmark for XPB</h1>
+      <p style="text-align: center; color: #888;">
+        Testing new browser APIs that could improve XPB encoding/decoding performance
+      </p>
+      
+      <div id="feature-detection"></div>
+      <div id="status"><span class="spinner"></span>Running benchmarks...</div>
+      <div id="results"></div>
+    </div>
+
+    <script type="module">
+      // Import the bundled XPB browser runtime
+      import './dist/xpb-browser.js';
+
+      const { Encoder, Decoder, SlabAllocator, compileEncoder, compileDecoder, FieldType } = window.XPB;
+
+      // ============= Feature Detection =============
+      
+      function detectFeatures() {
+        const features = {
+          resizableArrayBuffer: typeof ArrayBuffer.prototype.resize === 'function',
+          transferArrayBuffer: typeof ArrayBuffer.prototype.transfer === 'function',
+          uint8ArrayToBase64: typeof Uint8Array.prototype.toBase64 === 'function',
+          uint8ArrayFromBase64: typeof Uint8Array.fromBase64 === 'function',
+          textEncoderEncodeInto: typeof TextEncoder.prototype.encodeInto === 'function',
+          textDecoderStream: typeof TextDecoderStream === 'function',
+          webAssembly: typeof WebAssembly === 'object',
+          wasmSIMD: false,
+        };
+
+        try {
+          const simdTest = new Uint8Array([
+            0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0,
+            253, 15, 253, 98, 11
+          ]);
+          features.wasmSIMD = WebAssembly.validate(simdTest);
+        } catch (e) {
+          features.wasmSIMD = false;
+        }
+
+        return features;
+      }
+
+      function displayFeatures(features) {
+        const html = `
+          <h2>🔍 API Feature Detection</h2>
+          <div class="feature-box">
+            <h4>ArrayBuffer APIs (ES2024-2025)</h4>
+            <p>Resizable ArrayBuffer: <span class="${features.resizableArrayBuffer ? 'support-yes' : 'support-no'}">${features.resizableArrayBuffer ? '✅ Supported' : '❌ Not Supported'}</span></p>
+            <p>ArrayBuffer.transfer(): <span class="${features.transferArrayBuffer ? 'support-yes' : 'support-no'}">${features.transferArrayBuffer ? '✅ Supported' : '❌ Not Supported'}</span></p>
+          </div>
+          <div class="feature-box">
+            <h4>Base64 APIs (New)</h4>
+            <p>Uint8Array.toBase64(): <span class="${features.uint8ArrayToBase64 ? 'support-yes' : 'support-no'}">${features.uint8ArrayToBase64 ? '✅ Supported' : '❌ Not Supported'}</span></p>
+            <p>Uint8Array.fromBase64(): <span class="${features.uint8ArrayFromBase64 ? 'support-yes' : 'support-no'}">${features.uint8ArrayFromBase64 ? '✅ Supported' : '❌ Not Supported'}</span></p>
+          </div>
+          <div class="feature-box">
+            <h4>Text Encoding APIs</h4>
+            <p>TextEncoder.encodeInto(): <span class="${features.textEncoderEncodeInto ? 'support-yes' : 'support-no'}">${features.textEncoderEncodeInto ? '✅ Supported' : '❌ Not Supported'}</span></p>
+            <p>TextDecoderStream: <span class="${features.textDecoderStream ? 'support-yes' : 'support-no'}">${features.textDecoderStream ? '✅ Supported' : '❌ Not Supported'}</span></p>
+          </div>
+          <div class="feature-box">
+            <h4>WebAssembly Features</h4>
+            <p>WebAssembly: <span class="${features.webAssembly ? 'support-yes' : 'support-no'}">${features.webAssembly ? '✅ Supported' : '❌ Not Supported'}</span></p>
+            <p>WASM SIMD: <span class="${features.wasmSIMD ? 'support-yes' : 'support-no'}">${features.wasmSIMD ? '✅ Supported' : '❌ Not Supported'}</span></p>
+          </div>
+        `;
+        document.getElementById('feature-detection').innerHTML = html;
+      }
+
+      // ============= Benchmark Utilities =============
+      
+      function bench(iterations, fn) {
+        // Warmup
+        for (let i = 0; i < 50; i++) fn();
+
+        const start = performance.now();
+        for (let i = 0; i < iterations; i++) fn();
+        const end = performance.now();
+
+        return ((end - start) * 1_000_000) / iterations;
+      }
+
+      // ============= Test 1: Resizable ArrayBuffer =============
+      
+      function benchResizableArrayBuffer(features) {
+        if (!features.resizableArrayBuffer) {
+          return { supported: false, message: "Resizable ArrayBuffer not supported" };
+        }
+
+        const iterations = 5000;
+        const results = [];
+
+        // Standard approach: reallocate and copy
+        const standardGrow = () => {
+          let buf = new Uint8Array(64);
+          let view = new DataView(buf.buffer);
+          let pos = 0;
+          
+          for (let i = 0; i < 10; i++) {
+            if (pos + 8 > buf.length) {
+              const newBuf = new Uint8Array(buf.length * 2);
+              newBuf.set(buf);
+              buf = newBuf;
+              view = new DataView(buf.buffer);
+            }
+            view.setInt32(pos, i, true);
+            pos += 4;
+          }
+          return buf.subarray(0, pos);
+        };
+
+        // Resizable approach
+        const resizableGrow = () => {
+          const buf = new ArrayBuffer(64, { maxByteLength: 1024 });
+          const u8 = new Uint8Array(buf);
+          const view = new DataView(buf);
+          let pos = 0;
+          
+          for (let i = 0; i < 10; i++) {
+            if (pos + 8 > buf.byteLength) {
+              buf.resize(buf.byteLength * 2);
+            }
+            view.setInt32(pos, i, true);
+            pos += 4;
+          }
+          return new Uint8Array(buf, 0, pos);
+        };
+
+        const standardTime = bench(iterations, standardGrow);
+        const resizableTime = bench(iterations, resizableGrow);
+
+        results.push({
+          test: "Buffer Growth (10 writes)",
+          standard: standardTime,
+          newApi: resizableTime,
+          ratio: standardTime / resizableTime
+        });
+
+        return { supported: true, results };
+      }
+
+      // ============= Test 2: ArrayBuffer.transfer() =============
+      
+      function benchTransferArrayBuffer(features) {
+        if (!features.transferArrayBuffer) {
+          return { supported: false, message: "ArrayBuffer.transfer() not supported" };
+        }
+
+        const iterations = 5000;
+        const results = [];
+        const testSizes = [256, 1024, 4096];
+        
+        for (const size of testSizes) {
+          const copyBuffer = () => {
+            const original = new ArrayBuffer(size);
+            const view = new Uint8Array(original);
+            for (let i = 0; i < 64; i++) view[i] = i;
+            
+            const copy = new ArrayBuffer(size * 2);
+            const copyView = new Uint8Array(copy);
+            copyView.set(view);
+            return copy;
+          };
+
+          const transferBuffer = () => {
+            const original = new ArrayBuffer(size);
+            const view = new Uint8Array(original);
+            for (let i = 0; i < 64; i++) view[i] = i;
+            
+            return original.transfer(size * 2);
+          };
+
+          const copyTime = bench(iterations, copyBuffer);
+          const transferTime = bench(iterations, transferBuffer);
+
+          results.push({
+            test: `Resize ${size}B → ${size * 2}B`,
+            standard: copyTime,
+            newApi: transferTime,
+            ratio: copyTime / transferTime
+          });
+        }
+
+        return { supported: true, results };
+      }
+
+      // ============= Test 3: Native Base64 =============
+      
+      function benchBase64(features) {
+        const results = [];
+        const iterations = 2000;
+        const testSizes = [256, 1024];
+        
+        for (const size of testSizes) {
+          const data = new Uint8Array(size);
+          for (let i = 0; i < size; i++) data[i] = i & 0xff;
+
+          // btoa approach
+          const btoaEncode = () => {
+            let binary = '';
+            for (let i = 0; i < data.length; i++) {
+              binary += String.fromCharCode(data[i]);
+            }
+            return btoa(binary);
+          };
+
+          const btoaTime = bench(iterations, btoaEncode);
+
+          let nativeTime = null;
+          if (features.uint8ArrayToBase64) {
+            nativeTime = bench(iterations, () => data.toBase64());
+          }
+
+          results.push({
+            test: `Encode ${size}B`,
+            btoa: btoaTime,
+            native: nativeTime,
+            ratio: nativeTime ? btoaTime / nativeTime : null,
+            nativeSupported: features.uint8ArrayToBase64
+          });
+
+          // Decode
+          const encoded = btoaEncode();
+
+          const atobDecode = () => {
+            const decoded = atob(encoded);
+            const bytes = new Uint8Array(decoded.length);
+            for (let i = 0; i < decoded.length; i++) {
+              bytes[i] = decoded.charCodeAt(i);
+            }
+            return bytes;
+          };
+
+          const atobTime = bench(iterations, atobDecode);
+
+          let nativeDecodeTime = null;
+          if (features.uint8ArrayFromBase64) {
+            nativeDecodeTime = bench(iterations, () => Uint8Array.fromBase64(encoded));
+          }
+
+          results.push({
+            test: `Decode ${size}B`,
+            atob: atobTime,
+            native: nativeDecodeTime,
+            ratio: nativeDecodeTime ? atobTime / nativeDecodeTime : null,
+            nativeSupported: features.uint8ArrayFromBase64
+          });
+        }
+
+        return { results };
+      }
+
+      // ============= Test 4: String Encoding =============
+      
+      function benchStringEncoding() {
+        const results = [];
+        const iterations = 3000;
+        const textEncoder = new TextEncoder();
+        const textDecoder = new TextDecoder();
+
+        const testStrings = [
+          { name: "Short (10)", value: "Hello XPB!" },
+          { name: "Medium (50)", value: "This is a medium length string for testing purposes!" },
+        ];
+
+        for (const { name, value } of testStrings) {
+          const encodeCreate = () => textEncoder.encode(value);
+          const buffer = new Uint8Array(value.length * 3);
+          const encodeInto = () => textEncoder.encodeInto(value, buffer);
+
+          const encodeCreateTime = bench(iterations, encodeCreate);
+          const encodeIntoTime = bench(iterations, encodeInto);
+
+          results.push({
+            test: `Encode ${name}`,
+            encodeCreate: encodeCreateTime,
+            encodeInto: encodeIntoTime,
+            ratio: encodeCreateTime / encodeIntoTime
+          });
+
+          // Decode
+          const encoded = textEncoder.encode(value);
+          const decodeTime = bench(iterations, () => textDecoder.decode(encoded));
+          
+          // Manual for short ASCII
+          let manualTime = null;
+          if (encoded.length < 50) {
+            manualTime = bench(iterations, () => String.fromCharCode(...encoded));
+          }
+
+          results.push({
+            test: `Decode ${name}`,
+            textDecoder: decodeTime,
+            manual: manualTime,
+            ratio: manualTime ? decodeTime / manualTime : null
+          });
+        }
+
+        return { results };
+      }
+
+      // ============= Test 5: XPB Comparison =============
+      
+      function benchXPBWithNewAPIs(features) {
+        const results = [];
+        const iterations = 3000;
+
+        const largeUser = {
+          id: 12345678901234n,
+          name: "Alice Johnson",
+          email: "alice.johnson@example.com",
+          age: 30,
+          score: 95.5,
+          active: true,
+          description: "This is a longer description field."
+        };
+        const largeUserSchema = {
+          fields: [
+            { tag: 1, type: FieldType.Uint64, name: "id" },
+            { tag: 2, type: FieldType.String, name: "name" },
+            { tag: 3, type: FieldType.String, name: "email" },
+            { tag: 4, type: FieldType.Int32, name: "age" },
+            { tag: 5, type: FieldType.Float64, name: "score" },
+            { tag: 6, type: FieldType.Bool, name: "active" },
+            { tag: 7, type: FieldType.String, name: "description" },
+          ],
+        };
+
+        // Current XPB implementation
+        const currentEncode = compileEncoder(largeUserSchema);
+        const currentDecode = compileDecoder(largeUserSchema);
+        const slab = new SlabAllocator(65536);
+
+        slab.pos = 0;
+        currentEncode(slab, largeUser);
+        const currentEncoded = new Uint8Array(slab.buf.subarray(0, slab.pos));
+
+        const currentEncTime = bench(iterations, () => {
+          slab.pos = 0;
+          currentEncode(slab, largeUser);
+        });
+
+        const currentDecTime = bench(iterations, () => {
+          currentDecode(currentEncoded, currentEncoded.length);
+        });
+
+        results.push({
+          name: "Current XPB (SlabAllocator)",
+          encodeNs: currentEncTime,
+          decodeNs: currentDecTime,
+          sizeBytes: currentEncoded.length
+        });
+
+        return { results };
+      }
+
+      // ============= Display Results =============
+      
+      function displayResults(allResults) {
+        let html = '';
+
+        // Resizable ArrayBuffer
+        html += `<h2>1️⃣ Resizable ArrayBuffer</h2>`;
+        if (allResults.resizable.supported) {
+          html += `<table><tr><th>Test</th><th>Standard (copy)</th><th>Resizable API</th><th>Speedup</th></tr>`;
+          for (const r of allResults.resizable.results) {
+            const cls = r.ratio > 1 ? 'faster' : 'slower';
+            html += `<tr><td>${r.test}</td><td>${r.standard.toFixed(0)} ns</td><td class="highlight">${r.newApi.toFixed(0)} ns</td><td class="${cls}">${r.ratio.toFixed(2)}x</td></tr>`;
+          }
+          html += `</table>`;
+        } else {
+          html += `<div class="feature-box"><h4>${allResults.resizable.message}</h4></div>`;
+        }
+
+        // ArrayBuffer.transfer()
+        html += `<h2>2️⃣ ArrayBuffer.transfer()</h2>`;
+        if (allResults.transfer.supported) {
+          html += `<table><tr><th>Test</th><th>Copy + Allocate</th><th>transfer()</th><th>Speedup</th></tr>`;
+          for (const r of allResults.transfer.results) {
+            const cls = r.ratio > 1 ? 'faster' : 'slower';
+            html += `<tr><td>${r.test}</td><td>${r.standard.toFixed(0)} ns</td><td class="highlight">${r.newApi.toFixed(0)} ns</td><td class="${cls}">${r.ratio.toFixed(2)}x</td></tr>`;
+          }
+          html += `</table>`;
+        } else {
+          html += `<div class="feature-box"><h4>${allResults.transfer.message}</h4></div>`;
+        }
+
+        // Base64
+        html += `<h2>3️⃣ Native Base64</h2>`;
+        html += `<table><tr><th>Test</th><th>btoa/atob</th><th>Native</th><th>Speedup</th></tr>`;
+        for (const r of allResults.base64.results) {
+          const oldVal = r.btoa ?? r.atob;
+          const nativeStr = r.nativeSupported && r.native ? `<span class="highlight">${r.native.toFixed(0)} ns</span>` : '<span style="color:#666">N/A</span>';
+          const ratioStr = r.ratio ? `<span class="${r.ratio > 1 ? 'faster' : 'slower'}">${r.ratio.toFixed(2)}x</span>` : 'N/A';
+          html += `<tr><td>${r.test}</td><td>${oldVal.toFixed(0)} ns</td><td>${nativeStr}</td><td>${ratioStr}</td></tr>`;
+        }
+        html += `</table>`;
+
+        // String Encoding
+        html += `<h2>4️⃣ String Encoding</h2>`;
+        html += `<table><tr><th>Test</th><th>encode()/decode()</th><th>encodeInto()/manual</th><th>Speedup</th></tr>`;
+        for (const r of allResults.string.results) {
+          const oldVal = r.encodeCreate ?? r.textDecoder;
+          const newVal = r.encodeInto ?? r.manual;
+          const newStr = newVal ? `<span class="highlight">${newVal.toFixed(0)} ns</span>` : '<span style="color:#666">N/A</span>';
+          const ratio = r.ratio ?? (newVal ? oldVal / newVal : null);
+          const ratioStr = ratio ? `<span class="${ratio > 1 ? 'faster' : 'slower'}">${ratio.toFixed(2)}x</span>` : 'N/A';
+          html += `<tr><td>${r.test}</td><td>${oldVal.toFixed(0)} ns</td><td>${newStr}</td><td>${ratioStr}</td></tr>`;
+        }
+        html += `</table>`;
+
+        // XPB
+        html += `<h2>5️⃣ XPB Performance</h2>`;
+        html += `<table><tr><th>Implementation</th><th>Encode</th><th>Decode</th><th>Size</th></tr>`;
+        for (const r of allResults.xpb.results) {
+          html += `<tr><td>${r.name}</td><td class="highlight">${r.encodeNs.toFixed(0)} ns</td><td class="highlight">${r.decodeNs.toFixed(0)} ns</td><td>${r.sizeBytes} B</td></tr>`;
+        }
+        html += `</table>`;
+
+        // Summary
+        html += `<h2>📋 Summary & Recommendations</h2>`;
+        html += `<div class="summary">`;
+        
+        if (allResults.transfer.supported && allResults.transfer.results.length > 0) {
+          const avgSpeedup = allResults.transfer.results.reduce((a, r) => a + r.ratio, 0) / allResults.transfer.results.length;
+          html += `<p>✅ <strong>ArrayBuffer.transfer()</strong>: <span class="faster">${avgSpeedup.toFixed(1)}x faster</span> for buffer resizing</p>`;
+        }
+        
+        if (allResults.resizable.supported && allResults.resizable.results.length > 0) {
+          const avgSpeedup = allResults.resizable.results.reduce((a, r) => a + r.ratio, 0) / allResults.resizable.results.length;
+          html += `<p>✅ <strong>Resizable ArrayBuffer</strong>: <span class="faster">${avgSpeedup.toFixed(1)}x benefit</span> for dynamic encoding</p>`;
+        }
+        
+        html += `<p>💡 <strong>encodeInto()</strong>: XPB already uses this optimal method</p>`;
+        html += `<p>💡 <strong>Manual ASCII decode</strong>: XPB already optimizes short strings this way</p>`;
+        html += `</div>`;
+
+        document.getElementById('results').innerHTML = html;
+        document.getElementById('status').style.display = 'none';
+
+        window.newApisBenchmarkResults = allResults;
+      }
+
+      // ============= Run =============
+      
+      async function run() {
+        const features = detectFeatures();
+        displayFeatures(features);
+
+        await new Promise(r => setTimeout(r, 100));
+
+        const allResults = {
+          features,
+          resizable: benchResizableArrayBuffer(features),
+          transfer: benchTransferArrayBuffer(features),
+          base64: benchBase64(features),
+          string: benchStringEncoding(),
+          xpb: benchXPBWithNewAPIs(features)
+        };
+
+        displayResults(allResults);
+      }
+
+      run();
+    </script>
+  </body>
+</html>
