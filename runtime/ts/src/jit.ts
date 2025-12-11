@@ -221,10 +221,14 @@ function generateFieldWrite(field: FieldDef, valVar: string): string {
 export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
   const lines: string[] = [];
   
+  // Check if we need a DataView (for floats)
+  const hasFloats = schema.fields.some(f => f.type === FieldType.Float32 || f.type === FieldType.Float64);
+
   lines.push(`
     var pos = 0;
     var obj = {};
     var val, len, first;
+    ${hasFloats ? 'var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);' : ''}
   `);
 
   for (const field of schema.fields) {
@@ -285,14 +289,12 @@ function generateFieldRead(field: FieldDef): string {
 
     case FieldType.Float32:
       return `
-        var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         val = view.getFloat32(pos, true);
         pos += 4;
       `;
 
     case FieldType.Float64:
       return `
-        var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         val = view.getFloat64(pos, true);
         pos += 8;
       `;

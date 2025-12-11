@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/anthropic/xpb/pkg/wire"
 )
@@ -242,7 +243,7 @@ func (d *Decoder) ReadString() (string, error) {
 	if d.pos+length > len(d.buf) {
 		return "", io.ErrUnexpectedEOF
 	}
-	s := string(d.buf[d.pos : d.pos+length])
+	s := unsafe.String(unsafe.SliceData(d.buf[d.pos:]), length)
 	d.pos += length
 	return s, nil
 }
