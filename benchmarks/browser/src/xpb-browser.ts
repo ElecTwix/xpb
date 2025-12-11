@@ -1,70 +1,31 @@
 /**
- * XPB V2 Browser Runtime
- * Optimized for browser (no Node.js Buffer dependency)
+ * XPB V2 TypeScript Runtime
+ * 
+ * V2 uses:
+ * - Struct mode (no tags, fields in declaration order)
+ * - Fixed-width integers (4/8 bytes, little-endian, two's complement)
+ * - Compact length encoding (1 byte if < 255, else 0xFF + 4 bytes)
  */
 
 // Compact length constants
-const CompactLengthThreshold = 254;
-const CompactLengthMarker = 0xFF;
+export const CompactLengthThreshold = 254;
+export const CompactLengthMarker = 0xFF;
 
+// Fixed sizes
+export const SizeBool = 1;
+export const SizeInt32 = 4;
+export const SizeInt64 = 8;
+export const SizeUint32 = 4;
+export const SizeUint64 = 8;
+export const SizeFloat32 = 4;
+export const SizeFloat64 = 8;
+
+// Cached encoder/decoder for strings
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-// ============= BUFFER POOL =============
-
 /**
- * BufferPool for reusing ArrayBuffers to reduce GC pressure.
- * Maintains a pool of pre-allocated buffers for encoding.
- */
-export class BufferPool {
-  private pool: Uint8Array[] = [];
-  private size: number;
-  
-  constructor(poolSize = 8, bufferSize = 1024) {
-    this.size = bufferSize;
-    // Pre-allocate buffers
-    for (let i = 0; i < poolSize; i++) {
-      this.pool.push(new Uint8Array(bufferSize));
-    }
-  }
-  
-  /**
-   * Get a buffer from the pool (or create new if empty)
-   */
-  acquire(): Uint8Array {
-    return this.pool.pop() || new Uint8Array(this.size);
-  }
-  
-  /**
-   * Return a buffer to the pool
-   */
-  release(buf: Uint8Array): void {
-    if (buf.length === this.size && this.pool.length < 16) {
-      this.pool.push(buf);
-    }
-  }
-  
-  /**
-   * Encode with pooled buffer - returns the encoded data (copy)
-   */
-  encode<T>(encodeFn: (buf: Uint8Array) => number, copyResult = true): Uint8Array {
-    const buf = this.acquire();
-    const len = encodeFn(buf);
-    if (copyResult) {
-      const result = new Uint8Array(len);
-      result.set(buf.subarray(0, len));
-      this.release(buf);
-      return result;
-    }
-    return buf.subarray(0, len);
-  }
-}
-
-// Global buffer pool
-export const bufferPool = new BufferPool();
-
-/**
- * Browser-optimized Encoder
+ * V2 Encoder - tagless, fixed-width, compact lengths.
  */
 export class Encoder {
   private buf: Uint8Array;
@@ -94,116 +55,340 @@ export class Encoder {
     this.pos = 0;
   }
 
+  /** Write bool as 1 byte */
   writeBool(v: boolean): void {
     this.ensureCapacity(1);
     this.buf[this.pos++] = v ? 1 : 0;
   }
 
+  /** Write int32 as 4 bytes (little-endian, two's complement) */
   writeInt32(v: number): void {
     this.ensureCapacity(4);
-    this.view.setInt32(this.pos, v, true);
+    const p = this.pos;
+    this.buf[p] = v;
+    this.buf[p + 1] = v >> 8;
+    this.buf[p + 2] = v >> 16;
+    this.buf[p + 3] = v >> 24;
     this.pos += 4;
   }
 
+  /** Write int64 as 8 bytes (little-endian, two's complement) */
+  writeInt64(v: bigint): void {
+    this.ensureCapacity(8);
+    let lo = Number(v & 0xffffffffn);
+    let hi = Number(v >> 32n);
+    const p = this.pos;
+    this.buf[p] = lo;
+    this.buf[p + 1] = lo >> 8;
+    this.buf[p + 2] = lo >> 16;
+    this.buf[p + 3] = lo >> 24;
+    this.buf[p + 4] = hi;
+    this.buf[p + 5] = hi >> 8;
+    this.buf[p + 6] = hi >> 16;
+    this.buf[p + 7] = hi >> 24;
+    this.pos += 8;
+  }
+
+  /** Write uint32 as 4 bytes (little-endian) */
+  writeUint32(v: number): void {
+    this.ensureCapacity(4);
+    const p = this.pos;
+    this.buf[p] = v;
+    this.buf[p + 1] = v >> 8;
+    this.buf[p + 2] = v >> 16;
+    this.buf[p + 3] = v >> 24;
+    this.pos += 4;
+  }
+
+  /** Write uint64 as 8 bytes (little-endian) */
+  writeUint64(v: bigint): void {
+    this.ensureCapacity(8);
+    let lo = Number(v & 0xffffffffn);
+    let hi = Number(v >> 32n);
+    const p = this.pos;
+    this.buf[p] = lo;
+    this.buf[p + 1] = lo >> 8;
+    this.buf[p + 2] = lo >> 16;
+    this.buf[p + 3] = lo >> 24;
+    this.buf[p + 4] = hi;
+    this.buf[p + 5] = hi >> 8;
+    this.buf[p + 6] = hi >> 16;
+    this.buf[p + 7] = hi >> 24;
+    this.pos += 8;
+  }
+
+  /** Write float32 as 4 bytes */
+  writeFloat32(v: number): void {
+    this.ensureCapacity(4);
+    this.view.setFloat32(this.pos, v, true);
+    this.pos += 4;
+  }
+
+  /** Write float64 as 8 bytes */
+  writeFloat64(v: number): void {
+    this.ensureCapacity(8);
+    this.view.setFloat64(this.pos, v, true);
+    this.pos += 8;
+  }
+
+  /** Write compact length prefix */
+  private writeCompactLength(length: number): void {
+    if (length <= CompactLengthThreshold) {
+      this.ensureCapacity(1);
+      this.buf[this.pos++] = length;
+    } else {
+      this.ensureCapacity(5);
+      this.buf[this.pos++] = CompactLengthMarker;
+      const p = this.pos;
+      this.buf[p] = length;
+      this.buf[p + 1] = length >> 8;
+      this.buf[p + 2] = length >> 16;
+      this.buf[p + 3] = length >> 24;
+      this.pos += 4;
+    }
+  }
+
+  /** Write string with compact length prefix */
   writeString(v: string): void {
-    // Browser: use encodeInto for zero-allocation
-    this.ensureCapacity(v.length * 3 + 5); // UTF-8 worst case + length
-    const lenPos = this.pos++;
-    
-    // ASCII fast path
-    const strLen = v.length;
-    if (strLen < 40) {
+    const len = v.length;
+    // Optimization: For short strings (likely ASCII), try manual encoding
+    // This avoids the heavy overhead of TextEncoder.encode()
+    if (len < 64) {
+      // Optimistically assume 1 byte per char + 1 byte length
+      this.ensureCapacity(len + 1);
+      
       let isAscii = true;
-      for (let i = 0; i < strLen; i++) {
+      const startPos = this.pos;
+      
+      // Write length (assuming < 128 for now, but space is reserved)
+      // If we fail ASCII check, we rewind.
+      this.buf[this.pos++] = len;
+
+      for (let i = 0; i < len; i++) {
         const c = v.charCodeAt(i);
-        if (c > 127) { isAscii = false; break; }
-        this.buf[this.pos + i] = c;
+        if (c > 127) {
+          isAscii = false;
+          break;
+        }
+        this.buf[this.pos++] = c;
       }
+
       if (isAscii) {
-        this.buf[lenPos] = strLen;
-        this.pos += strLen;
         return;
       }
+      
+      // Rewind and fallback to TextEncoder
+      this.pos = startPos;
     }
+
+    // Use encodeInto for zero-copy encoding into the buffer
+    // Reserve space for length + max UTF8 size (3 bytes per char)
+    this.ensureCapacity(len * 3 + 5);
     
-    // Fallback: encodeInto
+    // Write placeholder for length
+    const lenPos = this.pos;
+    this.pos += 1; // Assume 1 byte length initially
+    
     const result = textEncoder.encodeInto(v, this.buf.subarray(this.pos));
-    this.buf[lenPos] = result.written!;
-    this.pos += result.written!;
+    const written = result.written!;
+    
+    if (written <= CompactLengthThreshold) {
+      this.buf[lenPos] = written;
+      this.pos += written;
+    } else {
+      // Rare case: length > 254. We need to shift data to make room for 5-byte length
+      const endPos = this.pos + written;
+      this.buf.copyWithin(lenPos + 5, lenPos + 1, endPos);
+      
+      this.buf[lenPos] = CompactLengthMarker;
+      this.buf[lenPos + 1] = written;
+      this.buf[lenPos + 2] = written >> 8;
+      this.buf[lenPos + 3] = written >> 16;
+      this.buf[lenPos + 4] = written >> 24;
+      
+      this.pos += written + 4; // +4 because we already advanced 1
+    }
+  }
+
+  /** Write bytes with compact length prefix */
+  writeBytes(v: Uint8Array): void {
+    this.writeCompactLength(v.length);
+    this.ensureCapacity(v.length);
+    this.buf.set(v, this.pos);
+    this.pos += v.length;
+  }
+
+  /** Write nested message (already encoded) with compact length prefix */
+  writeMessage(data: Uint8Array): void {
+    this.writeBytes(data);
   }
 }
 
 /**
- * Browser-optimized Decoder with ASCII fast path
+ * V2 Decoder - tagless, fixed-width, compact lengths.
  */
 export class Decoder {
   private data: Uint8Array;
-  private pos = 0;
   private view: DataView;
+  private pos = 0;
 
   constructor(data: Uint8Array) {
     this.data = data;
     this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   }
 
+  eof(): boolean {
+    return this.pos >= this.data.length;
+  }
+
+  remaining(): number {
+    return this.data.length - this.pos;
+  }
+
+  /** Read bool from 1 byte */
   readBool(): boolean {
+    if (this.pos >= this.data.length) {
+      throw new Error('xpb: unexpected EOF reading bool');
+    }
     return this.data[this.pos++] !== 0;
   }
 
+  /** Read int32 from 4 bytes (little-endian, two's complement) */
   readInt32(): number {
-    const v = this.view.getInt32(this.pos, true);
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading int32');
+    }
+    const p = this.pos;
+    const v = this.data[p] | (this.data[p + 1] << 8) | (this.data[p + 2] << 16) | (this.data[p + 3] << 24);
     this.pos += 4;
     return v;
   }
 
+  /** Read int64 from 8 bytes (little-endian, two's complement) */
+  readInt64(): bigint {
+    if (this.pos + 8 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading int64');
+    }
+    const p = this.pos;
+    const lo = this.data[p] | (this.data[p + 1] << 8) | (this.data[p + 2] << 16) | (this.data[p + 3] << 24);
+    const hi = this.data[p + 4] | (this.data[p + 5] << 8) | (this.data[p + 6] << 16) | (this.data[p + 7] << 24);
+    this.pos += 8;
+    return BigInt(lo >>> 0) | (BigInt(hi >>> 0) << 32n);
+  }
+
+  /** Read uint32 from 4 bytes (little-endian) */
+  readUint32(): number {
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading uint32');
+    }
+    const p = this.pos;
+    const v = (this.data[p] | (this.data[p + 1] << 8) | (this.data[p + 2] << 16) | (this.data[p + 3] << 24)) >>> 0;
+    this.pos += 4;
+    return v;
+  }
+
+  /** Read uint64 from 8 bytes (little-endian) */
+  readUint64(): bigint {
+    if (this.pos + 8 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading uint64');
+    }
+    const v = this.view.getBigUint64(this.pos, true);
+    this.pos += 8;
+    return v;
+  }
+
+  /** Read float32 from 4 bytes */
+  readFloat32(): number {
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading float32');
+    }
+    const v = this.view.getFloat32(this.pos, true);
+    this.pos += 4;
+    return v;
+  }
+
+  /** Read float64 from 8 bytes */
+  readFloat64(): number {
+    if (this.pos + 8 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading float64');
+    }
+    const v = this.view.getFloat64(this.pos, true);
+    this.pos += 8;
+    return v;
+  }
+
+  /** Read compact length prefix */
+  private readCompactLength(): number {
+    if (this.pos >= this.data.length) {
+      throw new Error('xpb: unexpected EOF reading length');
+    }
+    const first = this.data[this.pos++];
+    if (first !== CompactLengthMarker) {
+      return first;
+    }
+    // Read 4-byte length
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading extended length');
+    }
+    const length = this.view.getUint32(this.pos, true);
+    this.pos += 4;
+    return length;
+  }
+
+  /** Read string with compact length prefix */
   readString(): string {
-    const len = this.data[this.pos++];
-    
-    // Unrolled short string handling (most common case in XPB)
-    if (len === 0) {
-      return '';
-    } else if (len === 1) {
-      return String.fromCharCode(this.data[this.pos++]);
-    } else if (len === 2) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1]);
-      this.pos += 2;
-      return s;
-    } else if (len === 3) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2]);
-      this.pos += 3;
-      return s;
-    } else if (len === 4) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3]);
-      this.pos += 4;
-      return s;
-    } else if (len === 5) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4]);
-      this.pos += 5;
-      return s;
-    } else if (len === 6) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5]);
-      this.pos += 6;
-      return s;
-    } else if (len === 7) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6]);
-      this.pos += 7;
-      return s;
-    } else if (len === 8) {
-      const s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6], this.data[this.pos+7]);
-      this.pos += 8;
-      return s;
-    } else if (len <= 16) {
-      // Build short string: first 8 chars unrolled, then loop
-      let s = String.fromCharCode(this.data[this.pos], this.data[this.pos+1], this.data[this.pos+2], this.data[this.pos+3], this.data[this.pos+4], this.data[this.pos+5], this.data[this.pos+6], this.data[this.pos+7]);
-      for (let i = 8; i < len; i++) s += String.fromCharCode(this.data[this.pos + i]);
-      this.pos += len;
-      return s;
+    const length = this.readCompactLength();
+    if (this.pos + length > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading string');
     }
     
-    // For longer strings, TextDecoder is optimized in browsers
-    const str = textDecoder.decode(this.data.subarray(this.pos, this.pos + len));
-    this.pos += len;
-    return str;
+    // Optimization: For short strings, manual decode is faster than TextDecoder
+    if (length < 20) {
+      let result = "";
+      let isAscii = true;
+      // Peek to see if we can use fast path
+      for (let i = 0; i < length; i++) {
+        const b = this.data[this.pos + i];
+        if (b > 127) {
+          isAscii = false;
+          break;
+        }
+        result += String.fromCharCode(b);
+      }
+      
+      if (isAscii) {
+        this.pos += length;
+        return result;
+      }
+    }
+
+    const bytes = this.data.subarray(this.pos, this.pos + length);
+    this.pos += length;
+    return textDecoder.decode(bytes);
+  }
+
+  /** Read bytes with compact length prefix */
+  readBytes(): Uint8Array {
+    const length = this.readCompactLength();
+    if (this.pos + length > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading bytes');
+    }
+    const bytes = this.data.slice(this.pos, this.pos + length);
+    this.pos += length;
+    return bytes;
+  }
+
+  /** Read nested message bytes */
+  readMessageBytes(): Uint8Array {
+    return this.readBytes();
+  }
+
+  /** Skip n bytes */
+  skip(n: number): void {
+    if (this.pos + n > this.data.length) {
+      throw new Error('xpb: unexpected EOF during skip');
+    }
+    this.pos += n;
   }
 }
 
@@ -352,11 +537,14 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
     }
   }).join(', ');
   
+  // Optimization: Only create DataView if we have float fields
+  const hasFloats = schema.fields.some(f => f.type === FieldType.Float32 || f.type === FieldType.Float64);
+
   const lines: string[] = [`
     var pos = 0;
     var obj = { ${propInits} };
-    var len, isAscii, i, lo, hi, view;
-    view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    var len, isAscii, i, lo, hi;
+    ${hasFloats ? 'var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);' : ''}
   `];
 
   for (const field of schema.fields) {
@@ -404,6 +592,11 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         // 2. For >16 bytes, use TextDecoder directly (faster than ASCII checking + building string)
         lines.push(`
           len = buf[pos++];
+          if (len === 0xFF) {
+            len = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+            pos += 4;
+          }
+          
           if (len === 0) {
             obj.${field.name} = '';
           } else if (len === 1) {
@@ -448,8 +641,6 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
   Encoder,
   Decoder,
   SlabAllocator,
-  BufferPool,
-  bufferPool,
   compileEncoder,
   compileDecoder,
   FieldType
