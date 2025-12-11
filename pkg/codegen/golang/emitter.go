@@ -192,9 +192,12 @@ func (g *Generator) generateScalarEncode(varName string, t ast.FieldType, indent
 	case ast.TypeBytes:
 		g.printf("%senc.WriteBytes(%s)\n", indent, varName)
 	case ast.TypeMessage:
-		g.printf("%snestedEnc := xpb.NewEncoder(64)\n", indent)
-		g.printf("%s%s.MarshalTo(nestedEnc)\n", indent, varName)
-		g.printf("%senc.WriteMessage(nestedEnc.Bytes())\n", indent)
+		g.printf("%s{\n", indent)
+		g.printf("%s\tnestedEnc := xpb.GetEncoder()\n", indent)
+		g.printf("%s\t%s.MarshalTo(nestedEnc)\n", indent, varName)
+		g.printf("%s\tenc.WriteMessage(nestedEnc.Bytes())\n", indent)
+		g.printf("%s\txpb.PutEncoder(nestedEnc)\n", indent)
+		g.printf("%s}\n", indent)
 	}
 }
 

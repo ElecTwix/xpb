@@ -24,11 +24,12 @@ func BenchmarkXPB_Encode_Simple(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		enc := xpb.NewEncoder(64)
+		enc := xpb.GetEncoder()
 		enc.WriteString("Alice Johnson")
 		enc.WriteInt32(30)
 		enc.WriteBool(true)
 		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 
@@ -166,7 +167,7 @@ func BenchmarkXPB_Encode_Large(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		enc := xpb.NewEncoder(256)
+		enc := xpb.GetEncoder()
 		enc.WriteUint64(12345678901234)
 		enc.WriteString("Alice Johnson")
 		enc.WriteString("alice.johnson@example.com")
@@ -175,6 +176,7 @@ func BenchmarkXPB_Encode_Large(b *testing.B) {
 		enc.WriteBool(true)
 		enc.WriteString("This is a longer description field that contains more text.")
 		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 

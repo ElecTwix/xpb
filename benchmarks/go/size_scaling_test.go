@@ -234,7 +234,10 @@ func BenchmarkXPB_Encode_Tiny(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = encodeTinyXPB(m)
+		enc := xpb.GetEncoder()
+		enc.WriteBool(m.OK)
+		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 
@@ -295,7 +298,12 @@ func BenchmarkXPB_Encode_Small(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = encodeSmallXPB(m)
+		enc := xpb.GetEncoder()
+		enc.WriteInt32(m.ID)
+		enc.WriteInt32(m.Value)
+		enc.WriteString(m.Type)
+		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 
@@ -356,7 +364,17 @@ func BenchmarkXPB_Encode_Medium(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = encodeMediumXPB(m)
+		enc := xpb.GetEncoder()
+		enc.WriteUint64(m.ID)
+		enc.WriteString(m.Name)
+		enc.WriteString(m.Email)
+		enc.WriteString(m.Description)
+		enc.WriteFloat64(m.Score)
+		enc.WriteBool(m.Active)
+		enc.WriteString(m.Tags)
+		enc.WriteString(m.Metadata)
+		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 
@@ -417,7 +435,19 @@ func BenchmarkXPB_Encode_LargeDoc(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = encodeLargeXPB(m)
+		enc := xpb.GetEncoder()
+		enc.WriteUint64(m.ID)
+		enc.WriteString(m.Title)
+		enc.WriteString(m.Content)
+		enc.WriteString(m.Author)
+		enc.WriteInt32(int32(len(m.Tags)))
+		for _, t := range m.Tags {
+			enc.WriteString(t)
+		}
+		enc.WriteString(m.Metadata)
+		enc.WriteString(m.Description)
+		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 
@@ -478,7 +508,15 @@ func BenchmarkXPB_Encode_XLarge(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = encodeXLargeXPB(m)
+		enc := xpb.GetEncoder()
+		enc.WriteUint64(m.ID)
+		enc.WriteString(m.Payload)
+		enc.WriteInt32(int32(len(m.Items)))
+		for _, item := range m.Items {
+			enc.WriteString(item)
+		}
+		_ = enc.Bytes()
+		xpb.PutEncoder(enc)
 	}
 }
 

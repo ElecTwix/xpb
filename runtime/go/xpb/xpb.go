@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"sync"
 	"unsafe"
 
 	"github.com/anthropic/xpb/pkg/wire"
@@ -18,6 +19,26 @@ var (
 	ErrInvalidData    = errors.New("xpb: invalid data")
 )
 
+var encoderPool = sync.Pool{
+	New: func() interface{} {
+		return &Encoder{buf: make([]byte, 0, 256)}
+	},
+}
+
+// GetEncoder retrieves an Encoder from the pool.
+// The encoder is automatically reset and ready for use.
+// Call PutEncoder when done to return it to the pool.
+func GetEncoder() *Encoder {
+	e := encoderPool.Get().(*Encoder)
+	e.Reset()
+	return e
+}
+
+// PutEncoder returns an Encoder to the pool.
+func PutEncoder(e *Encoder) {
+	encoderPool.Put(e)
+}
+
 // Encoder encodes values into XPB V2 binary format.
 // V2 uses fixed-width encoding with no tags.
 type Encoder struct {
@@ -25,6 +46,7 @@ type Encoder struct {
 }
 
 // NewEncoder creates a new encoder with the given initial capacity.
+// For better performance, use GetEncoder() instead to utilize the object pool.
 func NewEncoder(capacity int) *Encoder {
 	return &Encoder{buf: make([]byte, 0, capacity)}
 }
@@ -234,7 +256,9 @@ func (d *Decoder) readCompactLength() (int, error) {
 	return int(length), nil
 }
 
-// ReadString reads a length-prefixed string.
+// ReadString reads a length-prefixed string using zero-copy (unsafe).
+// The returned string aliases the decoder's buffer.
+// Use CloneString() if you need a safe copy.
 func (d *Decoder) ReadString() (string, error) {
 	length, err := d.readCompactLength()
 	if err != nil {
@@ -244,6 +268,21 @@ func (d *Decoder) ReadString() (string, error) {
 		return "", io.ErrUnexpectedEOF
 	}
 	s := unsafe.String(unsafe.SliceData(d.buf[d.pos:]), length)
+	d.pos += length
+	return s, nil
+}
+
+// CloneString reads a length-prefixed string and returns a safe copy.
+func (d *Decoder) CloneString() (string, error) {
+	length, err := d.readCompactLength()
+	if err != nil {
+		return "", err
+	}
+	if d.pos+length > len(d.buf) {
+		return "", io.ErrUnexpectedEOF
+	}
+	// Force allocation
+	s := string(d.buf[d.pos : d.pos+length])
 	d.pos += length
 	return s, nil
 }
