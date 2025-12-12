@@ -289,7 +289,7 @@
         <div class="summary">
           <h3>📊 Analysis</h3>
           <p><strong>Naive Worker:</strong> Slower due to 'Structured Clone' cost (copying objects).</p>
-          <p><strong>Optimized Worker:</strong> Faster for large data because it uses <code>Transferable Objects</code> (Zero-Copy).</p>
+          <p><strong>Optimized Worker:</strong> Effective for String Arrays as small as <strong>200 items (5KB)</strong>! Uses <code>Transferable Objects</code> (Zero-Copy).</p>
         </div>
       `;
       
