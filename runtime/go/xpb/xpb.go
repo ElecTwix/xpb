@@ -302,6 +302,22 @@ func (d *Decoder) ReadBytes() ([]byte, error) {
 	return data, nil
 }
 
+// ReadBytesUnsafe reads a length-prefixed byte slice using zero-copy.
+// The returned slice aliases the decoder's buffer.
+// Warning: The data remains valid only as long as the decoder buffer is valid.
+func (d *Decoder) ReadBytesUnsafe() ([]byte, error) {
+	length, err := d.readCompactLength()
+	if err != nil {
+		return nil, err
+	}
+	if d.pos+length > len(d.buf) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	data := d.buf[d.pos : d.pos+length]
+	d.pos += length
+	return data, nil
+}
+
 // ReadMessageBytes reads a length-prefixed message.
 func (d *Decoder) ReadMessageBytes() ([]byte, error) {
 	return d.ReadBytes()

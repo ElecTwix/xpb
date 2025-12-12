@@ -253,3 +253,26 @@ func TestDecoder_Remaining(t *testing.T) {
 		t.Errorf("Remaining = %d, want 4", dec.Remaining())
 	}
 }
+
+func TestDecoder_ReadBytesUnsafe(t *testing.T) {
+	enc := NewEncoder(1024) // Ensure large capacity
+	data := []byte{0x01, 0x02, 0x03, 0x04}
+	enc.WriteBytes(data)
+
+	dec := NewDecoder(enc.Bytes())
+
+	// ReadBytesUnsafe should alias the buffer
+	unsafeBytes, err := dec.ReadBytesUnsafe()
+	if err != nil {
+		t.Fatalf("ReadBytesUnsafe: %v", err)
+	}
+	if !bytes.Equal(unsafeBytes, data) {
+		t.Errorf("ReadBytesUnsafe = %v, want %v", unsafeBytes, data)
+	}
+
+	// Verify it's a slice of the original capacity (indicating no alloc copy)
+	// Original buffer has cap 1024. Slice should have cap > len.
+	if cap(unsafeBytes) <= len(unsafeBytes) {
+		t.Errorf("ReadBytesUnsafe appears to have allocated (cap %d == len %d), expected alias of large buffer", cap(unsafeBytes), len(unsafeBytes))
+	}
+}
