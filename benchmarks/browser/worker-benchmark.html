@@ -177,6 +177,20 @@
       return (end - start) / iterations;
     }
     
+    // Encode test data (JSON)
+    function encodeJSONStringArray(arr) {
+      const str = JSON.stringify(arr);
+      return new TextEncoder().encode(str);
+    }
+
+    // Decode test data (JSON)
+    function decodeJSONStringArray(data) {
+      const str = new TextDecoder().decode(data);
+      return JSON.parse(str);
+    }
+
+    // ... (existing encoding functions)
+
     // Run benchmarks
     async function runBenchmarks() {
       status.textContent = 'Initializing worker pools...';
@@ -204,99 +218,60 @@
       };
       
       // String Array benchmarks
-      html += '<h2>📦 String Array Decode: Main vs Naive vs Optimized</h2>';
-      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Naive Worker</th><th>Optimized Worker</th><th>Speedup (Opt)</th></tr>';
+      html += '<h2>📦 String Array Decode: XPB Worker vs JSON</h2>';
+      html += '<table><tr><th>Size</th><th>XPB Size</th><th>JSON Size</th><th>XPB Worker</th><th>JSON Parse</th><th>Winner</th></tr>';
       
       for (const { name, count, iterations } of testSizes) {
         const data = generateLargeStringArray(count);
-        const encoded = encodeStringArray(data);
-        const payloadSize = (encoded.length / 1024).toFixed(1) + ' KB';
         
-        // Main thread benchmark
-        const syncTime = await benchSync('sync', iterations, () => {
-          decodeStringArraySync(encoded);
-        });
+        // XPB Prep
+        const xpbEncoded = encodeStringArray(data);
+        const xpbSize = (xpbEncoded.length / 1024).toFixed(1) + ' KB';
         
-        // Naive Worker benchmark
-        const asyncTime = await benchAsync('async', iterations, async () => {
-          const buffer = encoded.buffer.slice(0);
-          await poolNaive.decodeStringArrayAsync(buffer);
-        });
-
-        // Optimized Worker benchmark
-        const optTime = await benchAsync('opt', iterations, async () => {
-          const buffer = encoded.buffer.slice(0);
+        // JSON Prep
+        const jsonEncoded = encodeJSONStringArray(data);
+        const jsonSize = (jsonEncoded.length / 1024).toFixed(1) + ' KB';
+        
+        // XPB Worker benchmark
+        const xpbTime = await benchAsync('xpb-worker', iterations, async () => {
+          const buffer = xpbEncoded.buffer.slice(0);
           await poolOpt.decodeStringArrayAsync(buffer);
         });
-        
-        const speedup = syncTime / optTime;
-        
-        allResults.stringArray.push({ name, payloadSize, syncTime, asyncTime, optTime, speedup });
-        
-        html += `<tr>
-          <td>${name}</td>
-          <td>${payloadSize}</td>
-          <td>${syncTime.toFixed(2)} ms</td>
-          <td>${asyncTime.toFixed(2)} ms</td>
-          <td class="${optTime < syncTime ? 'success' : ''}">${optTime.toFixed(2)} ms</td>
-          <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
-        </tr>`;
-      }
-      
-      html += '</table>';
-      
-      // Int32 Array benchmarks
-      html += '<h2>📦 Int32 Array Decode: Main vs Naive vs Optimized</h2>';
-      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Naive Worker</th><th>Optimized Worker</th><th>Speedup (Opt)</th></tr>';
-      
-      for (const { name, count, iterations } of testSizes) {
-        const data = generateLargeIntArray(count);
-        const encoded = encodeInt32Array(data);
-        const payloadSize = (encoded.length / 1024).toFixed(1) + ' KB';
-        
-        const syncTime = await benchSync('sync', iterations, () => {
-          decodeInt32ArraySync(encoded);
+
+        // JSON benchmark (Main Thread)
+        // JSON.parse is blocking, but it's the standard.
+        // We include TextDecoder time because XPB handles binary->string.
+        const jsonTime = await benchSync('json', iterations, () => {
+           decodeJSONStringArray(jsonEncoded);
         });
         
-        const asyncTime = await benchAsync('async', iterations, async () => {
-          const buffer = encoded.buffer.slice(0);
-          await poolNaive.decodeInt32ArrayAsync(buffer);
+        const speedup = jsonTime / xpbTime;
+        const winner = xpbTime < jsonTime ? `<strong>XPB (${speedup.toFixed(2)}x)</strong>` : `JSON (${(jsonTime/xpbTime).toFixed(2)}x)`;
+        
+        allResults.stringArray.push({
+            name, 
+            payloadSize: xpbSize, // reusing field name for compat
+            jsonSize,
+            xpbTime, 
+            jsonTime, 
+            speedup
         });
 
-        const optTime = await benchAsync('opt', iterations, async () => {
-          const buffer = encoded.buffer.slice(0);
-          await poolOpt.decodeInt32ArrayAsync(buffer);
-        });
-        
-        const speedup = syncTime / optTime;
-        
-        allResults.int32Array.push({ name, payloadSize, syncTime, asyncTime, optTime, speedup });
-        
         html += `<tr>
           <td>${name}</td>
-          <td>${payloadSize}</td>
-          <td>${syncTime.toFixed(2)} ms</td>
-          <td>${asyncTime.toFixed(2)} ms</td>
-          <td class="${optTime < syncTime ? 'success' : ''}">${optTime.toFixed(2)} ms</td>
-          <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
+          <td>${xpbSize}</td>
+          <td>${jsonSize}</td>
+          <td class="highlight">${xpbTime.toFixed(2)} ms</td>
+          <td>${jsonTime.toFixed(2)} ms</td>
+          <td>${winner}</td>
         </tr>`;
       }
       
       html += '</table>';
-      
-      // Summary
-      html += `
-        <div class="summary">
-          <h3>📊 Analysis</h3>
-          <p><strong>Naive Worker:</strong> Slower due to 'Structured Clone' cost (copying objects).</p>
-          <p><strong>Optimized Worker:</strong> Effective for String Arrays as small as <strong>200 items (5KB)</strong>! Uses <code>Transferable Objects</code> (Zero-Copy).</p>
-        </div>
-      `;
       
       results.innerHTML = html;
       status.style.display = 'none';
 
-      // Export results for Playwright
       window.workerBenchmarkResults = allResults;
       
       poolNaive.terminate();

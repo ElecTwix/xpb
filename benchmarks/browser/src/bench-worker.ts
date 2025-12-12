@@ -70,36 +70,19 @@ async function main() {
   server.close();
   
   // Report String Array
-  console.log("\n📦 String Array Benchmark:");
+  console.log("\n📦 String Array Benchmark (XPB Worker vs JSON):");
   console.log("┌───────────────────────────┬─────────────┬─────────────┬─────────────┬─────────────┬─────────┐");
-  console.log("│ Size                      │ Payload     │ Main Thread │ Naive Worker│ Opt Worker  │ Speedup │");
+  console.log("│ Size                      │ XPB Size    │ JSON Size   │ XPB Worker  │ JSON Parse  │ Speedup │");
   console.log("├───────────────────────────┼─────────────┼─────────────┼─────────────┼─────────────┼─────────┤");
   
   for (const r of results.stringArray) {
       const name = r.name.padEnd(25);
-      const size = r.payloadSize.padEnd(11);
-      const main = r.syncTime.toFixed(2).padStart(8) + " ms";
-      const naive = r.asyncTime.toFixed(2).padStart(8) + " ms";
-      const opt = r.optTime.toFixed(2).padStart(8) + " ms";
+      const xpbSize = r.payloadSize.padEnd(11);
+      const jsonSize = r.jsonSize.padEnd(11);
+      const xpbTime = r.xpbTime.toFixed(2).padStart(8) + " ms";
+      const jsonTime = r.jsonTime.toFixed(2).padStart(8) + " ms";
       const speedup = r.speedup.toFixed(2).padStart(6) + "x";
-      console.log(`│ ${name} │ ${size} │ ${main} │ ${naive} │ ${opt} │ ${speedup} │`);
-  }
-  console.log("└───────────────────────────┴─────────────┴─────────────┴─────────────┴─────────────┴─────────┘");
-
-  // Report Int32 Array
-  console.log("\n📦 Int32 Array Benchmark:");
-  console.log("┌───────────────────────────┬─────────────┬─────────────┬─────────────┬─────────────┬─────────┐");
-  console.log("│ Size                      │ Payload     │ Main Thread │ Naive Worker│ Opt Worker  │ Speedup │");
-  console.log("├───────────────────────────┼─────────────┼─────────────┼─────────────┼─────────────┼─────────┤");
-  
-  for (const r of results.int32Array) {
-      const name = r.name.padEnd(25);
-      const size = r.payloadSize.padEnd(11);
-      const main = r.syncTime.toFixed(2).padStart(8) + " ms";
-      const naive = r.asyncTime.toFixed(2).padStart(8) + " ms";
-      const opt = r.optTime.toFixed(2).padStart(8) + " ms";
-      const speedup = r.speedup.toFixed(2).padStart(6) + "x";
-      console.log(`│ ${name} │ ${size} │ ${main} │ ${naive} │ ${opt} │ ${speedup} │`);
+      console.log(`│ ${name} │ ${xpbSize} │ ${jsonSize} │ ${xpbTime} │ ${jsonTime} │ ${speedup} │`);
   }
   console.log("└───────────────────────────┴─────────────┴─────────────┴─────────────┴─────────────┴─────────┘");
   
