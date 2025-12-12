@@ -102,6 +102,11 @@ export class XPBWorkerPool {
 
   // --- Public API ---
 
+  /**
+   * Decodes an Int32Array using a worker.
+   * Recommendation: Use only for VERY large arrays (> 200KB or 50k items).
+   * For smaller arrays, the main thread is faster.
+   */
   async decodeInt32Array(buffer: ArrayBuffer): Promise<Int32Array> {
     const worker = await this.getWorker();
     const id = this.nextRequestId++;
@@ -114,6 +119,7 @@ export class XPBWorkerPool {
 
   /**
    * Decodes a string array using a worker.
+   * Recommendation: Use for arrays > 20KB or 1k items.
    * Returns a standard string[] but reconstructed efficiently from shared buffers.
    */
   async decodeStringArray(buffer: ArrayBuffer): Promise<string[]> {
