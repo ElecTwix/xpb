@@ -110,7 +110,7 @@ export class XPBNodeWorkerPool {
       // In Node, passing a TypedArray view of a shared buffer might clone.
       // Best to pass the underlying ArrayBuffer if it's unique.
       const ab = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
-      worker.postMessage({ id, type: 'int32Array', buffer: ab }, [ab]);
+      worker.postMessage({ id, type: 'int32Array', buffer: ab }, [ab as any]);
     });
   }
 
@@ -136,7 +136,7 @@ export class XPBNodeWorkerPool {
     const rawResult = await new Promise<StringArrayResult>((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
       const ab = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
-      worker.postMessage({ id, type: 'stringArray', buffer: ab }, [ab]);
+      worker.postMessage({ id, type: 'stringArray', buffer: ab }, [ab as any]);
     });
 
     const { offsets, data } = rawResult;

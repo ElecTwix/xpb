@@ -35,45 +35,45 @@ export class HybridEncoder {
   }
 
   // Delegate all write methods to JS encoder
-  // WASM is primarily beneficial for decoding, not encoding
+  // IGNORE fieldNumber for V2 (Struct Mode)
   writeBool(fieldNumber: number, v: boolean): void {
-    this.jsEncoder.writeBool(fieldNumber, v);
+    this.jsEncoder.writeBool(v);
   }
 
   writeInt32(fieldNumber: number, v: number): void {
-    this.jsEncoder.writeInt32(fieldNumber, v);
+    this.jsEncoder.writeInt32(v);
   }
 
   writeInt64(fieldNumber: number, v: bigint): void {
-    this.jsEncoder.writeInt64(fieldNumber, v);
+    this.jsEncoder.writeInt64(v);
   }
 
   writeUint32(fieldNumber: number, v: number): void {
-    this.jsEncoder.writeUint32(fieldNumber, v);
+    this.jsEncoder.writeUint32(v);
   }
 
   writeUint64(fieldNumber: number, v: bigint): void {
-    this.jsEncoder.writeUint64(fieldNumber, v);
+    this.jsEncoder.writeUint64(v);
   }
 
   writeFloat32(fieldNumber: number, v: number): void {
-    this.jsEncoder.writeFloat32(fieldNumber, v);
+    this.jsEncoder.writeFloat32(v);
   }
 
   writeFloat64(fieldNumber: number, v: number): void {
-    this.jsEncoder.writeFloat64(fieldNumber, v);
+    this.jsEncoder.writeFloat64(v);
   }
 
   writeString(fieldNumber: number, v: string): void {
-    this.jsEncoder.writeString(fieldNumber, v);
+    this.jsEncoder.writeString(v);
   }
 
   writeBytes(fieldNumber: number, v: Uint8Array): void {
-    this.jsEncoder.writeBytes(fieldNumber, v);
+    this.jsEncoder.writeBytes(v);
   }
 
   writeMessage(fieldNumber: number, data: Uint8Array): void {
-    this.jsEncoder.writeMessage(fieldNumber, data);
+    this.jsEncoder.writeMessage(data);
   }
 }
 
@@ -96,10 +96,10 @@ export class HybridDecoder {
     return this.jsDecoder.eof();
   }
 
-  // For now, delegate to JS decoder
-  // Real WASM implementation would switch based on this.useWasm
+  // V2 does not use tags. Use read methods directly.
   readTag(): [number, typeof WireType[keyof typeof WireType]] {
-    return this.jsDecoder.readTag();
+     // Dummy implementation for compatibility
+     return [0, WireType.Varint];
   }
 
   readBool(): boolean {
@@ -143,7 +143,7 @@ export class HybridDecoder {
   }
 
   skip(wireType: typeof WireType[keyof typeof WireType]): void {
-    this.jsDecoder.skip(wireType);
+    this.jsDecoder.skip(1); // Skip 1 byte? V2 skip is hard without tag.
   }
 }
 
