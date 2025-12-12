@@ -522,46 +522,35 @@ export function compileEncoder<T>(schema: SchemaDef): (slab: SlabAllocator, obj:
 }
 
 export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
-  // V8 Optimization: Pre-initialize all properties for consistent hidden class
-  const propInits = schema.fields.map(f => {
-    switch (f.type) {
-      case FieldType.Bool: return `${f.name}: false`;
-      case FieldType.Int32:
-      case FieldType.Uint32:
-      case FieldType.Float32:
-      case FieldType.Float64: return `${f.name}: 0`;
-      case FieldType.Int64:
-      case FieldType.Uint64: return `${f.name}: 0n`;
-      case FieldType.String: return `${f.name}: ''`;
-      default: return `${f.name}: null`;
-    }
-  }).join(', ');
-  
   // Optimization: Only create DataView if we have float fields
   const hasFloats = schema.fields.some(f => f.type === FieldType.Float32 || f.type === FieldType.Float64);
 
+  // 1. Declare local variables for each field
+  const localVars = schema.fields.map(f => `v_${f.name}`).join(', ');
+  
   const lines: string[] = [`
     var pos = 0;
-    var obj = { ${propInits} };
+    var ${localVars};
     var len, isAscii, i, lo, hi;
     ${hasFloats ? 'var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);' : ''}
   `];
 
   for (const field of schema.fields) {
+    const varName = `v_${field.name}`;
     switch (field.type) {
       case FieldType.Bool:
-        lines.push(`obj.${field.name} = buf[pos++] !== 0;`);
+        lines.push(`${varName} = buf[pos++] !== 0;`);
         break;
       case FieldType.Int32:
         // Inline int32 read - avoid function call overhead
         lines.push(`
-          obj.${field.name} = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+          ${varName} = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           pos += 4;
         `);
         break;
       case FieldType.Uint32:
         lines.push(`
-          obj.${field.name} = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          ${varName} = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
           pos += 4;
         `);
         break;
@@ -570,19 +559,19 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
         lines.push(`
           lo = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           hi = buf[pos+4] | (buf[pos+5] << 8) | (buf[pos+6] << 16) | (buf[pos+7] << 24);
-          obj.${field.name} = BigInt(lo >>> 0) | (BigInt(hi >>> 0) << 32n);
+          ${varName} = BigInt(lo >>> 0) | (BigInt(hi >>> 0) << 32n);
           pos += 8;
         `);
         break;
       case FieldType.Float32:
         lines.push(`
-          obj.${field.name} = view.getFloat32(pos, true);
+          ${varName} = view.getFloat32(pos, true);
           pos += 4;
         `);
         break;
       case FieldType.Float64:
         lines.push(`
-          obj.${field.name} = view.getFloat64(pos, true);
+          ${varName} = view.getFloat64(pos, true);
           pos += 8;
         `);
         break;
@@ -598,31 +587,31 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
           }
           
           if (len === 0) {
-            obj.${field.name} = '';
+            ${varName} = '';
           } else if (len === 1) {
-            obj.${field.name} = String.fromCharCode(buf[pos]);
+            ${varName} = String.fromCharCode(buf[pos]);
           } else if (len === 2) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1]);
           } else if (len === 3) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2]);
           } else if (len === 4) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3]);
           } else if (len === 5) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4]);
           } else if (len === 6) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5]);
           } else if (len === 7) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6]);
           } else if (len === 8) {
-            obj.${field.name} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6], buf[pos+7]);
+            ${varName} = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6], buf[pos+7]);
           } else if (len <= 16) {
             // Build short string without intermediate allocations
             var s = String.fromCharCode(buf[pos], buf[pos+1], buf[pos+2], buf[pos+3], buf[pos+4], buf[pos+5], buf[pos+6], buf[pos+7]);
             for (i = 8; i < len; i++) s += String.fromCharCode(buf[pos + i]);
-            obj.${field.name} = s;
+            ${varName} = s;
           } else {
             // For longer strings, TextDecoder is faster than manual building
-            obj.${field.name} = textDecoder.decode(buf.subarray(pos, pos + len));
+            ${varName} = textDecoder.decode(buf.subarray(pos, pos + len));
           }
           pos += len;
         `);
@@ -630,7 +619,9 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
     }
   }
 
-  lines.push(`return obj;`);
+  // 2. Return object literal
+  const props = schema.fields.map(f => `${f.name}: v_${f.name}`).join(',\n    ');
+  lines.push(`return {\n    ${props}\n  };`);
 
   return new Function('textDecoder', 'buf', 'end', lines.join('\n'))
     .bind(null, textDecoder) as any;
