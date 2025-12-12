@@ -333,3 +333,4 @@ export class Decoder {
     this.pos += n;
   }
 }
+export * from './worker-pool';
