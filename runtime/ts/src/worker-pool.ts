@@ -1,3 +1,5 @@
+import { Decoder } from './browser';
+
 /**
  * XPB V2 Worker Pool
  * 
@@ -13,6 +15,13 @@ interface StringArrayResult {
   offsets: Int32Array;
   data: Uint8Array;
 }
+
+// Performance thresholds for switching to worker (bytes)
+// Derived from extensive benchmarks:
+// - Strings: Worker is faster > 5KB. Safe bet: 10KB.
+// - Int32: Main thread is super fast. Worker only wins > 200KB.
+const THRESHOLD_STRINGS = 10 * 1024;
+const THRESHOLD_INTS = 200 * 1024;
 
 export class XPBWorkerPool {
   private workers: Worker[] = [];
@@ -62,8 +71,6 @@ export class XPBWorkerPool {
           } else {
             pending.resolve(result);
           }
-          
-          // Process next queued item if any (simplified: we rely on caller to await)
         }
       });
 
@@ -89,25 +96,24 @@ export class XPBWorkerPool {
     });
   }
 
-  private async request(type: string, buffer: ArrayBuffer): Promise<any> {
-    if (!this.initialized) throw new Error("WorkerPool not initialized");
-    const worker = await this.getWorker();
-    const id = this.nextRequestId++;
-    
-    return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      worker.postMessage({ id, type, buffer }, [buffer]);
-    });
-  }
-
   // --- Public API ---
 
   /**
-   * Decodes an Int32Array using a worker.
-   * Recommendation: Use only for VERY large arrays (> 200KB or 50k items).
-   * For smaller arrays, the main thread is faster.
+   * Decodes an Int32Array using a worker or main thread based on size.
+   * - < 200KB: Main Thread (Sync, fast)
+   * - > 200KB: Worker (Async, non-blocking)
    */
   async decodeInt32Array(buffer: ArrayBuffer): Promise<Int32Array> {
+    if (buffer.byteLength < THRESHOLD_INTS) {
+      const decoder = new Decoder(new Uint8Array(buffer));
+      const count = decoder.readInt32();
+      const result = new Int32Array(count);
+      for (let i = 0; i < count; i++) {
+        result[i] = decoder.readInt32();
+      }
+      return result;
+    }
+
     const worker = await this.getWorker();
     const id = this.nextRequestId++;
     
@@ -118,11 +124,21 @@ export class XPBWorkerPool {
   }
 
   /**
-   * Decodes a string array using a worker.
-   * Recommendation: Use for arrays > 20KB or 1k items.
-   * Returns a standard string[] but reconstructed efficiently from shared buffers.
+   * Decodes a string array using a worker or main thread based on size.
+   * - < 10KB: Main Thread (Sync, fast)
+   * - > 10KB: Worker (Async, non-blocking)
    */
   async decodeStringArray(buffer: ArrayBuffer): Promise<string[]> {
+    if (buffer.byteLength < THRESHOLD_STRINGS) {
+      const decoder = new Decoder(new Uint8Array(buffer));
+      const count = decoder.readInt32();
+      const result = new Array(count);
+      for (let i = 0; i < count; i++) {
+        result[i] = decoder.readString();
+      }
+      return result;
+    }
+
     const worker = await this.getWorker();
     const id = this.nextRequestId++;
     
@@ -132,7 +148,6 @@ export class XPBWorkerPool {
     });
 
     // Reconstruct strings on main thread (CPU bound but non-blocking for the decoding part)
-    // For maximum performance, users should use a LazyView, but standard API expects string[]
     const { offsets, data } = rawResult;
     const count = offsets.length - 1;
     const result = new Array<string>(count);
@@ -140,7 +155,6 @@ export class XPBWorkerPool {
     for (let i = 0; i < count; i++) {
       const start = offsets[i];
       const end = offsets[i+1];
-      // Short string optimization in V8?
       result[i] = this.textDecoder.decode(data.subarray(start, end));
     }
     

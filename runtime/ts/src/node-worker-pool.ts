@@ -6,6 +6,8 @@
 
 import { Worker } from 'worker_threads';
 import { cpus } from 'os';
+import { Decoder } from './node';
+import { Buffer } from 'node:buffer';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -16,6 +18,11 @@ interface StringArrayResult {
   offsets: Int32Array;
   data: Uint8Array;
 }
+
+// Performance thresholds for switching to worker (bytes)
+// Derived from benchmarks. Node main thread is fast (C++), so thresholds are higher.
+const THRESHOLD_STRINGS = 250 * 1024; // 250KB
+const THRESHOLD_INTS = 500 * 1024;    // 500KB
 
 export class XPBNodeWorkerPool {
   private workers: Worker[] = [];
@@ -79,9 +86,20 @@ export class XPBNodeWorkerPool {
 
   /**
    * Decodes an Int32Array using a worker.
-   * Recommendation: Use for arrays > 250KB (approx 60k items).
+   * - < 500KB: Main Thread (Sync, fast)
+   * - > 500KB: Worker (Async, non-blocking)
    */
   async decodeInt32Array(buffer: Uint8Array): Promise<Int32Array> {
+    if (buffer.byteLength < THRESHOLD_INTS) {
+      const decoder = new Decoder(buffer);
+      const count = decoder.readInt32();
+      const result = new Int32Array(count);
+      for (let i = 0; i < count; i++) {
+        result[i] = decoder.readInt32();
+      }
+      return result;
+    }
+
     const worker = await this.getWorker();
     const id = this.nextRequestId++;
     
@@ -98,9 +116,20 @@ export class XPBNodeWorkerPool {
 
   /**
    * Decodes a string array using a worker.
-   * Recommendation: Use for arrays > 250KB (approx 10k items).
+   * - < 250KB: Main Thread (Sync, fast)
+   * - > 250KB: Worker (Async, non-blocking)
    */
   async decodeStringArray(buffer: Uint8Array): Promise<string[]> {
+    if (buffer.byteLength < THRESHOLD_STRINGS) {
+      const decoder = new Decoder(buffer);
+      const count = decoder.readInt32();
+      const result = new Array(count);
+      for (let i = 0; i < count; i++) {
+        result[i] = decoder.readString();
+      }
+      return result;
+    }
+
     const worker = await this.getWorker();
     const id = this.nextRequestId++;
     
