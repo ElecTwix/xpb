@@ -627,12 +627,13 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
     .bind(null, textDecoder) as any;
 }
 
-// Export for browser bundle
-(window as any).XPB = {
-  Encoder,
-  Decoder,
-  SlabAllocator,
-  compileEncoder,
-  compileDecoder,
-  FieldType
-};
+if (typeof window !== 'undefined') {
+  (window as any).XPB = {
+    Encoder,
+    Decoder,
+    SlabAllocator,
+    compileEncoder,
+    compileDecoder,
+    FieldType
+  };
+}

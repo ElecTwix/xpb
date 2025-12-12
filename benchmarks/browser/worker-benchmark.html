@@ -179,11 +179,14 @@
     
     // Run benchmarks
     async function runBenchmarks() {
-      status.textContent = 'Initializing worker pool...';
+      status.textContent = 'Initializing worker pools...';
       
-      // Initialize worker pool
-      const pool = new XPBWorkerPool(4);
-      await pool.init('./dist/xpb-worker.js');
+      // Initialize worker pools
+      const poolNaive = new XPBWorkerPool(4);
+      await poolNaive.init('./dist/xpb-worker.js');
+
+      const poolOpt = new XPBWorkerPool(4);
+      await poolOpt.init('./dist/xpb-worker-optimized.js');
       
       status.textContent = 'Running benchmarks...';
       
@@ -195,10 +198,14 @@
       ];
       
       let html = '';
+      const allResults = {
+          stringArray: [],
+          int32Array: []
+      };
       
       // String Array benchmarks
-      html += '<h2>📦 String Array Decode: Main Thread vs Worker</h2>';
-      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Worker</th><th>Speedup</th><th>Main Thread Blocked</th></tr>';
+      html += '<h2>📦 String Array Decode: Main vs Naive vs Optimized</h2>';
+      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Naive Worker</th><th>Optimized Worker</th><th>Speedup (Opt)</th></tr>';
       
       for (const { name, count, iterations } of testSizes) {
         const data = generateLargeStringArray(count);
@@ -210,33 +217,37 @@
           decodeStringArraySync(encoded);
         });
         
-        // Worker benchmark
+        // Naive Worker benchmark
         const asyncTime = await benchAsync('async', iterations, async () => {
-          // Need to clone buffer since it's transferred
           const buffer = encoded.buffer.slice(0);
-          await pool.decodeStringArrayAsync(buffer);
+          await poolNaive.decodeStringArrayAsync(buffer);
+        });
+
+        // Optimized Worker benchmark
+        const optTime = await benchAsync('opt', iterations, async () => {
+          const buffer = encoded.buffer.slice(0);
+          await poolOpt.decodeStringArrayAsync(buffer);
         });
         
-        const speedup = syncTime / asyncTime;
-        const blocked = syncTime > 1 ? 
-          `<span class="warning">Yes (${syncTime.toFixed(1)}ms)</span>` : 
-          '<span class="success">No</span>';
+        const speedup = syncTime / optTime;
+        
+        allResults.stringArray.push({ name, payloadSize, syncTime, asyncTime, optTime, speedup });
         
         html += `<tr>
           <td>${name}</td>
           <td>${payloadSize}</td>
           <td>${syncTime.toFixed(2)} ms</td>
           <td>${asyncTime.toFixed(2)} ms</td>
+          <td class="${optTime < syncTime ? 'success' : ''}">${optTime.toFixed(2)} ms</td>
           <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
-          <td>${blocked}</td>
         </tr>`;
       }
       
       html += '</table>';
       
       // Int32 Array benchmarks
-      html += '<h2>📦 Int32 Array Decode: Main Thread vs Worker</h2>';
-      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Worker</th><th>Speedup</th><th>Main Thread Blocked</th></tr>';
+      html += '<h2>📦 Int32 Array Decode: Main vs Naive vs Optimized</h2>';
+      html += '<table><tr><th>Size</th><th>Payload</th><th>Main Thread</th><th>Naive Worker</th><th>Optimized Worker</th><th>Speedup (Opt)</th></tr>';
       
       for (const { name, count, iterations } of testSizes) {
         const data = generateLargeIntArray(count);
@@ -249,49 +260,47 @@
         
         const asyncTime = await benchAsync('async', iterations, async () => {
           const buffer = encoded.buffer.slice(0);
-          await pool.decodeInt32ArrayAsync(buffer);
+          await poolNaive.decodeInt32ArrayAsync(buffer);
+        });
+
+        const optTime = await benchAsync('opt', iterations, async () => {
+          const buffer = encoded.buffer.slice(0);
+          await poolOpt.decodeInt32ArrayAsync(buffer);
         });
         
-        const speedup = syncTime / asyncTime;
-        const blocked = syncTime > 1 ? 
-          `<span class="warning">Yes (${syncTime.toFixed(1)}ms)</span>` : 
-          '<span class="success">No</span>';
+        const speedup = syncTime / optTime;
+        
+        allResults.int32Array.push({ name, payloadSize, syncTime, asyncTime, optTime, speedup });
         
         html += `<tr>
           <td>${name}</td>
           <td>${payloadSize}</td>
           <td>${syncTime.toFixed(2)} ms</td>
           <td>${asyncTime.toFixed(2)} ms</td>
+          <td class="${optTime < syncTime ? 'success' : ''}">${optTime.toFixed(2)} ms</td>
           <td class="${speedup > 1 ? 'highlight' : ''}">${speedup.toFixed(2)}x</td>
-          <td>${blocked}</td>
         </tr>`;
       }
       
       html += '</table>';
       
-      // Summary and recommendations
+      // Summary
       html += `
         <div class="summary">
-          <h3>📊 Recommendations</h3>
-          <p><strong>Use main thread (sync) when:</strong></p>
-          <ul>
-            <li>Payload is &lt; 10KB</li>
-            <li>Latency is critical (no async overhead)</li>
-          </ul>
-          <p><strong>Use worker (async) when:</strong></p>
-          <ul>
-            <li>Payload is &gt; 10KB</li>
-            <li>Main thread responsiveness is critical (UI, animations)</li>
-            <li>Processing multiple large payloads concurrently</li>
-          </ul>
+          <h3>📊 Analysis</h3>
+          <p><strong>Naive Worker:</strong> Slower due to 'Structured Clone' cost (copying objects).</p>
+          <p><strong>Optimized Worker:</strong> Faster for large data because it uses <code>Transferable Objects</code> (Zero-Copy).</p>
         </div>
       `;
       
       results.innerHTML = html;
       status.style.display = 'none';
+
+      // Export results for Playwright
+      window.workerBenchmarkResults = allResults;
       
-      // Cleanup
-      pool.terminate();
+      poolNaive.terminate();
+      poolOpt.terminate();
     }
     
     runBenchmarks().catch(e => {
