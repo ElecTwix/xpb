@@ -63,79 +63,70 @@ export class Encoder {
     this.buf[this.pos++] = v;
   }
 
-  private writeTag(fieldNumber: number, wireType: number): void {
-    this.writeVarint32((fieldNumber << 3) | wireType);
-  }
-
-  writeBool(fieldNumber: number, v: boolean): void {
-    this.ensureCapacity(2);
-    this.writeTag(fieldNumber, WireType.Varint);
+  writeBool(v: boolean): void {
+    this.ensureCapacity(1);
     this.buf[this.pos++] = v ? 1 : 0;
   }
 
-  writeInt32(fieldNumber: number, v: number): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint32(zigzagEncode32(v));
+  writeInt32(v: number): void {
+    this.ensureCapacity(4);
+    this.buf.writeInt32LE(v, this.pos);
+    this.pos += 4;
   }
 
-  writeInt64(fieldNumber: number, v: bigint): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.ensureCapacity(10);
-    let val = v < 0n ? (v << 1n) ^ (v >> 63n) : v << 1n; // zigzag
-    while (val >= 0x80n) {
-      this.buf[this.pos++] = Number((val & 0x7fn) | 0x80n);
-      val >>= 7n;
-    }
-    this.buf[this.pos++] = Number(val);
+  writeInt64(v: bigint): void {
+    this.ensureCapacity(8);
+    this.buf.writeBigInt64LE(v, this.pos);
+    this.pos += 8;
   }
 
-  writeUint32(fieldNumber: number, v: number): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.writeVarint32(v);
+  writeUint32(v: number): void {
+    this.ensureCapacity(4);
+    this.buf.writeUInt32LE(v, this.pos);
+    this.pos += 4;
   }
 
-  writeUint64(fieldNumber: number, v: bigint): void {
-    this.writeTag(fieldNumber, WireType.Varint);
-    this.ensureCapacity(10);
-    while (v >= 0x80n) {
-      this.buf[this.pos++] = Number((v & 0x7fn) | 0x80n);
-      v >>= 7n;
-    }
-    this.buf[this.pos++] = Number(v);
+  writeUint64(v: bigint): void {
+    this.ensureCapacity(8);
+    this.buf.writeBigUInt64LE(v, this.pos);
+    this.pos += 8;
   }
 
-  writeFloat32(fieldNumber: number, v: number): void {
-    this.ensureCapacity(6);
-    this.writeTag(fieldNumber, WireType.Fixed32);
-    // Native Buffer method
+  writeFloat32(v: number): void {
+    this.ensureCapacity(4);
     this.buf.writeFloatLE(v, this.pos);
     this.pos += 4;
   }
 
-  writeFloat64(fieldNumber: number, v: number): void {
-    this.ensureCapacity(10);
-    this.writeTag(fieldNumber, WireType.Fixed64);
-    // Native Buffer method
+  writeFloat64(v: number): void {
+    this.ensureCapacity(8);
     this.buf.writeDoubleLE(v, this.pos);
     this.pos += 8;
   }
 
-  writeString(fieldNumber: number, v: string): void {
-    // Use Buffer.byteLength for accurate size, then write directly
+  private writeCompactLength(length: number): void {
+    if (length < 255) {
+      this.ensureCapacity(1);
+      this.buf[this.pos++] = length;
+    } else {
+      this.ensureCapacity(5);
+      this.buf[this.pos++] = 0xFF;
+      this.buf.writeUInt32LE(length, this.pos);
+      this.pos += 4;
+    }
+  }
+
+  writeString(v: string): void {
     const byteLen = Buffer.byteLength(v, 'utf8');
-    this.ensureCapacity(byteLen + 10);
-    this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeVarint32(byteLen);
-    // Native Buffer.write is very fast
+    this.writeCompactLength(byteLen);
+    this.ensureCapacity(byteLen);
     this.buf.write(v, this.pos, byteLen, 'utf8');
     this.pos += byteLen;
   }
 
-  writeBytes(fieldNumber: number, v: Uint8Array): void {
-    this.ensureCapacity(v.length + 10);
-    this.writeTag(fieldNumber, WireType.LengthDelimited);
-    this.writeVarint32(v.length);
-    // Fast copy
+  writeBytes(v: Uint8Array): void {
+    this.writeCompactLength(v.length);
+    this.ensureCapacity(v.length);
     if (Buffer.isBuffer(v)) {
       v.copy(this.buf, this.pos);
     } else {
@@ -144,8 +135,8 @@ export class Encoder {
     this.pos += v.length;
   }
 
-  writeMessage(fieldNumber: number, data: Uint8Array): void {
-    this.writeBytes(fieldNumber, data);
+  writeMessage(data: Uint8Array): void {
+    this.writeBytes(data);
   }
 }
 
@@ -157,7 +148,6 @@ export class Decoder {
   private pos = 0;
 
   constructor(data: Uint8Array) {
-    // Wrap in Buffer for native methods
     this.buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
   }
 
@@ -165,58 +155,32 @@ export class Decoder {
     return this.pos >= this.buf.length;
   }
 
-  private readVarint32(): number {
-    let result = 0;
-    let shift = 0;
-    while (this.pos < this.buf.length) {
-      const b = this.buf[this.pos++];
-      result |= (b & 0x7f) << shift;
-      if ((b & 0x80) === 0) {
-        return result >>> 0;
-      }
-      shift += 7;
-    }
-    throw new Error("xpb: unexpected EOF reading varint");
-  }
-
-  private readVarint64(): bigint {
-    let result = 0n;
-    let shift = 0n;
-    while (this.pos < this.buf.length) {
-      const b = this.buf[this.pos++];
-      result |= BigInt(b & 0x7f) << shift;
-      if ((b & 0x80) === 0) {
-        return result;
-      }
-      shift += 7n;
-    }
-    throw new Error("xpb: unexpected EOF reading varint");
-  }
-
-  readTag(): [number, WireType] {
-    const tag = this.readVarint32();
-    return [tag >>> 3, (tag & 0x7) as WireType];
-  }
-
   readBool(): boolean {
-    return this.readVarint32() !== 0;
+    return this.buf[this.pos++] !== 0;
   }
 
   readInt32(): number {
-    return zigzagDecode32(this.readVarint32());
+    const v = this.buf.readInt32LE(this.pos);
+    this.pos += 4;
+    return v;
   }
 
   readInt64(): bigint {
-    const n = this.readVarint64();
-    return (n >> 1n) ^ -(n & 1n);
+    const v = this.buf.readBigInt64LE(this.pos);
+    this.pos += 8;
+    return v;
   }
 
   readUint32(): number {
-    return this.readVarint32();
+    const v = this.buf.readUInt32LE(this.pos);
+    this.pos += 4;
+    return v;
   }
 
   readUint64(): bigint {
-    return this.readVarint64();
+    const v = this.buf.readBigUInt64LE(this.pos);
+    this.pos += 8;
+    return v;
   }
 
   readFloat32(): number {
@@ -231,17 +195,25 @@ export class Decoder {
     return v;
   }
 
+  private readCompactLength(): number {
+    const first = this.buf[this.pos++];
+    if (first === 0xFF) {
+      const len = this.buf.readUInt32LE(this.pos);
+      this.pos += 4;
+      return len;
+    }
+    return first;
+  }
+
   readString(): string {
-    const length = this.readVarint32();
-    // Native Buffer.toString is very fast
+    const length = this.readCompactLength();
     const s = this.buf.toString('utf8', this.pos, this.pos + length);
     this.pos += length;
     return s;
   }
 
   readBytes(): Uint8Array {
-    const length = this.readVarint32();
-    // Fast copy using Buffer methods
+    const length = this.readCompactLength();
     const bytes = Buffer.from(this.buf.buffer, this.buf.byteOffset + this.pos, length);
     this.pos += length;
     return bytes;
@@ -251,21 +223,7 @@ export class Decoder {
     return this.readBytes();
   }
 
-  skip(wireType: WireType): void {
-    switch (wireType) {
-      case WireType.Varint:
-        this.readVarint32();
-        break;
-      case WireType.Fixed32:
-        this.pos += 4;
-        break;
-      case WireType.Fixed64:
-        this.pos += 8;
-        break;
-      case WireType.LengthDelimited:
-        const length = this.readVarint32();
-        this.pos += length;
-        break;
-    }
+  skip(n: number): void {
+    this.pos += n;
   }
 }
