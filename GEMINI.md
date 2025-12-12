@@ -183,13 +183,31 @@ XPB provides greatest size savings for smaller messages:
 
 
 
+
+
+
+
 1.  **Go Encoding**: XPB is now **13-23x faster** than JSON thanks to `sync.Pool` (zero allocations).
 
-2.  **Go Decoding**: XPB is **180-230x faster** than JSON thanks to `unsafe` zero-copy strings.
+
+
+2.  **Go Decoding**: XPB is **180-230x faster** than JSON thanks to `unsafe` zero-copy strings/bytes.
+
+
 
 3.  **Browser**: XPB is **4.6x faster** than JSON for small message encoding.
 
-4.  **Size**: Consistent 37-90% reduction.
+
+
+4.  **Hybrid Runtime**: Automatically balances overhead vs throughput (JS < 256B < WASM).
+
+
+
+5.  **Worker Threads**: Optimized workers provide **~3.3x speedup** for large arrays.
+
+
+
+6.  **Size**: Consistent 37-90% reduction.
 
 ## Commands
 
@@ -266,12 +284,61 @@ const age = dec.readInt32();
 const active = dec.readBool();
 ```
 
+## Hybrid Runtime (TypeScript)
+
+For optimal performance across all message sizes, use the Hybrid Runtime. It automatically selects:
+- **Pure JS** for small messages (<256 bytes) to minimize overhead.
+- **WASM** for large messages (>=256 bytes) to maximize throughput.
+
+```typescript
+import { createEncoder, createDecoder } from "@xpb/runtime/hybrid";
+
+// Automatically uses JS or WASM based on size/availability
+const enc = createEncoder(); 
+const dec = createDecoder(data);
+```
+
+## Hyper-Speed Runtime (TypeScript)
+
+For **maximum performance** in trusted environments, use the Hyper Runtime.
+- **Zero Function Call Overhead**: Inline implementation.
+- **Zero Allocation**: Reuse encoders/decoders.
+- **Unsafe**: No validation checks.
+
+```typescript
+import { HyperEncoder, HyperDecoder, E, D } from "@xpb/runtime/hyper";
+
+// Encode
+const enc = new HyperEncoder();
+E.str(enc, 1, "Alice");
+E.i32(enc, 2, 30);
+const data = enc.f();
+
+// Decode
+const dec = new HyperDecoder(data);
+const name = D.str(dec); // tag is handled by caller or assumed in struct mode
+```
+
+## Advanced Go Usage (Zero-Copy)
+
+For extreme performance, use unsafe zero-copy methods. These return slices/strings that alias the decoder's buffer.
+
+```go
+// Returns string pointing to decoder buffer memory
+s, _ := dec.ReadString() 
+
+// Returns byte slice pointing to decoder buffer memory
+b, _ := dec.ReadBytesUnsafe()
+```
+
 ## Key Files
 
 - `pkg/wire/wire.go` - V2 wire format constants
-- `runtime/go/xpb/xpb.go` - Go Encoder/Decoder
+- `runtime/go/xpb/xpb.go` - Go Encoder/Decoder (inc. Unsafe)
 - `runtime/ts/src/index.ts` - TypeScript Encoder/Decoder
 - `runtime/ts/src/jit.ts` - JIT Compiler
+- `runtime/ts/src/hybrid.ts` - Hybrid JS/WASM Runtime
+- `runtime/ts/src/hyper.ts` - Hyper-Speed Inline Runtime
 - `benchmarks/browser/src/xpb-browser.ts` - Browser-optimized runtime
 - `benchmarks/go/comparison_test.go` - Go vs JSON/Protobuf/Msgpack
 - `benchmarks/go/collections_test.go` - Array and Map benchmarks
