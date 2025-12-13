@@ -209,6 +209,12 @@ XPB provides greatest size savings for smaller messages:
 
 6.  **Size**: Consistent 37-90% reduction.
 
+## Unified Benchmarking (New)
+
+A unified benchmarking tool `xpbench` is available to run and compare tests across all platforms (Go, Node.js, Browser). It aggregates results into a single comparison table.
+
+For detailed analysis of weaknesses and improvement roadmap, see: `docs/ANALYSIS_AND_IMPROVEMENTS.md`.
+
 ## Commands
 
 ```bash
@@ -218,7 +224,10 @@ go build -o xpbc ./cmd/xpbc
 # Generate Go code
 ./xpbc --lang=go schema.xpb
 
-# Run all benchmarks
+# Run Unified Benchmarks (Preferred)
+go run ./cmd/xpbench
+
+# Run legacy shell script (custom filters)
 ./benchmarks/run-all.sh
 
 # Run selective benchmarks by platform
