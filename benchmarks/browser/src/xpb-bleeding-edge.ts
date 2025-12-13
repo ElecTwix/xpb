@@ -155,8 +155,76 @@ export class StandardStringArray {
 }
 
 // ==========================================
-// 3. Shared Memory Coordinator
+// 4. BYOB Stream -> SharedArrayBuffer
 // ==========================================
+
+export class SABStreamer {
+  private sab: SharedArrayBuffer;
+  private u8: Uint8Array;
+  private control: Int32Array;
+  private worker: Worker;
+  
+  // Control Indices
+  private readonly IDX_WRITE_HEAD = 0; // Main thread updates
+  private readonly IDX_READ_HEAD = 1;  // Worker updates
+  private readonly IDX_STATE = 2;      // 0=Active, 1=Done
+  private readonly DATA_OFFSET = 32;   // Start of data
+
+  constructor(workerPath: string, capacity: number = 10 * 1024 * 1024) {
+    this.sab = new SharedArrayBuffer(capacity);
+    this.u8 = new Uint8Array(this.sab);
+    this.control = new Int32Array(this.sab, 0, 8);
+    this.worker = new Worker(workerPath);
+    this.worker.postMessage({ type: 'init-stream', payload: this.sab });
+  }
+
+  async stream(source: ReadableStream<Uint8Array>): Promise<void> {
+    const reader = source.getReader({ mode: 'byob' });
+    let offset = this.DATA_OFFSET;
+    
+    // We allocate a reuseable buffer for BYOB reads
+    // (Since we can't read directly into SAB)
+    let tempBuf = new ArrayBuffer(64 * 1024); // 64KB chunks
+
+    try {
+      while (true) {
+        // Read into tempBuf
+        const { value, done } = await reader.read(new Uint8Array(tempBuf));
+        
+        if (done) {
+          Atomics.store(this.control, this.IDX_STATE, 1); // Done
+          Atomics.notify(this.control, this.IDX_STATE);
+          break;
+        }
+        
+        // 'value' is a view over tempBuf (or a new buffer if detached)
+        // Check capacity
+        if (offset + value.byteLength > this.sab.byteLength) {
+            throw new Error("SAB Overflow");
+        }
+
+        // 1. Copy to SAB (Fast memcpy)
+        this.u8.set(value, offset);
+        
+        // 2. Update Write Head
+        offset += value.byteLength;
+        Atomics.store(this.control, this.IDX_WRITE_HEAD, offset);
+        
+        // 3. Notify Worker
+        Atomics.notify(this.control, this.IDX_WRITE_HEAD);
+        
+        // Reuse buffer (BYOB often detaches, so we use the returned buffer's buffer)
+        tempBuf = value.buffer; 
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  
+  terminate() {
+      this.worker.terminate();
+  }
+}
 
 export class SharedMemoryLink {
   private worker: Worker;

@@ -90,8 +90,15 @@
       <div id="res-string-array"></div>
     </div>
 
+    <div class="card">
+      <h2>5. BYOB Stream -> SharedArrayBuffer</h2>
+      <p>Simulating 50MB network stream directly into Worker memory.</p>
+      <button id="btn-stream" class="btn">Run Benchmark</button>
+      <div id="res-stream"></div>
+    </div>
+
     <script type="module">
-      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray } from './dist/xpb-bleeding-edge.js';
+      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray, SABStreamer } from './dist/xpb-bleeding-edge.js';
       import './dist/xpb-browser.js'; // Ensure XPB runtime is loaded
 
       const ITERATIONS = 1000;
@@ -115,153 +122,6 @@
       }
 
       // --- Base64 ---
-      document.getElementById('btn-base64').onclick = async () => {
-        const div = document.getElementById('res-base64');
-        div.innerHTML = 'Running...';
-        
-        // 1MB random data
-        const data = new Uint8Array(1024 * 1024);
-        crypto.getRandomValues(data.subarray(0, 65536)); // partial fill
-        
-        // Bench Encode
-        const polyTime = await bench(() => NativeBase64.encodePolyfill(data), 50);
-        let nativeTime = 0;
-        let supported = false;
-        
-        try {
-          if (NativeBase64.isSupported()) {
-            nativeTime = await bench(() => NativeBase64.encode(data), 50);
-            supported = true;
-          }
-        } catch(e) {}
-
-        let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
-        html += `<tr><td>Standard (btoa)</td><td>${formatNs(polyTime)}</td><td>1x</td></tr>`;
-        
-        if (supported) {
-          const speedup = polyTime / nativeTime;
-          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
-        } else {
-          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td><td>-</td></tr>`;
-        }
-        html += `</table>`;
-        div.innerHTML = html;
-      };
-
-      // --- Accessors ---
-      document.getElementById('btn-accessor').onclick = async () => {
-        const div = document.getElementById('res-accessor');
-        div.innerHTML = 'Running...';
-        
-        // Prepare Data (1000 Users)
-        // Manual encode for test
-        const count = 1000;
-        const entrySize = 40; // approx
-        const buffer = new Uint8Array(count * entrySize);
-        
-        // Encode mock data
-        let offset = 0;
-        const offsets = [];
-        for(let i=0; i<count; i++) {
-          offsets.push(offset);
-          const view = new DataView(buffer.buffer);
-          view.setInt32(offset, i, true); // id
-          buffer[offset + 4] = 1; // active
-          view.setFloat64(offset + 5, Math.random(), true); // score
-          
-          const name = `User ${i}`;
-          buffer[offset + 13] = name.length;
-          const nameBytes = new TextEncoder().encode(name);
-          buffer.set(nameBytes, offset + 14);
-          
-          offset += 14 + name.length;
-        }
-        
-        // Bench Standard Decode (Create Object)
-        const stdTime = await bench(() => {
-          // Decode random one
-          const idx = Math.floor(Math.random() * count);
-          const u = StandardUser.decode(buffer, offsets[idx]);
-          return u.id + u.score;
-        });
-
-        // Bench Accessor (Zero Copy)
-        const accTime = await bench(() => {
-          const idx = Math.floor(Math.random() * count);
-          const u = new ZeroCopyUser(buffer, offsets[idx]);
-          return u.id + u.score;
-        });
-
-        let html = `<table><tr><th>Method</th><th>Time (Read 2 fields)</th><th>Speedup</th></tr>`;
-        html += `<tr><td>Standard (New Object)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
-        
-        const speedup = stdTime / accTime;
-        html += `<tr><td>Accessor (Zero-Copy)</td><td>${formatNs(accTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
-        html += `</table>`;
-        div.innerHTML = html;
-      };
-
-      // --- Shared Memory ---
-      const runShared = async () => {
-        const div = document.getElementById('res-shared');
-        div.innerHTML = 'Initializing Worker...';
-        
-        // Check SAB support
-        if (typeof SharedArrayBuffer === 'undefined') {
-          div.innerHTML = `<p class="error">❌ SharedArrayBuffer is not defined. COOP/COEP headers missing?</p>`;
-          return null;
-        }
-
-        try {
-          // Use bundled worker (we assume build process puts it here, or use blob)
-          // For this standalone html test, we need to point to the js file.
-          // Assuming 'dist/bleeding-edge-worker.js' exists after build.
-          const link = new SharedMemoryLink('./dist/bleeding-edge-worker.js');
-          await link.init();
-          
-          div.innerHTML = 'Running...';
-          
-          // Data: 100KB
-          const data = new Uint8Array(100 * 1024);
-          for(let i=0; i<data.length; i++) data[i] = 1;
-          
-          // Bench PostMessage
-          const stdTime = await bench(async () => {
-            await link.sendStandard(data);
-          }, 100);
-
-          // Bench Shared
-          const sharedTime = await bench(async () => {
-            await link.sendZeroCopy(data);
-          }, 100);
-          
-          link.terminate();
-
-          let html = `<table><tr><th>Method</th><th>Time (100KB Roundtrip)</th><th>Speedup</th></tr>`;
-          html += `<tr><td>postMessage (Copy)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
-          
-          const speedup = stdTime / sharedTime;
-          html += `<tr><td>SharedArrayBuffer</td><td>${formatNs(sharedTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
-          html += `</table>`;
-          div.innerHTML = html;
-
-          return { stdTime, sharedTime, speedup };
-
-        } catch (e) {
-          div.innerHTML = `<p class="error">Error: ${e.message}</p>`;
-          return null;
-        }
-      };
-      
-      document.getElementById('btn-shared').onclick = runShared;
-
-      // --- Automation ---
-      window.runAll = async () => {
-        const resBase64 = await document.getElementById('btn-base64').click(); // Trigger click (async handlers won't return value this way though)
-        // Better to refactor to functions returning values.
-      };
-
-      // --- Base64 ---
       const runBase64 = async () => {
         const div = document.getElementById('res-base64');
         div.innerHTML = 'Running...';
@@ -270,45 +130,35 @@
         const rawData = new Uint8Array(1024 * 1024);
         crypto.getRandomValues(rawData.subarray(0, 65536));
         const base64Str = await new Promise(resolve => {
-            // Helper to get base64 string
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(new Blob([rawData]));
         });
         
-        // Setup Encoder
         const { Encoder } = window.XPB;
-        
         let nativeTime = 0;
         let setFromTime = 0;
         let supported = false;
         
         try {
           if (NativeBase64.isSupported()) {
-             // 1. Native Decode + Write (Old "Bleeding Edge")
              nativeTime = await bench(() => {
                  const enc = new Encoder(rawData.length + 10);
                  const bytes = NativeBase64.decode(base64Str);
                  enc.writeBytes(bytes);
              }, 50);
 
-             // 2. Direct Write (New "Zero-Alloc")
              setFromTime = await bench(() => {
                  const enc = new Encoder(rawData.length + 10);
                  enc.writeBase64AsBytes(base64Str);
              }, 50);
-             
              supported = true;
           }
-        } catch(e) {
-          console.error(e);
-        }
+        } catch(e) { console.error(e); }
 
         let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
-        
         if (supported) {
           html += `<tr><td>fromBase64 + writeBytes</td><td>${formatNs(nativeTime)}</td><td>1x</td></tr>`;
-          
           const speedup = nativeTime / setFromTime;
           html += `<tr><td>writeBase64AsBytes (Direct)</td><td>${formatNs(setFromTime)}</td><td class="speedup">${speedup.toFixed(2)}x</td></tr>`;
         } else {
@@ -320,41 +170,35 @@
       };
       document.getElementById('btn-base64').onclick = runBase64;
 
+      // --- Accessors ---
       const runAccessor = async () => {
         const div = document.getElementById('res-accessor');
         div.innerHTML = 'Running...';
         
-        // Prepare Data (1000 Users)
         const count = 1000;
         const entrySize = 40; 
         const buffer = new Uint8Array(count * entrySize);
-        
-        // Encode mock data
         let offset = 0;
         const offsets = [];
         for(let i=0; i<count; i++) {
           offsets.push(offset);
           const view = new DataView(buffer.buffer);
-          view.setInt32(offset, i, true); // id
-          buffer[offset + 4] = 1; // active
-          view.setFloat64(offset + 5, Math.random(), true); // score
-          
+          view.setInt32(offset, i, true);
+          buffer[offset + 4] = 1;
+          view.setFloat64(offset + 5, Math.random(), true);
           const name = `User ${i}`;
           buffer[offset + 13] = name.length;
           const nameBytes = new TextEncoder().encode(name);
           buffer.set(nameBytes, offset + 14);
-          
           offset += 14 + name.length;
         }
         
-        // Bench Standard Decode
         const stdTime = await bench(() => {
           const idx = Math.floor(Math.random() * count);
           const u = StandardUser.decode(buffer, offsets[idx]);
           return u.id + u.score;
         });
 
-        // Bench Accessor
         const accTime = await bench(() => {
           const idx = Math.floor(Math.random() * count);
           const u = new ZeroCopyUser(buffer, offsets[idx]);
@@ -363,7 +207,6 @@
 
         let html = `<table><tr><th>Method</th><th>Time (Read 2 fields)</th><th>Speedup</th></tr>`;
         html += `<tr><td>Standard (New Object)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
-        
         const speedup = stdTime / accTime;
         html += `<tr><td>Accessor (Zero-Copy)</td><td>${formatNs(accTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
         html += `</table>`;
@@ -372,24 +215,51 @@
       };
       document.getElementById('btn-accessor').onclick = runAccessor;
 
-      // --- String Array (Lazy View) ---
+      // --- Shared Memory ---
+      const runShared = async () => {
+        const div = document.getElementById('res-shared');
+        div.innerHTML = 'Initializing Worker...';
+        
+        if (typeof SharedArrayBuffer === 'undefined') {
+          div.innerHTML = `<p class="error">❌ SharedArrayBuffer is not defined. COOP/COEP headers missing?</p>`;
+          return null;
+        }
+
+        try {
+          const link = new SharedMemoryLink('./dist/bleeding-edge-worker.js');
+          await link.init();
+          div.innerHTML = 'Running...';
+          const data = new Uint8Array(100 * 1024);
+          for(let i=0; i<data.length; i++) data[i] = 1;
+          const stdTime = await bench(async () => { await link.sendStandard(data); }, 100);
+          const sharedTime = await bench(async () => { await link.sendZeroCopy(data); }, 100);
+          link.terminate();
+
+          let html = `<table><tr><th>Method</th><th>Time (100KB Roundtrip)</th><th>Speedup</th></tr>`;
+          html += `<tr><td>postMessage (Copy)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+          const speedup = stdTime / sharedTime;
+          html += `<tr><td>SharedArrayBuffer</td><td>${formatNs(sharedTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+          html += `</table>`;
+          div.innerHTML = html;
+          return { stdTime, sharedTime, speedup };
+        } catch (e) {
+          div.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+          return null;
+        }
+      };
+      document.getElementById('btn-shared').onclick = runShared;
+
+      // --- String Array ---
       const runStringArray = async () => {
         const div = document.getElementById('res-string-array');
         div.innerHTML = 'Running...';
-        
-        // Prepare Data (100 strings)
         const count = 100;
-        // Mock data
         const strings = [];
         for(let i=0; i<count; i++) strings.push(`item_${i}_value_is_long_enough`);
-        
-        // Encode manually
-        // [Count] [Len][Str]...
         const totalLen = 4 + strings.reduce((acc, s) => acc + 1 + s.length, 0);
         const buffer = new Uint8Array(totalLen);
         const view = new DataView(buffer.buffer);
         view.setInt32(0, count, true);
-        
         let offset = 4;
         for(const s of strings) {
             buffer[offset] = s.length;
@@ -397,20 +267,10 @@
             buffer.set(bytes, offset + 1);
             offset += 1 + s.length;
         }
-
-        // Bench Standard Decode (Full Decode)
-        const stdTime = await bench(() => {
-          StandardStringArray.decode(buffer);
-        });
-
-        // Bench Lazy View (Scan Only)
-        const lazyTime = await bench(() => {
-          new ZeroCopyStringArray(buffer);
-        });
-
+        const stdTime = await bench(() => { StandardStringArray.decode(buffer); });
+        const lazyTime = await bench(() => { new ZeroCopyStringArray(buffer); });
         let html = `<table><tr><th>Method</th><th>Init Time (100 items)</th><th>Speedup</th></tr>`;
         html += `<tr><td>Standard (Full Decode)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
-        
         const speedup = stdTime / lazyTime;
         html += `<tr><td>Lazy View (Scan Only)</td><td>${formatNs(lazyTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
         html += `</table>`;
@@ -419,7 +279,56 @@
       };
       document.getElementById('btn-string-array').onclick = runStringArray;
 
-      // Expose for automation
+      // --- Stream ---
+      const runStream = async () => {
+        const div = document.getElementById('res-stream');
+        div.innerHTML = 'Generating 50MB Data...';
+        const size = 50 * 1024 * 1024;
+        const largeBuf = new Uint8Array(size); 
+        const stream = new ReadableStream({
+            start(controller) {
+                const chunkSize = 64 * 1024;
+                let offset = 0;
+                function push() {
+                    if (offset >= size) { controller.close(); return; }
+                    const end = Math.min(offset + chunkSize, size);
+                    controller.enqueue(largeBuf.slice(offset, end));
+                    offset = end;
+                    if (offset < size) push(); 
+                    else controller.close();
+                }
+                push();
+            },
+            type: 'bytes'
+        });
+        div.innerHTML = 'Streaming...';
+        const streamer = new SABStreamer('./dist/bleeding-edge-worker.js', size + 1024);
+        const start = performance.now();
+        const workerDone = new Promise(resolve => {
+            const handler = (e) => {
+                if (e.data.type === 'stream-result') {
+                    streamer['worker'].removeEventListener('message', handler);
+                    resolve(e.data.bytes);
+                }
+            };
+            streamer['worker'].addEventListener('message', handler);
+        });
+        await streamer.stream(stream);
+        await workerDone;
+        const end = performance.now();
+        const duration = end - start;
+        const mb = size / 1024 / 1024;
+        const mbps = (mb / (duration / 1000)).toFixed(0);
+        streamer.terminate();
+        let html = `<table><tr><th>Method</th><th>Time (50MB)</th><th>Throughput</th></tr>`;
+        html += `<tr><td>SAB Streamer</td><td>${duration.toFixed(0)} ms</td><td class="speedup">${mbps} MB/s</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+        return { duration, mbps };
+      };
+      document.getElementById('btn-stream').onclick = runStream;
+
+      // --- Automation ---
       window.runAll = async () => {
         console.log("Starting Base64...");
         const base64 = await runBase64();
@@ -429,13 +338,12 @@
         const shared = await runShared();
         console.log("Finished Shared. Starting String Array...");
         const stringArray = await runStringArray();
-        console.log("Finished String Array.");
-        
-        // Store results globally
-        window.bleedingEdgeResults = { base64, accessor, shared, stringArray };
+        console.log("Finished String Array. Starting Stream...");
+        const stream = await runStream();
+        console.log("Finished Stream.");
+        window.bleedingEdgeResults = { base64, accessor, shared, stringArray, stream };
         return window.bleedingEdgeResults;
       };
-
     </script>
   </body>
 </html>

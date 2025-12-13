@@ -10,7 +10,7 @@
     "build:msgpack": "esbuild node_modules/@msgpack/msgpack/dist.esm/index.mjs --bundle --outfile=dist/msgpack.js --format=esm --target=es2020",
     "build:all": "npm run build && npm run build:worker && npm run build:pool && npm run build:bleeding && npm run build:msgpack",
     "bench": "npm run build && npm run build:msgpack && npx tsx src/bench-playwright.ts",
-    "bench:bleeding": "npm run build:bleeding && npx tsx src/bench-bleeding-edge.ts"
+    "bench:bleeding": "npm run build && npm run build:bleeding && npx tsx src/bench-bleeding-edge.ts"
   },
   "devDependencies": {
     "@msgpack/msgpack": "^3.0.0",

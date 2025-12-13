@@ -25,7 +25,9 @@ function createServer(dir: string): Promise<http.Server> {
           'Cross-Origin-Embedder-Policy': 'require-corp'
         });
         res.end(content);
-      } catch {
+        console.log(`[Server] 200 ${req.url} (${content.length} bytes)`);
+      } catch (e) {
+        console.log(`[Server] 404 ${req.url} -> ${filePath}`);
         res.writeHead(404);
         res.end('Not found');
       }
@@ -93,7 +95,7 @@ async function main() {
       server.close();
       
       // Report Results
-      const { base64, accessor, shared, stringArray } = results;
+      const { base64, accessor, shared, stringArray, stream } = results;
 
       console.log("\n1️⃣ Native Base64 Performance (Write to Encoder):");
       if (base64.supported) {
@@ -123,6 +125,10 @@ async function main() {
       console.log(`   Standard (Decode): ${stringArray.stdTime.toFixed(0)} ns`);
       console.log(`   Lazy View (Scan):  ${stringArray.lazyTime.toFixed(0)} ns`);
       console.log(`   🚀 Speedup:        ${stringArray.speedup.toFixed(2)}x`);
+
+      console.log("\n5️⃣ BYOB Stream -> SharedArrayBuffer (50MB):");
+      console.log(`   Throughput:        ${stream.mbps} MB/s`);
+      console.log(`   Time:              ${stream.duration.toFixed(0)} ms`);
       
       console.log("\n✅ Done!");
       process.exit(0);
