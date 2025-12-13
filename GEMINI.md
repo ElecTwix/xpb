@@ -264,11 +264,11 @@ XPB V2 implements advanced optimizations for modern browsers (Chrome 133+, Firef
 
 ### Benchmark Results (Browser)
 
-| Metric | Specific Test | Speedup vs JSON |
-| :--- | :--- | :--- |
-| **Binary Data** | Base64 Decode (1MB) | **160x** 🚀 |
-| **Zero-Alloc** | Base64 Write to Encoder | **3.2x** (vs Native) ⚡ |
-| **Lazy Read** | 2 Field Access | **2.7x** ⚡ |
+| Metric | Specific Test | Comparison | Speedup |
+| :--- | :--- | :--- | :--- |
+| **Binary Data** | Base64 Decode (1MB) | vs JSON (`atob`) | **160x** 🚀 |
+| **Zero-Alloc** | Base64 Write to Encoder | vs Standard XPB | **3.2x** ⚡ |
+| **Lazy Read** | 2 Field Access | vs `JSON.parse` | **2.7x** ⚡ |
 
 ### Usage
 
