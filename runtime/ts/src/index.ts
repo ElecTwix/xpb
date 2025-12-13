@@ -392,28 +392,3 @@ export class Decoder {
 }
 export * from './worker-pool';
 
-// Legacy V1 exports for hybrid/unsafe compatibility
-export enum WireType {
-  Varint = 0,
-  Fixed64 = 1,
-  LengthDelimited = 2,
-  StartGroup = 3,
-  EndGroup = 4,
-  Fixed32 = 5,
-}
-
-export function zigzagEncode32(n: number): number {
-  return (n << 1) ^ (n >> 31);
-}
-
-export function zigzagDecode32(n: number): number {
-  return (n >>> 1) ^ -(n & 1);
-}
-
-export function zigzagEncode64(n: bigint): bigint {
-  return (n << 1n) ^ (n >> 63n);
-}
-
-export function zigzagDecode64(n: bigint): bigint {
-  return (n >> 1n) ^ -(n & 1n);
-}
