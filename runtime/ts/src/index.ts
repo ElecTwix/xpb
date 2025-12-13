@@ -430,4 +430,5 @@ export class Decoder {
   }
 }
 export * from './worker-pool';
+export * from './view';
 
