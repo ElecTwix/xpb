@@ -62,45 +62,54 @@ function createServer(dir: string): Promise<http.Server> {
 }
 
 async function main() {
-  console.log("╔═══════════════════════════════════════════════════════════════╗");
-  console.log("║          XPB V2 Browser Benchmark (Playwright)                ║");
-  console.log("║    Messages • Collections • Size Scaling • JSON • Msgpack     ║");
-  console.log("╚═══════════════════════════════════════════════════════════════╝");
+  const args = process.argv.slice(2);
+  const jsonMode = args.includes('--json');
+
+  if (!jsonMode) {
+    console.log("╔═══════════════════════════════════════════════════════════════╗");
+    console.log("║          XPB V2 Browser Benchmark (Playwright)                ║");
+    console.log("║    Messages • Collections • Size Scaling • JSON • Msgpack     ║");
+    console.log("╚═══════════════════════════════════════════════════════════════╝");
+    
+    // Build the browser bundle
+    console.log("\n📦 Building browser bundle...");
+  }
   
-  // Build the browser bundle
-  console.log("\n📦 Building browser bundle...");
+  // Suppress logs in JSON mode
+  const log = jsonMode ? () => {} : console.log;
+
   try {
     execSync('npx esbuild src/xpb-browser.ts --bundle --outfile=dist/xpb-browser.js --format=esm --target=es2020', {
       cwd: path.join(__dirname, '..'),
-      stdio: 'inherit'
+      stdio: jsonMode ? 'ignore' : 'inherit'
     });
   } catch (e) {
-    console.error("Build failed:", e);
+    if (!jsonMode) console.error("Build failed:", e);
     process.exit(1);
   }
 
   // Build MessagePack bundle
-  console.log("\n📦 Building MessagePack bundle...");
+  log("\n📦 Building MessagePack bundle...");
   try {
     execSync('npx esbuild node_modules/@msgpack/msgpack/dist.esm/index.mjs --bundle --outfile=dist/msgpack.js --format=esm --target=es2020', {
       cwd: path.join(__dirname, '..'),
-      stdio: 'inherit'
+      stdio: jsonMode ? 'ignore' : 'inherit'
     });
   } catch (e) {
-    console.error("MessagePack build failed:", e);
+    if (!jsonMode) console.error("MessagePack build failed:", e);
     process.exit(1);
   }
   
   // Start HTTP server
-  console.log("\n🖥️  Starting HTTP server...");
+  log("\n🖥️  Starting HTTP server...");
   const serverDir = path.join(__dirname, '..');
   const server = await createServer(serverDir);
   const address = server.address() as { port: number };
   const url = `http://127.0.0.1:${address.port}/index.html`;
-  console.log(`   Serving at ${url}`);
+  log(`   Serving at ${url}`);
   
   // Launch browser
-  console.log("\n🌐 Launching Chromium...");
+  log("\n🌐 Launching Chromium...");
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -111,13 +120,15 @@ async function main() {
   });
 
   // Log console messages for debugging
-  page.on('console', msg => console.log('   Browser:', msg.text()));
-  page.on('pageerror', err => console.error('   Page error:', err.message));
+  if (!jsonMode) {
+    page.on('console', msg => console.log('   Browser:', msg.text()));
+    page.on('pageerror', err => console.error('   Page error:', err.message));
+  }
   
   await page.goto(url);
   
   // Wait for benchmarks to complete (increase timeout for all benchmarks)
-  console.log("⏱️  Running benchmarks in browser...\n");
+  log("⏱️  Running benchmarks in browser...\n");
   await page.waitForFunction(() => (window as any).benchmarkResults !== undefined, { timeout: 300000 });
   
   // Get results
@@ -126,36 +137,40 @@ async function main() {
   await browser.close();
   server.close();
   
-  // Display all results
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📦 Message Benchmarks");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  printResults("Small Message (3 fields: name, age, active)", results.small);
-  printSummary("Small Message", results.small);
-  
-  printResults("Large Message (7 fields)", results.large);
-  printSummary("Large Message", results.large);
-  
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📦 Collection Benchmarks (100 elements)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  
-  printResults("String Array (100 elements)", results.stringArray);
-  printSummary("String Array", results.stringArray);
-  
-  printResults("Int32 Array (100 elements)", results.intArray);
-  printSummary("Int32 Array", results.intArray);
-  
-  printResults("String Map (100 entries)", results.stringMap);
-  printSummary("String Map", results.stringMap);
-  
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("  📊 Size Scaling (XPB vs JSON)");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  printSizeScaling(results.sizeScaling);
-  
-  console.log("\n✅ All browser benchmarks complete!");
+  if (jsonMode) {
+    console.log(JSON.stringify(results, null, 2));
+  } else {
+    // Display all results
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📦 Message Benchmarks");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    printResults("Small Message (3 fields: name, age, active)", results.small);
+    printSummary("Small Message", results.small);
+    
+    printResults("Large Message (7 fields)", results.large);
+    printSummary("Large Message", results.large);
+    
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📦 Collection Benchmarks (100 elements)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    printResults("String Array (100 elements)", results.stringArray);
+    printSummary("String Array", results.stringArray);
+    
+    printResults("Int32 Array (100 elements)", results.intArray);
+    printSummary("Int32 Array", results.intArray);
+    
+    printResults("String Map (100 entries)", results.stringMap);
+    printSummary("String Map", results.stringMap);
+    
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("  📊 Size Scaling (XPB vs JSON)");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    printSizeScaling(results.sizeScaling);
+    
+    console.log("\n✅ All browser benchmarks complete!");
+  }
 }
 
 function printResults(title: string, results: BenchResult[]) {
