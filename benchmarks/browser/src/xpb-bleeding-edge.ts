@@ -226,6 +226,120 @@ export class SABStreamer {
   }
 }
 
+// ==========================================
+// 5. Large Message Zero-Copy View
+// ==========================================
+
+// Schema:
+// 0: id (uint64) - 8 bytes
+// 1: name (string) - var
+// 2: email (string) - var
+// 3: age (int32) - 4 bytes
+// 4: score (float64) - 8 bytes
+// 5: active (bool) - 1 byte
+// 6: description (string) - var
+
+const td = new TextDecoder();
+
+export class LargeMessageView {
+  private u8: Uint8Array;
+  private view: DataView;
+  
+  constructor(buffer: Uint8Array) {
+    this.u8 = buffer;
+    this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  }
+
+  get id(): bigint {
+    return this.view.getBigUint64(0, true);
+  }
+
+  get name(): string {
+    const len = this.u8[8]; // Demo simplified (1-byte len)
+    return td.decode(this.u8.subarray(9, 9 + len));
+  }
+  
+  // Efficiently find email by skipping name
+  get email(): string {
+      let pos = 8;
+      pos += 1 + this.u8[pos]; // Skip name
+      
+      const len = this.u8[pos];
+      return td.decode(this.u8.subarray(pos+1, pos+1+len));
+  }
+  
+  get age(): number {
+      let pos = 8;
+      pos += 1 + this.u8[pos]; // Skip name
+      pos += 1 + this.u8[pos]; // Skip email
+      
+      return this.view.getInt32(pos, true);
+  }
+  
+  get score(): number {
+      let pos = 8;
+      pos += 1 + this.u8[pos]; // Skip name
+      pos += 1 + this.u8[pos]; // Skip email
+      pos += 4; // Skip age
+      
+      return this.view.getFloat64(pos, true);
+  }
+  
+  get description(): string {
+      let pos = 8;
+      pos += 1 + this.u8[pos]; // Skip name
+      pos += 1 + this.u8[pos]; // Skip email
+      pos += 4; // Skip age
+      pos += 8; // Skip score
+      pos += 1; // Skip active
+      
+      const len = this.u8[pos];
+      return td.decode(this.u8.subarray(pos+1, pos+1+len));
+  }
+}
+
+export class LargeMessageStandard {
+    id: bigint;
+    name: string;
+    email: string;
+    age: number;
+    score: number;
+    active: boolean;
+    description: string;
+    
+    constructor(id: bigint, name: string, email: string, age: number, score: number, active: boolean, desc: string) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.age = age;
+        this.score = score;
+        this.active = active;
+        this.description = desc;
+    }
+    
+    static decode(buffer: Uint8Array): LargeMessageStandard {
+        const view = new DataView(buffer.buffer, buffer.byteOffset);
+        let pos = 0;
+        
+        const id = view.getBigUint64(pos, true); pos += 8;
+        
+        const nameLen = buffer[pos++];
+        const name = td.decode(buffer.subarray(pos, pos+nameLen)); pos += nameLen;
+        
+        const emailLen = buffer[pos++];
+        const email = td.decode(buffer.subarray(pos, pos+emailLen)); pos += emailLen;
+        
+        const age = view.getInt32(pos, true); pos += 4;
+        const score = view.getFloat64(pos, true); pos += 8;
+        const active = buffer[pos++] !== 0;
+        
+        const descLen = buffer[pos++];
+        const desc = td.decode(buffer.subarray(pos, pos+descLen)); pos += descLen;
+        
+        return new LargeMessageStandard(id, name, email, age, score, active, desc);
+    }
+}
+
 export class SharedMemoryLink {
   private worker: Worker;
   private sab: SharedArrayBuffer;

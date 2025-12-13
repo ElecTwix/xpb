@@ -104,8 +104,15 @@
       <div id="res-simd"></div>
     </div>
 
+    <div class="card">
+      <h2>7. Large Message View (Lazy)</h2>
+      <p>Comparing Standard Decode vs Lazy View for large objects.</p>
+      <button id="btn-large-view" class="btn">Run Benchmark</button>
+      <div id="res-large-view"></div>
+    </div>
+
     <script type="module">
-      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray, SABStreamer } from './dist/xpb-bleeding-edge.js';
+      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray, SABStreamer, LargeMessageView, LargeMessageStandard } from './dist/xpb-bleeding-edge.js';
       import './dist/xpb-browser.js'; // Ensure XPB runtime is loaded
 
       const ITERATIONS = 1000;
@@ -339,31 +346,25 @@
       const runSimd = async () => {
         const div = document.getElementById('res-simd');
         div.innerHTML = 'Loading Wasm...';
-        
         const response = await fetch('./dist/simd.wasm');
         const buffer = await response.arrayBuffer();
         const module = await WebAssembly.compile(buffer);
         const instance = await WebAssembly.instantiate(module);
         const { zigzag_scalar, zigzag_simd, mem } = instance.exports;
-        
         const COUNT = 10000;
         const dataJS = new Int32Array(COUNT);
         for(let i=0; i<COUNT; i++) dataJS[i] = i * 2;
-        
         const wasmMem32 = new Int32Array(mem.buffer);
         wasmMem32.set(dataJS, 0);
-        
         function zigzagJS(arr) {
             for (let i = 0; i < arr.length; i++) {
                 const n = arr[i];
                 arr[i] = (n >>> 1) ^ -(n & 1);
             }
         }
-        
         const jsTime = await bench(() => { zigzagJS(dataJS); }, 1000);
         const wasmScalarTime = await bench(() => { zigzag_scalar(0, COUNT); }, 1000);
         const wasmSimdTime = await bench(() => { zigzag_simd(0, COUNT); }, 1000);
-        
         let html = `<table><tr><th>Method</th><th>Time (10k items)</th><th>Speedup</th></tr>`;
         html += `<tr><td>JS Scalar</td><td>${formatNs(jsTime)}</td><td>1x</td></tr>`;
         html += `<tr><td>Wasm Scalar</td><td>${formatNs(wasmScalarTime)}</td><td class="speedup">${(jsTime/wasmScalarTime).toFixed(2)}x</td></tr>`;
@@ -373,6 +374,49 @@
         return { jsTime, wasmSimdTime };
       };
       document.getElementById('btn-simd').onclick = runSimd;
+
+      // --- Large View ---
+      const runLargeView = async () => {
+        const div = document.getElementById('res-large-view');
+        div.innerHTML = 'Running...';
+        
+        // Prepare Data
+        const name = "Alice";
+        const email = "alice@example.com";
+        const desc = "This is a longer description text to simulate payload.";
+        const size = 8 + (1+name.length) + (1+email.length) + 4 + 8 + 1 + (1+desc.length);
+        const buffer = new Uint8Array(size);
+        const view = new DataView(buffer.buffer);
+        let pos = 0;
+        view.setBigUint64(pos, 1234567890n, true); pos += 8;
+        buffer[pos++] = name.length;
+        buffer.set(new TextEncoder().encode(name), pos); pos += name.length;
+        buffer[pos++] = email.length;
+        buffer.set(new TextEncoder().encode(email), pos); pos += email.length;
+        view.setInt32(pos, 30, true); pos += 4;
+        view.setFloat64(pos, 95.5, true); pos += 8;
+        buffer[pos++] = 1;
+        buffer[pos++] = desc.length;
+        buffer.set(new TextEncoder().encode(desc), pos); pos += desc.length;
+        
+        const stdTime = await bench(() => { LargeMessageStandard.decode(buffer); });
+        const initTime = await bench(() => { new LargeMessageView(buffer); });
+        const accessTime = await bench(() => {
+            const v = new LargeMessageView(buffer);
+            const id = v.id;
+            const n = v.name;
+            return id;
+        });
+        
+        let html = `<table><tr><th>Method</th><th>Time (ns)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard Decode</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+        html += `<tr><td>Lazy View (Init)</td><td>${formatNs(initTime)}</td><td class="speedup">${(stdTime/initTime).toFixed(1)}x</td></tr>`;
+        html += `<tr><td>Lazy View (Init + Read 2)</td><td>${formatNs(accessTime)}</td><td class="speedup">${(stdTime/accessTime).toFixed(1)}x</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+        return { stdTime, initTime, accessTime };
+      };
+      document.getElementById('btn-large-view').onclick = runLargeView;
 
       // Expose for automation
       window.runAll = async () => {
@@ -388,9 +432,11 @@
         const stream = await runStream();
         console.log("Finished Stream. Starting SIMD...");
         const simd = await runSimd();
-        console.log("Finished SIMD.");
+        console.log("Finished SIMD. Starting Large View...");
+        const largeView = await runLargeView();
+        console.log("Finished Large View.");
         
-        window.bleedingEdgeResults = { base64, accessor, shared, stringArray, stream, simd };
+        window.bleedingEdgeResults = { base64, accessor, shared, stringArray, stream, simd, largeView };
         return window.bleedingEdgeResults;
       };
     </script>
