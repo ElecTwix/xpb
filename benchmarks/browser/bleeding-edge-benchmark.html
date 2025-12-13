@@ -97,6 +97,13 @@
       <div id="res-stream"></div>
     </div>
 
+    <div class="card">
+      <h2>6. Wasm SIMD (ZigZag Decode)</h2>
+      <p>Comparing Scalar JS vs Wasm Scalar vs Wasm SIMD (128-bit).</p>
+      <button id="btn-simd" class="btn">Run Benchmark</button>
+      <div id="res-simd"></div>
+    </div>
+
     <script type="module">
       import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray, SABStreamer } from './dist/xpb-bleeding-edge.js';
       import './dist/xpb-browser.js'; // Ensure XPB runtime is loaded
@@ -328,7 +335,46 @@
       };
       document.getElementById('btn-stream').onclick = runStream;
 
-      // --- Automation ---
+      // --- SIMD ---
+      const runSimd = async () => {
+        const div = document.getElementById('res-simd');
+        div.innerHTML = 'Loading Wasm...';
+        
+        const response = await fetch('./dist/simd.wasm');
+        const buffer = await response.arrayBuffer();
+        const module = await WebAssembly.compile(buffer);
+        const instance = await WebAssembly.instantiate(module);
+        const { zigzag_scalar, zigzag_simd, mem } = instance.exports;
+        
+        const COUNT = 10000;
+        const dataJS = new Int32Array(COUNT);
+        for(let i=0; i<COUNT; i++) dataJS[i] = i * 2;
+        
+        const wasmMem32 = new Int32Array(mem.buffer);
+        wasmMem32.set(dataJS, 0);
+        
+        function zigzagJS(arr) {
+            for (let i = 0; i < arr.length; i++) {
+                const n = arr[i];
+                arr[i] = (n >>> 1) ^ -(n & 1);
+            }
+        }
+        
+        const jsTime = await bench(() => { zigzagJS(dataJS); }, 1000);
+        const wasmScalarTime = await bench(() => { zigzag_scalar(0, COUNT); }, 1000);
+        const wasmSimdTime = await bench(() => { zigzag_simd(0, COUNT); }, 1000);
+        
+        let html = `<table><tr><th>Method</th><th>Time (10k items)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>JS Scalar</td><td>${formatNs(jsTime)}</td><td>1x</td></tr>`;
+        html += `<tr><td>Wasm Scalar</td><td>${formatNs(wasmScalarTime)}</td><td class="speedup">${(jsTime/wasmScalarTime).toFixed(2)}x</td></tr>`;
+        html += `<tr><td>Wasm SIMD</td><td>${formatNs(wasmSimdTime)}</td><td class="speedup">${(jsTime/wasmSimdTime).toFixed(2)}x</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+        return { jsTime, wasmSimdTime };
+      };
+      document.getElementById('btn-simd').onclick = runSimd;
+
+      // Expose for automation
       window.runAll = async () => {
         console.log("Starting Base64...");
         const base64 = await runBase64();
@@ -340,8 +386,11 @@
         const stringArray = await runStringArray();
         console.log("Finished String Array. Starting Stream...");
         const stream = await runStream();
-        console.log("Finished Stream.");
-        window.bleedingEdgeResults = { base64, accessor, shared, stringArray, stream };
+        console.log("Finished Stream. Starting SIMD...");
+        const simd = await runSimd();
+        console.log("Finished SIMD.");
+        
+        window.bleedingEdgeResults = { base64, accessor, shared, stringArray, stream, simd };
         return window.bleedingEdgeResults;
       };
     </script>

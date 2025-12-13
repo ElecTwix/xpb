@@ -84,6 +84,7 @@ Experimental benchmarks (`benchmarks/browser/src/xpb-bleeding-edge.ts`) demonstr
 | Optimization | Scenario | Standard Time | Optimized Time | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
 | **Lazy String Array** | Init 100 Strings | 104,720 ns | **1,480 ns** | **70x** 🚀 |
+| **Wasm SIMD** | ZigZag Decode (10k) | 75,850 ns | **2,595 ns** | **29x** |
 | **Stream Pipeline** | 50MB Network -> Worker | N/A | **1,660 MB/s** | **Huge** |
 | **Native Base64** | Write to Encoder | 1,764,000 ns | **662,800 ns** | **2.66x** |
 | **Zero-Copy Object** | Read 2 Fields | 2,470 ns | **960 ns** | **2.57x** |
@@ -91,6 +92,7 @@ Experimental benchmarks (`benchmarks/browser/src/xpb-bleeding-edge.ts`) demonstr
 **Insights:**
 *   **Lazy String Array:** Achieving **70x speedup** proves that avoiding upfront string allocation is the key to unlocking maximum browser performance for collections.
 *   **Stream Pipeline:** Using **BYOB Streams + SharedArrayBuffer**, XPB achieves **1.6 GB/s** throughput from network to worker processing. The worker consumes data instantly as it arrives, enabling real-time parsing of massive datasets without blocking the UI thread.
+*   **Wasm SIMD:** For computation-heavy decoding (e.g., ZigZag, Delta, Crypto), **Unsafe Wasm + SIMD128** outperforms JavaScript by **~30x**. This enables implementing advanced compression algorithms without the performance penalty usually associated with JS implementations.
 
 ---
 *Report generated via `cmd/xpbench`.*

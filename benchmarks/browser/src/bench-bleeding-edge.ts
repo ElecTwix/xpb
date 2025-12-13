@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function createServer(dir: string): Promise<http.Server> {
   return new Promise((resolve) => {
     const server = http.createServer((req: any, res: any) => {
+      console.log(`[Request] ${req.method} ${req.url}`);
       const filePath = path.join(dir, req.url === '/' ? 'index.html' : req.url!);
       const ext = path.extname(filePath);
       let contentType = 'text/html';
@@ -129,6 +130,14 @@ async function main() {
       console.log("\n5️⃣ BYOB Stream -> SharedArrayBuffer (50MB):");
       console.log(`   Throughput:        ${stream.mbps} MB/s`);
       console.log(`   Time:              ${stream.duration.toFixed(0)} ms`);
+
+      const { simd } = results;
+      if (simd) {
+          console.log("\n6️⃣ Wasm SIMD (ZigZag Decode 10k):");
+          console.log(`   JS Scalar:         ${simd.jsTime.toFixed(0)} ns`);
+          console.log(`   Wasm Simd:         ${simd.wasmSimdTime.toFixed(0)} ns`);
+          console.log(`   🚀 Speedup:        ${(simd.jsTime / simd.wasmSimdTime).toFixed(2)}x`);
+      }
       
       console.log("\n✅ Done!");
       process.exit(0);
