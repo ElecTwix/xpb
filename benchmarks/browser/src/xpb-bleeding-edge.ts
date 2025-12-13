@@ -5,7 +5,7 @@
  */
 
 // ==========================================
-// 1. Native Base64 (Simulated for Benchmark if missing)
+// 1. Native Base64 (Strict 2025+)
 // ==========================================
 
 export const NativeBase64 = {
@@ -13,34 +13,12 @@ export const NativeBase64 = {
   
   encode: (data: Uint8Array): string => {
     // @ts-ignore
-    if (data.toBase64) return data.toBase64();
-    throw new Error("Native Base64 not supported");
+    return data.toBase64();
   },
   
   decode: (base64: string): Uint8Array => {
     // @ts-ignore
-    if (Uint8Array.fromBase64) return Uint8Array.fromBase64(base64);
-    throw new Error("Native Base64 not supported");
-  },
-
-  // Polyfills for comparison
-  encodePolyfill: (data: Uint8Array): string => {
-    let binary = '';
-    const len = data.length;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(data[i]);
-    }
-    return btoa(binary);
-  },
-
-  decodePolyfill: (base64: string): Uint8Array => {
-    const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
+    return Uint8Array.fromBase64(base64);
   }
 };
 

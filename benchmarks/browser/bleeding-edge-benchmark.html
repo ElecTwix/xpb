@@ -262,8 +262,6 @@
         const data = new Uint8Array(1024 * 1024);
         crypto.getRandomValues(data.subarray(0, 65536)); // partial fill
         
-        // Bench Encode
-        const polyTime = await bench(() => NativeBase64.encodePolyfill(data), 50);
         let nativeTime = 0;
         let supported = false;
         
@@ -272,21 +270,20 @@
             nativeTime = await bench(() => NativeBase64.encode(data), 50);
             supported = true;
           }
-        } catch(e) {}
+        } catch(e) {
+          console.error(e);
+        }
 
-        let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
-        html += `<tr><td>Standard (btoa)</td><td>${formatNs(polyTime)}</td><td>1x</td></tr>`;
+        let html = `<table><tr><th>Method</th><th>Time (1MB)</th></tr>`;
         
-        let speedup = 0;
         if (supported) {
-          speedup = polyTime / nativeTime;
-          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td></tr>`;
         } else {
-          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td><td>-</td></tr>`;
+          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td></tr>`;
         }
         html += `</table>`;
         div.innerHTML = html;
-        return { polyTime, nativeTime, supported, speedup };
+        return { nativeTime, supported };
       };
       document.getElementById('btn-base64').onclick = runBase64;
 

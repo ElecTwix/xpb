@@ -84,10 +84,8 @@ async function main() {
   const { base64, accessor, shared } = results;
 
   console.log("\n1️⃣ Native Base64 Performance:");
-  console.log(`   Standard (btoa):   ${base64.polyTime.toFixed(0)} ns`);
   if (base64.supported) {
       console.log(`   Native (toBase64): ${base64.nativeTime.toFixed(0)} ns`);
-      console.log(`   🚀 Speedup:        ${base64.speedup.toFixed(2)}x`);
   } else {
       console.log(`   Native API not supported in this browser version.`);
   }
