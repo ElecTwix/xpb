@@ -4,7 +4,6 @@
  */
 
 import { HyperEncoder, HyperDecoder, E, D, acquireEncoder, releaseEncoder, batchEncode, batchDecode } from '../../../runtime/ts/src/hyper.js';
-import { UltraEncoder, UltraDecoder, getEncoder, releaseEncoder as releaseUltra } from '../../../runtime/ts/src/ultra.js';
 
 function bench(name: string, iterations: number, fn: () => void): number {
   for (let i = 0; i < 1000; i++) fn();
@@ -61,33 +60,6 @@ async function main() {
     }
   });
 
-  // Ultra comparison
-  const ultraEncodeNs = bench("Ultra encode", iterations, () => {
-    const e = getEncoder(64);
-    e.writeString(1, testUser.name);
-    e.writeInt32(2, testUser.age);
-    e.writeBool(3, testUser.active);
-    releaseUltra(e);
-  });
-
-  const ultraEnc = getEncoder(64);
-  ultraEnc.writeString(1, testUser.name);
-  ultraEnc.writeInt32(2, testUser.age);
-  ultraEnc.writeBool(3, testUser.active);
-  const ultraData = Buffer.from(ultraEnc.finish());
-  releaseUltra(ultraEnc);
-
-  const ultraDecodeNs = bench("Ultra decode", iterations, () => {
-    const d = new UltraDecoder(ultraData);
-    while (d.hasMore()) {
-      const tag = d.readTag();
-      const fn = UltraDecoder.fieldNum(tag);
-      if (fn === 1) d.readString();
-      else if (fn === 2) d.readInt32();
-      else if (fn === 3) d.readBool();
-    }
-  });
-
   // JSON comparison
   const jsonData = JSON.stringify(testUser);
   const jsonEncodeNs = bench("JSON encode", iterations, () => { JSON.stringify(testUser); });
@@ -97,7 +69,6 @@ async function main() {
   console.log("│ Runtime             │ Encode     │ Decode     │ Size       │");
   console.log("├─────────────────────┼────────────┼────────────┼────────────┤");
   console.log(`│ Hyper (inline)      │ ${hyperEncodeNs.toFixed(0).padStart(7)} ns │ ${hyperDecodeNs.toFixed(0).padStart(7)} ns │ ${hyperData.length.toString().padStart(6)} B │`);
-  console.log(`│ Ultra (pooled)      │ ${ultraEncodeNs.toFixed(0).padStart(7)} ns │ ${ultraDecodeNs.toFixed(0).padStart(7)} ns │ ${ultraData.length.toString().padStart(6)} B │`);
   console.log(`│ JSON                │ ${jsonEncodeNs.toFixed(0).padStart(7)} ns │ ${jsonDecodeNs.toFixed(0).padStart(7)} ns │ ${jsonData.length.toString().padStart(6)} B │`);
   console.log("└─────────────────────┴────────────┴────────────┴────────────┘");
 

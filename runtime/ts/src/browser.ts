@@ -210,6 +210,56 @@ export class Encoder {
     }
   }
 
+  /** Write Base64 string directly as bytes (Zero-Alloc if supported) */
+  writeBase64AsBytes(base64: string): void {
+    // Check for native support (2025+ browsers)
+    // @ts-ignore
+    if (typeof Uint8Array.prototype.setFromBase64 === 'function') {
+       // We need to know the decoded size to reserve space.
+       // Standard Base64: 4 chars -> 3 bytes.
+       // Padding '=' might reduce it.
+       const strLen = base64.length;
+       const estimatedSize = Math.ceil(strLen * 3 / 4);
+       
+       this.ensureCapacity(estimatedSize + 5); // +5 for length prefix
+       
+       // Write placeholder length
+       const lenPos = this.pos;
+       this.pos += 1; // Assume 1 byte length
+       
+       // Write bytes directly to buffer
+       // @ts-ignore
+       const result = this.buf.subarray(this.pos).setFromBase64(base64);
+       const written = result.written;
+       
+       if (written <= CompactLengthThreshold) {
+         this.buf[lenPos] = written;
+         this.pos += written;
+       } else {
+         // Shift for extended length
+         const endPos = this.pos + written;
+         this.buf.copyWithin(lenPos + 5, lenPos + 1, endPos);
+         
+         this.buf[lenPos] = CompactLengthMarker;
+         this.buf[lenPos + 1] = written;
+         this.buf[lenPos + 2] = written >> 8;
+         this.buf[lenPos + 3] = written >> 16;
+         this.buf[lenPos + 4] = written >> 24;
+         
+         this.pos += written + 4;
+       }
+    } else {
+      // Fallback: Decode to temp buffer (atob) and write
+      const bin = atob(base64);
+      const len = bin.length;
+      this.writeCompactLength(len);
+      this.ensureCapacity(len);
+      for (let i = 0; i < len; i++) {
+        this.buf[this.pos++] = bin.charCodeAt(i);
+      }
+    }
+  }
+
   /** Write bytes with compact length prefix */
   writeBytes(v: Uint8Array): void {
     this.writeCompactLength(v.length);
@@ -344,27 +394,57 @@ export class Decoder {
     
     // Optimization: For short strings, manual decode is faster than TextDecoder
     if (length < 20) {
-      let result = "";
+      // Check for ASCII
       let isAscii = true;
-      // Peek to see if we can use fast path
       for (let i = 0; i < length; i++) {
-        const b = this.data[this.pos + i];
-        if (b > 127) {
+        if (this.data[this.pos + i] > 127) {
           isAscii = false;
           break;
         }
-        result += String.fromCharCode(b);
       }
       
       if (isAscii) {
+        // Use spread/apply for fast string creation
+        const str = String.fromCharCode.apply(null, this.data.subarray(this.pos, this.pos + length) as any);
         this.pos += length;
-        return result;
+        return str;
       }
     }
 
     const bytes = this.data.subarray(this.pos, this.pos + length);
     this.pos += length;
     return textDecoder.decode(bytes);
+  }
+
+  /** Read bytes directly as Base64 string */
+  readBytesAsBase64(): string {
+    const length = this.readCompactLength();
+    if (this.pos + length > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading bytes for base64');
+    }
+    
+    // Check for native support
+    // @ts-ignore
+    if (typeof Uint8Array.prototype.toBase64 === 'function') {
+      const bytes = this.data.subarray(this.pos, this.pos + length);
+      this.pos += length;
+      // @ts-ignore
+      return bytes.toBase64();
+    }
+    
+    // Fallback: btoa
+    // To avoid stack overflow with spread on large arrays, we use chunks or loop
+    // But btoa takes a binary string.
+    let binary = '';
+    const end = this.pos + length;
+    // Chunk size for apply
+    const CHUNK = 0x8000; 
+    for (let i = this.pos; i < end; i += CHUNK) {
+      const slice = this.data.subarray(i, Math.min(i + CHUNK, end));
+      binary += String.fromCharCode.apply(null, slice as any);
+    }
+    this.pos += length;
+    return btoa(binary);
   }
 
   /** Read bytes with compact length prefix */

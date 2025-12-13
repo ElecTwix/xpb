@@ -311,14 +311,13 @@ function generateFieldRead(field: FieldDef): string {
         } else {
           // Browser optimization: Manual decode for short strings (< 20 chars)
           if (len < 20) {
-            val = "";
             var isAscii = true;
             for (var i = 0; i < len; i++) {
-              var b = buf[pos + i];
-              if (b > 127) { isAscii = false; break; }
-              val += String.fromCharCode(b);
+              if (buf[pos + i] > 127) { isAscii = false; break; }
             }
-            if (!isAscii) {
+            if (isAscii) {
+              val = String.fromCharCode.apply(null, buf.subarray(pos, pos + len));
+            } else {
               val = textDecoder.decode(buf.subarray(pos, pos + len));
             }
           } else {

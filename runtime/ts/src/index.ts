@@ -343,27 +343,66 @@ export class Decoder {
     
     // Optimization: For short strings, manual decode is faster than TextDecoder
     if (length < 20) {
-      let result = "";
+      // Check for ASCII
       let isAscii = true;
-      // Peek to see if we can use fast path
       for (let i = 0; i < length; i++) {
-        const b = this.data[this.pos + i];
-        if (b > 127) {
+        if (this.data[this.pos + i] > 127) {
           isAscii = false;
           break;
         }
-        result += String.fromCharCode(b);
       }
       
       if (isAscii) {
+        // Use spread/apply for fast string creation
+        const str = String.fromCharCode.apply(null, this.data.subarray(this.pos, this.pos + length) as any);
         this.pos += length;
-        return result;
+        return str;
       }
     }
 
     const bytes = this.data.subarray(this.pos, this.pos + length);
     this.pos += length;
     return textDecoder.decode(bytes);
+  }
+
+  /** Read bytes directly as Base64 string */
+  readBytesAsBase64(): string {
+    const length = this.readCompactLength();
+    if (this.pos + length > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading bytes for base64');
+    }
+    
+    // Check for native support (Proposal 4)
+    // @ts-ignore
+    if (typeof Uint8Array.prototype.toBase64 === 'function') {
+      const bytes = this.data.subarray(this.pos, this.pos + length);
+      this.pos += length;
+      // @ts-ignore
+      return bytes.toBase64();
+    }
+    
+    // Node.js Buffer optimization
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(this.data)) {
+      const b64 = this.data.toString('base64', this.pos, this.pos + length);
+      this.pos += length;
+      return b64;
+    }
+    
+    // Fallback
+    const bytes = this.data.subarray(this.pos, this.pos + length);
+    this.pos += length;
+    if (typeof Buffer !== 'undefined') {
+       return Buffer.from(bytes).toString('base64');
+    }
+    
+    // Browser fallback (btoa)
+    let binary = '';
+    const end = bytes.length;
+    const CHUNK = 0x8000;
+    for (let i = 0; i < end; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, end)) as any);
+    }
+    return btoa(binary);
   }
 
   /** Read bytes with compact length prefix */
