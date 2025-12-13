@@ -175,6 +175,44 @@ export class Encoder {
     this.pos += bytes.length;
   }
 
+  /** 
+   * Write Base64 string directly as bytes (Zero-Allocation).
+   * Uses setFromBase64 to write directly into the buffer, handling the length prefix efficiently.
+   */
+  writeBase64AsBytes(v: string): void {
+    // Estimate max size (Base64 is 4 chars -> 3 bytes)
+    const maxLen = Math.ceil(v.length * 0.75);
+    
+    // Reserve space for Max Header (5 bytes) + Body
+    this.ensureCapacity(5 + maxLen);
+
+    // Write body at offset + 5 (leaving room for max header)
+    // @ts-ignore - Check for new browser API (2025)
+    if (this.buf.setFromBase64) {
+      const dest = this.buf.subarray(this.pos + 5);
+      // @ts-ignore
+      const { written } = dest.setFromBase64(v);
+      
+      if (written <= CompactLengthThreshold) {
+         // Short form: 1 byte header.
+         // Shift data back 4 bytes (from +5 to +1) to close the gap
+         this.buf.copyWithin(this.pos + 1, this.pos + 5, this.pos + 5 + written);
+         this.buf[this.pos] = written;
+         this.pos += 1 + written;
+      } else {
+         // Long form: 5 byte header.
+         // Data is already in correct place (pos + 5)
+         this.buf[this.pos] = CompactLengthMarker;
+         this.view.setUint32(this.pos + 1, written, true);
+         this.pos += 5 + written;
+      }
+    } else {
+      // Fallback: Decode -> Copy
+      const bytes = fromBase64(v);
+      this.writeBytes(bytes);
+    }
+  }
+
   /** Write bytes with compact length prefix */
   writeBytes(v: Uint8Array): void {
     this.writeCompactLength(v.length);

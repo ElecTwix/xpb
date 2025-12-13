@@ -63,48 +63,71 @@ async function main() {
       console.log(`   [Browser] ${msg.text()}`);
   });
   
+  page.on('pageerror', exception => {
+    console.error(`   [Browser Page Error] ${exception}`);
+  });
+  
+  page.on('crash', () => {
+    console.error(`   [Browser Crash] Page crashed!`);
+    browser.close();
+    server.close();
+    process.exit(1);
+  });
+  
   await page.goto(url);
   
   // Trigger benchmarks
   console.log("⏱️  Running benchmarks...");
   
-  // Execute window.runAll()
-  await page.evaluate(() => (window as any).runAll());
-  
-  // Wait for results
-  await page.waitForFunction(() => (window as any).bleedingEdgeResults !== undefined, { timeout: 60000 });
-  
-  // Get results
-  const results = await page.evaluate(() => (window as any).bleedingEdgeResults);
-  
-  await browser.close();
-  server.close();
-  
-  // Report Results
-  const { base64, accessor, shared } = results;
+  try {
+      // Execute window.runAll()
+      await page.evaluate(() => (window as any).runAll());
+      
+      // Wait for results
+      await page.waitForFunction(() => (window as any).bleedingEdgeResults !== undefined, { timeout: 60000 });
+      
+      // Get results
+      const results = await page.evaluate(() => (window as any).bleedingEdgeResults);
+      
+      await browser.close();
+      server.close();
+      
+      // Report Results
+      const { base64, accessor, shared } = results;
 
-  console.log("\n1️⃣ Native Base64 Performance:");
-  if (base64.supported) {
-      console.log(`   Native (toBase64): ${base64.nativeTime.toFixed(0)} ns`);
-  } else {
-      console.log(`   Native API not supported in this browser version.`);
+      console.log("\n1️⃣ Native Base64 Performance (Write to Encoder):");
+      if (base64.supported) {
+          console.log(`   fromBase64 + writeBytes: ${base64.nativeTime.toFixed(0)} ns`);
+          console.log(`   writeBase64AsBytes:      ${base64.setFromTime.toFixed(0)} ns`);
+          const speedup = base64.nativeTime / base64.setFromTime;
+          console.log(`   🚀 Speedup:              ${speedup.toFixed(2)}x (Zero-Alloc)`);
+      } else {
+          console.log(`   Native API not supported in this browser version.`);
+      }
+
+      console.log("\n2️⃣ Zero-Copy Accessor Performance:");
+      console.log(`   Standard (Object): ${accessor.stdTime.toFixed(0)} ns`);
+      console.log(`   Accessor (View):   ${accessor.accTime.toFixed(0)} ns`);
+      console.log(`   🚀 Speedup:        ${accessor.speedup.toFixed(2)}x`);
+
+      console.log("\n3️⃣ Shared Memory Performance:");
+      if (shared) {
+          console.log(`   postMessage:       ${shared.stdTime.toFixed(0)} ns`);
+          console.log(`   SharedArrayBuffer: ${shared.sharedTime.toFixed(0)} ns`);
+          console.log(`   🚀 Speedup:        ${shared.speedup.toFixed(2)}x`);
+      } else {
+          console.log(`   ❌ SharedArrayBuffer failed (likely missing headers or support).`);
+      }
+      
+      console.log("\n✅ Done!");
+      process.exit(0);
+
+  } catch (error) {
+      console.error('Benchmark failed:', error);
+      await browser.close();
+      server.close();
+      process.exit(1);
   }
-
-  console.log("\n2️⃣ Zero-Copy Accessor Performance:");
-  console.log(`   Standard (Object): ${accessor.stdTime.toFixed(0)} ns`);
-  console.log(`   Accessor (View):   ${accessor.accTime.toFixed(0)} ns`);
-  console.log(`   🚀 Speedup:        ${accessor.speedup.toFixed(2)}x`);
-
-  console.log("\n3️⃣ Shared Memory Performance:");
-  if (shared) {
-      console.log(`   postMessage:       ${shared.stdTime.toFixed(0)} ns`);
-      console.log(`   SharedArrayBuffer: ${shared.sharedTime.toFixed(0)} ns`);
-      console.log(`   🚀 Speedup:        ${shared.speedup.toFixed(2)}x`);
-  } else {
-      console.log(`   ❌ SharedArrayBuffer failed (likely missing headers or support).`);
-  }
-  
-  console.log("\n✅ Done!");
 }
 
 main().catch(console.error);

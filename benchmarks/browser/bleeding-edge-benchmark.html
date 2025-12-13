@@ -85,6 +85,7 @@
 
     <script type="module">
       import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink } from './dist/xpb-bleeding-edge.js';
+      import './dist/xpb-browser.js'; // Ensure XPB runtime is loaded
 
       const ITERATIONS = 1000;
 
@@ -253,37 +254,62 @@
         // Better to refactor to functions returning values.
       };
 
-      // Refactoring handlers to named functions
+      // --- Base64 ---
       const runBase64 = async () => {
         const div = document.getElementById('res-base64');
         div.innerHTML = 'Running...';
         
-        // 1MB random data
-        const data = new Uint8Array(1024 * 1024);
-        crypto.getRandomValues(data.subarray(0, 65536)); // partial fill
+        // 1MB random data converted to Base64 for the test
+        const rawData = new Uint8Array(1024 * 1024);
+        crypto.getRandomValues(rawData.subarray(0, 65536));
+        const base64Str = await new Promise(resolve => {
+            // Helper to get base64 string
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(new Blob([rawData]));
+        });
+        
+        // Setup Encoder
+        const { Encoder } = window.XPB;
         
         let nativeTime = 0;
+        let setFromTime = 0;
         let supported = false;
         
         try {
           if (NativeBase64.isSupported()) {
-            nativeTime = await bench(() => NativeBase64.encode(data), 50);
-            supported = true;
+             // 1. Native Decode + Write (Old "Bleeding Edge")
+             nativeTime = await bench(() => {
+                 const enc = new Encoder(rawData.length + 10);
+                 const bytes = NativeBase64.decode(base64Str);
+                 enc.writeBytes(bytes);
+             }, 50);
+
+             // 2. Direct Write (New "Zero-Alloc")
+             setFromTime = await bench(() => {
+                 const enc = new Encoder(rawData.length + 10);
+                 enc.writeBase64AsBytes(base64Str);
+             }, 50);
+             
+             supported = true;
           }
         } catch(e) {
           console.error(e);
         }
 
-        let html = `<table><tr><th>Method</th><th>Time (1MB)</th></tr>`;
+        let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
         
         if (supported) {
-          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td></tr>`;
+          html += `<tr><td>fromBase64 + writeBytes</td><td>${formatNs(nativeTime)}</td><td>1x</td></tr>`;
+          
+          const speedup = nativeTime / setFromTime;
+          html += `<tr><td>writeBase64AsBytes (Direct)</td><td>${formatNs(setFromTime)}</td><td class="speedup">${speedup.toFixed(2)}x</td></tr>`;
         } else {
-          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td></tr>`;
+          html += `<tr><td>Native</td><td class="error">Not Supported</td><td>-</td></tr>`;
         }
         html += `</table>`;
         div.innerHTML = html;
-        return { nativeTime, supported };
+        return { nativeTime, setFromTime, supported };
       };
       document.getElementById('btn-base64').onclick = runBase64;
 
