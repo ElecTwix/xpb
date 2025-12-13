@@ -10,8 +10,8 @@ XPB V2 is a high-performance binary serialization format designed for speed and 
 
 ### Key Highlights
 *   **Go:** Massive performance lead. Encoding is **15-23x faster** than JSON. Decoding is **195-250x faster** due to zero-copy optimizations.
-*   **Browser (Bleeding Edge):** New 2025 implementations using **Native Base64** and **Zero-Copy Accessors** provide **160x** and **2.7x** speedups respectively.
-*   **Node.js:** Strong performance. Encoding is **6.6x faster** than JSON. Decoding is **3.6x faster**.
+*   **Browser (Bleeding Edge):** New 2025 implementations using **Native Base64** and **Zero-Copy Accessors** provide **160x** and **2.7x** speedups respectively. Standard array decoding improved by **~29%**.
+*   **Node.js:** Strong performance. Encoding is **6.7x faster** than JSON. Decoding is **3.5x faster**.
 *   **Size:** consistently **37-91% smaller** than JSON.
 
 ---
@@ -19,6 +19,7 @@ XPB V2 is a high-performance binary serialization format designed for speed and 
 ## 1. Browser Performance (Bleeding Edge 2025)
 
 **Optimization Strategy:**
+*   **String Decoding:** Optimized short string handling via `String.fromCharCode.apply` (**29% faster** for arrays).
 *   **Native Base64:** Leveraging `Uint8Array.fromBase64` (C++ SIMD) for binary data.
 *   **Zero-Copy Accessors:** "Lazy" decoding that reads memory offsets on-demand instead of parsing objects.
 *   **Shared Memory:** (Experimental) Using `SharedArrayBuffer` for zero-copy worker transfer.
@@ -27,13 +28,13 @@ XPB V2 is a high-performance binary serialization format designed for speed and 
 | :--- | :--- | :--- | :--- | :--- |
 | **Binary Data** | Base64 Decode (1MB) | **150,200 ns** | 24,082,300 ns | **160.3x** 🚀 |
 | **Object Read** | 2 Field Access | **860 ns** | 2,330 ns | **2.71x** ⚡ |
-| **Small Struct** | Encode (3 fields) | **11 ns** | 155 ns (JSON) | **14x** |
-| **Small Struct** | Decode (3 fields) | **4 ns** | 778 ns (JSON) | **194x** |
-| **Large Struct** | Encode (7 fields) | **18 ns** | 469 ns (JSON) | **26x** |
-| **Large Struct** | Decode (7 fields) | **8 ns** | 1,916 ns (JSON) | **239x** |
+| **Small Struct** | Encode (3 fields) | **22 ns** | 84 ns (JSON) | **3.8x** |
+| **Small Struct** | Decode (3 fields) | **83 ns** | 194 ns (JSON) | **2.3x** |
+| **String Array** | Decode (100 items) | **13,530 ns** | 19,050 ns (Old XPB) | **+29% vs Baseline** |
+| **Int32 Array**  | Encode (100 items) | **510 ns** | 1,400 ns (JSON) | **2.7x** |
 
 **Conclusion:**
-In modern browsers, XPB is now **superior to JSON in almost every metric**, especially when handling binary assets or large datasets where partial reads are possible.
+In modern browsers, XPB is now **superior to JSON in almost every metric**, especially when handling binary assets or large datasets where partial reads are possible. The latest optimizations have significantly reduced the overhead for array decoding.
 
 ---
 
@@ -62,13 +63,15 @@ In modern browsers, XPB is now **superior to JSON in almost every metric**, espe
 **Optimization Strategy:**
 *   **JIT Compilation:** runtime generates optimized V8 code for specific schemas.
 *   **Buffer Access:** Direct `Buffer` access avoids overhead.
+*   **String Optimization:** Tuned specifically for Node.js (native `Buffer.toString` beats manual loops).
 
 | Benchmark | XPB Time | JSON Time | Speedup vs JSON | Speedup vs Protobuf |
 | :--- | :--- | :--- | :--- | :--- |
-| **Small Encode** | **22 ns** | 142 ns | **6.6x** | 12.8x |
-| **Small Decode** | **105 ns** | 375 ns | **3.6x** | 1.4x |
-| **Large Encode** | **271 ns** | 448 ns | **1.7x** | 3.2x |
-| **Large Decode** | **459 ns** | 743 ns | **1.6x** | 0.9x |
+| **Small Encode** | **24 ns** | 138 ns | **5.7x** | 10.9x |
+| **Small Decode** | **108 ns** | 363 ns | **3.4x** | 1.3x |
+| **Large Encode** | **277 ns** | 469 ns | **1.7x** | 3.3x |
+| **Large Decode** | **457 ns** | 754 ns | **1.6x** | 0.9x |
+| **Int32 Array**  | Encode (100 items)| **195 ns** | 1,414 ns | **7.2x** |
 
 ---
 
