@@ -101,6 +101,60 @@ export class StandardUser {
 }
 
 // ==========================================
+// 2.5. Zero-Copy String Array (Lazy View)
+// ==========================================
+
+// Format: [Count (4B)] [Len (1B)][Str] ...
+// Demo limitation: Len is 1 byte (max 255 chars)
+
+export class ZeroCopyStringArray {
+  private u8: Uint8Array;
+  private offsets: Int32Array;
+
+  constructor(buffer: Uint8Array) {
+    this.u8 = buffer;
+    const count = new DataView(buffer.buffer, buffer.byteOffset).getInt32(0, true);
+    this.offsets = new Int32Array(count);
+    
+    let offset = 4;
+    for (let i = 0; i < count; i++) {
+        this.offsets[i] = offset;
+        const len = buffer[offset];
+        offset += 1 + len;
+    }
+  }
+
+  get(index: number): string {
+      const offset = this.offsets[index];
+      const len = this.u8[offset];
+      const start = offset + 1;
+      // In a real implementation, we might cache this string
+      return new TextDecoder().decode(this.u8.subarray(start, start + len));
+  }
+  
+  get length(): number {
+      return this.offsets.length;
+  }
+}
+
+export class StandardStringArray {
+  static decode(buffer: Uint8Array): string[] {
+      const view = new DataView(buffer.buffer, buffer.byteOffset);
+      const count = view.getInt32(0, true);
+      const result = new Array(count);
+      
+      let offset = 4;
+      for (let i = 0; i < count; i++) {
+          const len = buffer[offset];
+          const start = offset + 1;
+          result[i] = new TextDecoder().decode(buffer.subarray(start, start + len));
+          offset += 1 + len;
+      }
+      return result;
+  }
+}
+
+// ==========================================
 // 3. Shared Memory Coordinator
 // ==========================================
 

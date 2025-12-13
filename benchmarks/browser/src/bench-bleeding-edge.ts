@@ -93,7 +93,7 @@ async function main() {
       server.close();
       
       // Report Results
-      const { base64, accessor, shared } = results;
+      const { base64, accessor, shared, stringArray } = results;
 
       console.log("\n1️⃣ Native Base64 Performance (Write to Encoder):");
       if (base64.supported) {
@@ -105,7 +105,7 @@ async function main() {
           console.log(`   Native API not supported in this browser version.`);
       }
 
-      console.log("\n2️⃣ Zero-Copy Accessor Performance:");
+      console.log("\n2️⃣ Zero-Copy Accessor Performance (Object Read):");
       console.log(`   Standard (Object): ${accessor.stdTime.toFixed(0)} ns`);
       console.log(`   Accessor (View):   ${accessor.accTime.toFixed(0)} ns`);
       console.log(`   🚀 Speedup:        ${accessor.speedup.toFixed(2)}x`);
@@ -118,6 +118,11 @@ async function main() {
       } else {
           console.log(`   ❌ SharedArrayBuffer failed (likely missing headers or support).`);
       }
+
+      console.log("\n4️⃣ String Array (Lazy View):");
+      console.log(`   Standard (Decode): ${stringArray.stdTime.toFixed(0)} ns`);
+      console.log(`   Lazy View (Scan):  ${stringArray.lazyTime.toFixed(0)} ns`);
+      console.log(`   🚀 Speedup:        ${stringArray.speedup.toFixed(2)}x`);
       
       console.log("\n✅ Done!");
       process.exit(0);

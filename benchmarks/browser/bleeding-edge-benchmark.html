@@ -83,8 +83,15 @@
       <div id="res-shared"></div>
     </div>
 
+    <div class="card">
+      <h2>4. String Array (Lazy View)</h2>
+      <p>Comparing <code>JSON.parse</code> style full decode vs <code>Lazy View</code> (Scan-only).</p>
+      <button id="btn-string-array" class="btn">Run Benchmark</button>
+      <div id="res-string-array"></div>
+    </div>
+
     <script type="module">
-      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink } from './dist/xpb-bleeding-edge.js';
+      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink, ZeroCopyStringArray, StandardStringArray } from './dist/xpb-bleeding-edge.js';
       import './dist/xpb-browser.js'; // Ensure XPB runtime is loaded
 
       const ITERATIONS = 1000;
@@ -365,6 +372,53 @@
       };
       document.getElementById('btn-accessor').onclick = runAccessor;
 
+      // --- String Array (Lazy View) ---
+      const runStringArray = async () => {
+        const div = document.getElementById('res-string-array');
+        div.innerHTML = 'Running...';
+        
+        // Prepare Data (100 strings)
+        const count = 100;
+        // Mock data
+        const strings = [];
+        for(let i=0; i<count; i++) strings.push(`item_${i}_value_is_long_enough`);
+        
+        // Encode manually
+        // [Count] [Len][Str]...
+        const totalLen = 4 + strings.reduce((acc, s) => acc + 1 + s.length, 0);
+        const buffer = new Uint8Array(totalLen);
+        const view = new DataView(buffer.buffer);
+        view.setInt32(0, count, true);
+        
+        let offset = 4;
+        for(const s of strings) {
+            buffer[offset] = s.length;
+            const bytes = new TextEncoder().encode(s);
+            buffer.set(bytes, offset + 1);
+            offset += 1 + s.length;
+        }
+
+        // Bench Standard Decode (Full Decode)
+        const stdTime = await bench(() => {
+          StandardStringArray.decode(buffer);
+        });
+
+        // Bench Lazy View (Scan Only)
+        const lazyTime = await bench(() => {
+          new ZeroCopyStringArray(buffer);
+        });
+
+        let html = `<table><tr><th>Method</th><th>Init Time (100 items)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard (Full Decode)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+        
+        const speedup = stdTime / lazyTime;
+        html += `<tr><td>Lazy View (Scan Only)</td><td>${formatNs(lazyTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+        return { stdTime, lazyTime, speedup };
+      };
+      document.getElementById('btn-string-array').onclick = runStringArray;
+
       // Expose for automation
       window.runAll = async () => {
         console.log("Starting Base64...");
@@ -373,10 +427,12 @@
         const accessor = await runAccessor();
         console.log("Finished Accessor. Starting Shared...");
         const shared = await runShared();
-        console.log("Finished Shared.");
+        console.log("Finished Shared. Starting String Array...");
+        const stringArray = await runStringArray();
+        console.log("Finished String Array.");
         
         // Store results globally
-        window.bleedingEdgeResults = { base64, accessor, shared };
+        window.bleedingEdgeResults = { base64, accessor, shared, stringArray };
         return window.bleedingEdgeResults;
       };
 
