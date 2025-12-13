@@ -39,9 +39,20 @@ Benchmarks run on Linux (Intel Core i9-13900H).
 | Protobuf   |   98 ns   |  164 ns   |   162 ns    |    84 ns    |      -      |      -      | 19 B |
 | JSON       |  155 ns   |  778 ns   |    83 ns    |   216 ns    |    46 ns    |   113 ns    | 47 B |
 
-> **Note**: 
-> - **Go**: Zero-allocation encoding (sync.Pool) and zero-copy decoding (unsafe) used.
-> - **Browser**: XPB is optimized for small, frequent messages (e.g., game state, UI events). Native JSON is faster for >10KB payloads.
+### ⚡ Browser Bleeding Edge (2025)
+
+New runtime features utilizing advanced browser APIs (Chrome 133+):
+
+| Feature | XPB Time | Standard/JSON Time | Speedup |
+| :--- | :--- | :--- | :--- |
+| **Binary Data (1MB)** | **150 µs** | 24,082 µs (atob) | **🚀 160x** |
+| **Zero-Copy Access** | **0.86 µs** | 2.33 µs (Parse) | **⚡ 2.7x** |
+| **Zero-Alloc Write** | **533 µs** | 1,716 µs (Native) | **⚡ 3.2x** |
+
+> **Tech Used:**
+> *   **Native Base64:** `Uint8Array.fromBase64` (SIMD)
+> *   **Zero-Alloc:** `Encoder.writeBase64AsBytes` (Direct Buffer Write)
+> *   **Lazy Accessors:** `XPB.compileAccessor` (Read-on-Demand)
 
 ## Quick Start
 
