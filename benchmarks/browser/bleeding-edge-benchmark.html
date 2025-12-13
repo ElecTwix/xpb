@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XPB "Bleeding Edge" Benchmark</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem;
+        line-height: 1.5;
+      }
+      h1 {
+        background: linear-gradient(to right, #fbbf24, #f59e0b);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: #1e293b;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        border: 1px solid #334155;
+      }
+      .btn {
+        background: #3b82f6;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 1rem;
+      }
+      .btn:hover { background: #2563eb; }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+      }
+      th, td {
+        text-align: left;
+        padding: 0.75rem;
+        border-bottom: 1px solid #334155;
+      }
+      th { color: #94a3b8; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      .speedup { color: #4ade80; font-weight: bold; }
+      .note { font-size: 0.875rem; color: #94a3b8; margin-top: 0.5rem; }
+      .error { color: #ef4444; }
+    </style>
+  </head>
+  <body>
+    <h1>⚡ XPB Bleeding Edge Benchmarks (2025)</h1>
+    
+    <p>Testing the absolute limits of browser performance using Unsafe Accessors, Native Base64, and Shared Memory.</p>
+
+    <div class="card">
+      <h2>1. Native Base64 vs atob()</h2>
+      <p>Comparing the new <code>Uint8Array.fromBase64</code> against standard <code>atob()</code>.</p>
+      <button id="btn-base64" class="btn">Run Benchmark</button>
+      <div id="res-base64"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. "No-Decode" Accessors (Zero-Copy)</h2>
+      <p>Comparing <code>JSON.parse</code> style object creation vs <code>Accessor</code> pattern (on-demand read).</p>
+      <button id="btn-accessor" class="btn">Run Benchmark</button>
+      <div id="res-accessor"></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Shared Memory (Zero-Copy Workers)</h2>
+      <p>Comparing <code>postMessage</code> (Copy) vs <code>SharedArrayBuffer</code> (Zero-Copy).</p>
+      <p class="note">⚠️ Requires COOP/COEP headers to be set on the server.</p>
+      <button id="btn-shared" class="btn">Run Benchmark</button>
+      <div id="res-shared"></div>
+    </div>
+
+    <script type="module">
+      import { NativeBase64, ZeroCopyUser, StandardUser, SharedMemoryLink } from './dist/xpb-bleeding-edge.js';
+
+      const ITERATIONS = 1000;
+
+      function log(id, html) {
+        document.getElementById(id).innerHTML = html;
+      }
+
+      function formatNs(ns) {
+        return ns.toFixed(2) + ' ns';
+      }
+
+      async function bench(fn, iters = ITERATIONS) {
+        // Warmup
+        for(let i=0; i<100; i++) await fn();
+        
+        const start = performance.now();
+        for(let i=0; i<iters; i++) await fn();
+        const end = performance.now();
+        return ((end - start) * 1_000_000) / iters; // ns per op
+      }
+
+      // --- Base64 ---
+      document.getElementById('btn-base64').onclick = async () => {
+        const div = document.getElementById('res-base64');
+        div.innerHTML = 'Running...';
+        
+        // 1MB random data
+        const data = new Uint8Array(1024 * 1024);
+        crypto.getRandomValues(data.subarray(0, 65536)); // partial fill
+        
+        // Bench Encode
+        const polyTime = await bench(() => NativeBase64.encodePolyfill(data), 50);
+        let nativeTime = 0;
+        let supported = false;
+        
+        try {
+          if (NativeBase64.isSupported()) {
+            nativeTime = await bench(() => NativeBase64.encode(data), 50);
+            supported = true;
+          }
+        } catch(e) {}
+
+        let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard (btoa)</td><td>${formatNs(polyTime)}</td><td>1x</td></tr>`;
+        
+        if (supported) {
+          const speedup = polyTime / nativeTime;
+          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+        } else {
+          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td><td>-</td></tr>`;
+        }
+        html += `</table>`;
+        div.innerHTML = html;
+      };
+
+      // --- Accessors ---
+      document.getElementById('btn-accessor').onclick = async () => {
+        const div = document.getElementById('res-accessor');
+        div.innerHTML = 'Running...';
+        
+        // Prepare Data (1000 Users)
+        // Manual encode for test
+        const count = 1000;
+        const entrySize = 40; // approx
+        const buffer = new Uint8Array(count * entrySize);
+        
+        // Encode mock data
+        let offset = 0;
+        const offsets = [];
+        for(let i=0; i<count; i++) {
+          offsets.push(offset);
+          const view = new DataView(buffer.buffer);
+          view.setInt32(offset, i, true); // id
+          buffer[offset + 4] = 1; // active
+          view.setFloat64(offset + 5, Math.random(), true); // score
+          
+          const name = `User ${i}`;
+          buffer[offset + 13] = name.length;
+          const nameBytes = new TextEncoder().encode(name);
+          buffer.set(nameBytes, offset + 14);
+          
+          offset += 14 + name.length;
+        }
+        
+        // Bench Standard Decode (Create Object)
+        const stdTime = await bench(() => {
+          // Decode random one
+          const idx = Math.floor(Math.random() * count);
+          const u = StandardUser.decode(buffer, offsets[idx]);
+          return u.id + u.score;
+        });
+
+        // Bench Accessor (Zero Copy)
+        const accTime = await bench(() => {
+          const idx = Math.floor(Math.random() * count);
+          const u = new ZeroCopyUser(buffer, offsets[idx]);
+          return u.id + u.score;
+        });
+
+        let html = `<table><tr><th>Method</th><th>Time (Read 2 fields)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard (New Object)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+        
+        const speedup = stdTime / accTime;
+        html += `<tr><td>Accessor (Zero-Copy)</td><td>${formatNs(accTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+      };
+
+      // --- Shared Memory ---
+      const runShared = async () => {
+        const div = document.getElementById('res-shared');
+        div.innerHTML = 'Initializing Worker...';
+        
+        // Check SAB support
+        if (typeof SharedArrayBuffer === 'undefined') {
+          div.innerHTML = `<p class="error">❌ SharedArrayBuffer is not defined. COOP/COEP headers missing?</p>`;
+          return null;
+        }
+
+        try {
+          // Use bundled worker (we assume build process puts it here, or use blob)
+          // For this standalone html test, we need to point to the js file.
+          // Assuming 'dist/bleeding-edge-worker.js' exists after build.
+          const link = new SharedMemoryLink('./dist/bleeding-edge-worker.js');
+          await link.init();
+          
+          div.innerHTML = 'Running...';
+          
+          // Data: 100KB
+          const data = new Uint8Array(100 * 1024);
+          for(let i=0; i<data.length; i++) data[i] = 1;
+          
+          // Bench PostMessage
+          const stdTime = await bench(async () => {
+            await link.sendStandard(data);
+          }, 100);
+
+          // Bench Shared
+          const sharedTime = await bench(async () => {
+            await link.sendZeroCopy(data);
+          }, 100);
+          
+          link.terminate();
+
+          let html = `<table><tr><th>Method</th><th>Time (100KB Roundtrip)</th><th>Speedup</th></tr>`;
+          html += `<tr><td>postMessage (Copy)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+          
+          const speedup = stdTime / sharedTime;
+          html += `<tr><td>SharedArrayBuffer</td><td>${formatNs(sharedTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+          html += `</table>`;
+          div.innerHTML = html;
+
+          return { stdTime, sharedTime, speedup };
+
+        } catch (e) {
+          div.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+          return null;
+        }
+      };
+      
+      document.getElementById('btn-shared').onclick = runShared;
+
+      // --- Automation ---
+      window.runAll = async () => {
+        const resBase64 = await document.getElementById('btn-base64').click(); // Trigger click (async handlers won't return value this way though)
+        // Better to refactor to functions returning values.
+      };
+
+      // Refactoring handlers to named functions
+      const runBase64 = async () => {
+        const div = document.getElementById('res-base64');
+        div.innerHTML = 'Running...';
+        
+        // 1MB random data
+        const data = new Uint8Array(1024 * 1024);
+        crypto.getRandomValues(data.subarray(0, 65536)); // partial fill
+        
+        // Bench Encode
+        const polyTime = await bench(() => NativeBase64.encodePolyfill(data), 50);
+        let nativeTime = 0;
+        let supported = false;
+        
+        try {
+          if (NativeBase64.isSupported()) {
+            nativeTime = await bench(() => NativeBase64.encode(data), 50);
+            supported = true;
+          }
+        } catch(e) {}
+
+        let html = `<table><tr><th>Method</th><th>Time (1MB)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard (btoa)</td><td>${formatNs(polyTime)}</td><td>1x</td></tr>`;
+        
+        let speedup = 0;
+        if (supported) {
+          speedup = polyTime / nativeTime;
+          html += `<tr><td>Native (toBase64)</td><td>${formatNs(nativeTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+        } else {
+          html += `<tr><td>Native (toBase64)</td><td class="error">Not Supported</td><td>-</td></tr>`;
+        }
+        html += `</table>`;
+        div.innerHTML = html;
+        return { polyTime, nativeTime, supported, speedup };
+      };
+      document.getElementById('btn-base64').onclick = runBase64;
+
+      const runAccessor = async () => {
+        const div = document.getElementById('res-accessor');
+        div.innerHTML = 'Running...';
+        
+        // Prepare Data (1000 Users)
+        const count = 1000;
+        const entrySize = 40; 
+        const buffer = new Uint8Array(count * entrySize);
+        
+        // Encode mock data
+        let offset = 0;
+        const offsets = [];
+        for(let i=0; i<count; i++) {
+          offsets.push(offset);
+          const view = new DataView(buffer.buffer);
+          view.setInt32(offset, i, true); // id
+          buffer[offset + 4] = 1; // active
+          view.setFloat64(offset + 5, Math.random(), true); // score
+          
+          const name = `User ${i}`;
+          buffer[offset + 13] = name.length;
+          const nameBytes = new TextEncoder().encode(name);
+          buffer.set(nameBytes, offset + 14);
+          
+          offset += 14 + name.length;
+        }
+        
+        // Bench Standard Decode
+        const stdTime = await bench(() => {
+          const idx = Math.floor(Math.random() * count);
+          const u = StandardUser.decode(buffer, offsets[idx]);
+          return u.id + u.score;
+        });
+
+        // Bench Accessor
+        const accTime = await bench(() => {
+          const idx = Math.floor(Math.random() * count);
+          const u = new ZeroCopyUser(buffer, offsets[idx]);
+          return u.id + u.score;
+        });
+
+        let html = `<table><tr><th>Method</th><th>Time (Read 2 fields)</th><th>Speedup</th></tr>`;
+        html += `<tr><td>Standard (New Object)</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
+        
+        const speedup = stdTime / accTime;
+        html += `<tr><td>Accessor (Zero-Copy)</td><td>${formatNs(accTime)}</td><td class="speedup">${speedup.toFixed(1)}x</td></tr>`;
+        html += `</table>`;
+        div.innerHTML = html;
+        return { stdTime, accTime, speedup };
+      };
+      document.getElementById('btn-accessor').onclick = runAccessor;
+
+      // Expose for automation
+      window.runAll = async () => {
+        console.log("Starting Base64...");
+        const base64 = await runBase64();
+        console.log("Finished Base64. Starting Accessor...");
+        const accessor = await runAccessor();
+        console.log("Finished Accessor. Starting Shared...");
+        const shared = await runShared();
+        console.log("Finished Shared.");
+        
+        // Store results globally
+        window.bleedingEdgeResults = { base64, accessor, shared };
+        return window.bleedingEdgeResults;
+      };
+
+    </script>
+  </body>
+</html>

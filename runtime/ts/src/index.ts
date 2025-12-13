@@ -24,6 +24,46 @@ export const SizeFloat64 = 8;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+// ============= Base64 Utilities (Native + Fallback) =============
+
+export function toBase64(data: Uint8Array): string {
+  // @ts-ignore - Check for new browser API (2025)
+  if (data.toBase64) return data.toBase64();
+  
+  // Node.js
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(data).toString('base64');
+  }
+  
+  // Browser Fallback (btoa) - chunks to avoid stack overflow
+  const CHUNK_SIZE = 0x8000;
+  let result = '';
+  for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+    const chunk = data.subarray(i, i + CHUNK_SIZE);
+    result += String.fromCharCode.apply(null, chunk as any);
+  }
+  return btoa(result);
+}
+
+export function fromBase64(base64: string): Uint8Array {
+  // @ts-ignore - Check for new browser API (2025)
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(base64);
+  
+  // Node.js
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(base64, 'base64'));
+  }
+  
+  // Browser Fallback (atob)
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 /**
  * V2 Encoder - tagless, fixed-width, compact lengths.
  */
