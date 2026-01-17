@@ -1,4 +1,4 @@
--- XPB V2 Lua Runtime
+-- XPB V2 Lua Runtime (Optimized)
 -- Pure Lua implementation of XPB V2 binary serialization
 
 local xpb = {}
@@ -10,30 +10,19 @@ xpb.COMPACT_LENGTH_MARKER = 0xFF
 -- Utility functions
 local function le32_to_num(bytes)
     if #bytes < 4 then return 0 end
-    local n = bytes:byte(1) +
-              (bytes:byte(2) * 256) +
-              (bytes:byte(3) * 65536) +
-              (bytes:byte(4) * 16777216)
-    if n >= 2147483648 then
-        n = n - 4294967296
-    end
+    local b1, b2, b3, b4 = bytes:byte(1, 4)
+    local n = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
+    if n >= 2147483648 then n = n - 4294967296 end
     return n
 end
 
 local function le64_to_num(bytes)
     if #bytes < 8 then return 0 end
-    local lo = bytes:byte(1) +
-               (bytes:byte(2) * 256) +
-               (bytes:byte(3) * 65536) +
-               (bytes:byte(4) * 16777216)
-    local hi = bytes:byte(5) +
-               (bytes:byte(6) * 256) +
-               (bytes:byte(7) * 65536) +
-               (bytes:byte(8) * 16777216)
-    local n = lo + (hi * 4294967296)
-    if n >= 9223372036854775808 then
-        n = n - 18446744073709551616
-    end
+    local b1, b2, b3, b4, b5, b6, b7, b8 = bytes:byte(1, 8)
+    local lo = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
+    local hi = b5 + (b6 << 8) + (b7 << 16) + (b8 << 24)
+    local n = lo + (hi << 32)
+    if n >= 9223372036854775808 then n = n - 18446744073709551616 end
     return n
 end
 
@@ -63,111 +52,113 @@ local function num_to_le64(n)
     )
 end
 
--- Encoder
+-- Encoder (chunk-based with table buffer)
 function xpb.Encoder(initial_size)
     local self = {
-        buf = {},
-        pos = 1
+        chunks = {},
+        pos = 0,
+        chunk_size = 256
     }
-    if initial_size then
-        for i = 1, initial_size do
-            self.buf[i] = string.char(0)
-        end
+    if initial_size and initial_size > 0 then
+        self.chunk_size = math.max(256, math.floor(initial_size / 2))
     end
+    self.chunks[1] = string.rep("\0", self.chunk_size)
 
     function self:ensure_capacity(needed)
-        while #self.buf - self.pos + 1 < needed do
-            self.buf[#self.buf + 1] = string.char(0)
-            self.buf[#self.buf + 1] = string.char(0)
-            self.buf[#self.buf + 1] = string.char(0)
-            self.buf[#self.buf + 1] = string.char(0)
-        end
+        local current = self.chunks[#self.chunks]
+        local used = #current
+        if self.pos + needed <= used then return end
+        self.chunks[#self.chunks] = current:sub(1, self.pos)
+        self.chunks[#self.chunks + 1] = string.rep("\0", self.chunk_size)
+        self.pos = 0
     end
 
     function self:write_bool(v)
         self:ensure_capacity(1)
-        self.buf[self.pos] = v and string.char(1) or string.char(0)
+        local current = self.chunks[#self.chunks]
         self.pos = self.pos + 1
+        self.chunks[#self.chunks] = current:sub(1, self.pos - 1) .. (v and "\1" or "\0")
     end
 
     function self:write_int32(v)
         self:ensure_capacity(4)
-        local bytes = num_to_le32(v)
-        for i = 1, 4 do
-            self.buf[self.pos + i - 1] = bytes:sub(i, i)
-        end
-        self.pos = self.pos + 4
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        self.chunks[#self.chunks] = current:sub(1, p) ..
+            string.char(v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF)
+        self.pos = p + 4
     end
 
     function self:write_int64(v)
         self:ensure_capacity(8)
-        local bytes = num_to_le64(v)
-        for i = 1, 8 do
-            self.buf[self.pos + i - 1] = bytes:sub(i, i)
-        end
-        self.pos = self.pos + 8
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        local lo = v & 0xFFFFFFFF
+        local hi = (v >> 32) & 0xFFFFFFFF
+        self.chunks[#self.chunks] = current:sub(1, p) ..
+            string.char(lo & 0xFF, (lo >> 8) & 0xFF, (lo >> 16) & 0xFF, (lo >> 24) & 0xFF,
+                       hi & 0xFF, (hi >> 8) & 0xFF, (hi >> 16) & 0xFF, (hi >> 24) & 0xFF)
+        self.pos = p + 8
     end
 
-    function self:write_uint32(v)
-        self:write_int32(v)
-    end
-
-    function self:write_uint64(v)
-        self:write_int64(v)
-    end
+    function self:write_uint32(v) self:write_int32(v) end
+    function self:write_uint64(v) self:write_int64(v) end
 
     function self:write_float32(v)
-        -- Convert float to bits
-        local bytes = string.pack("f", v)
         self:ensure_capacity(4)
-        for i = 1, 4 do
-            self.buf[self.pos + i - 1] = bytes:sub(i, i)
-        end
-        self.pos = self.pos + 4
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        local bits = string.unpack("I4", string.pack("f", v))
+        self.chunks[#self.chunks] = current:sub(1, p) ..
+            string.char(bits & 0xFF, (bits >> 8) & 0xFF, (bits >> 16) & 0xFF, (bits >> 24) & 0xFF)
+        self.pos = p + 4
     end
 
     function self:write_float64(v)
-        local bytes = string.pack("d", v)
         self:ensure_capacity(8)
-        for i = 1, 8 do
-            self.buf[self.pos + i - 1] = bytes:sub(i, i)
-        end
-        self.pos = self.pos + 8
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        local bits_lo, bits_hi = string.unpack("I4I4", string.pack("d", v))
+        self.chunks[#self.chunks] = current:sub(1, p) ..
+            string.char(bits_lo & 0xFF, (bits_lo >> 8) & 0xFF, (bits_lo >> 16) & 0xFF, (bits_lo >> 24) & 0xFF,
+                       bits_hi & 0xFF, (bits_hi >> 8) & 0xFF, (bits_hi >> 16) & 0xFF, (bits_hi >> 24) & 0xFF)
+        self.pos = p + 8
     end
 
     function self:write_compact_length(len)
         if len <= xpb.COMPACT_LENGTH_THRESHOLD then
             self:ensure_capacity(1)
-            self.buf[self.pos] = string.char(len)
+            local current = self.chunks[#self.chunks]
             self.pos = self.pos + 1
+            self.chunks[#self.chunks] = current:sub(1, self.pos - 1) .. string.char(len)
         else
             self:ensure_capacity(5)
-            self.buf[self.pos] = string.char(xpb.COMPACT_LENGTH_MARKER)
-            self.pos = self.pos + 1
-            local len_bytes = num_to_le32(len)
-            for i = 1, 4 do
-                self.buf[self.pos + i - 1] = len_bytes:sub(i, i)
-            end
-            self.pos = self.pos + 4
+            local current = self.chunks[#self.chunks]
+            local p = self.pos
+            self.chunks[#self.chunks] = current:sub(1, p) ..
+                string.char(xpb.COMPACT_LENGTH_MARKER, len & 0xFF, (len >> 8) & 0xFF, (len >> 16) & 0xFF, (len >> 24) & 0xFF)
+            self.pos = p + 5
         end
     end
 
     function self:write_string(v)
         self:write_compact_length(#v)
+        if #v == 0 then return end
         self:ensure_capacity(#v)
-        for i = 1, #v do
-            self.buf[self.pos + i - 1] = v:sub(i, i)
-        end
-        self.pos = self.pos + #v
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        self.chunks[#self.chunks] = current:sub(1, p) .. v
+        self.pos = p + #v
     end
 
     function self:write_bytes(data)
         self:write_compact_length(#data)
+        if #data == 0 then return end
         self:ensure_capacity(#data)
-        for i = 1, #data do
-            self.buf[self.pos + i - 1] = data:sub(i, i)
-        end
-        self.pos = self.pos + #data
+        local current = self.chunks[#self.chunks]
+        local p = self.pos
+        self.chunks[#self.chunks] = current:sub(1, p) .. data
+        self.pos = p + #data
     end
 
     function self:write_message(data)
@@ -175,15 +166,14 @@ function xpb.Encoder(initial_size)
     end
 
     function self:finish()
-        local result = ""
-        for i = 1, self.pos - 1 do
-            result = result .. (self.buf[i] or string.char(0))
-        end
-        return result
+        local used = self.chunks[#self.chunks]:sub(1, self.pos)
+        self.chunks[#self.chunks] = used
+        return table.concat(self.chunks)
     end
 
     function self:reset()
-        self.pos = 1
+        self.pos = 0
+        self.chunks[#self.chunks] = string.rep("\0", self.chunk_size)
     end
 
     return self
@@ -206,85 +196,58 @@ function xpb.Decoder(data)
     end
 
     function self:read_bool()
-        if self.pos > self.len then
-            error("xpb: unexpected EOF reading bool")
-        end
         local v = self.data:byte(self.pos) ~= 0
         self.pos = self.pos + 1
         return v
     end
 
     function self:read_int32()
-        if self.pos + 3 > self.len then
-            error("xpb: unexpected EOF reading int32")
-        end
-        local bytes = self.data:sub(self.pos, self.pos + 3)
-        local v = le32_to_num(bytes)
+        local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
+        local n = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
+        if n >= 2147483648 then n = n - 4294967296 end
         self.pos = self.pos + 4
-        return v
+        return n
     end
 
     function self:read_int64()
-        if self.pos + 7 > self.len then
-            error("xpb: unexpected EOF reading int64")
-        end
-        local bytes = self.data:sub(self.pos, self.pos + 7)
-        local v = le64_to_num(bytes)
+        local b1, b2, b3, b4, b5, b6, b7, b8 = self.data:byte(self.pos, self.pos + 7)
+        local lo = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
+        local hi = b5 + (b6 << 8) + (b7 << 16) + (b8 << 24)
+        local n = lo + (hi << 32)
+        if n >= 9223372036854775808 then n = n - 18446744073709551616 end
         self.pos = self.pos + 8
-        return v
+        return n
     end
 
-    function self:read_uint32()
-        return self:read_int32()
-    end
-
-    function self:read_uint64()
-        return self:read_int64()
-    end
+    function self:read_uint32() return self:read_int32() end
+    function self:read_uint64() return self:read_int64() end
 
     function self:read_float32()
-        if self.pos + 3 > self.len then
-            error("xpb: unexpected EOF reading float32")
-        end
-        local bytes = self.data:sub(self.pos, self.pos + 3)
-        local v = string.unpack("f", bytes)
+        local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
-        return v
+        return string.unpack("f", string.char(b1, b2, b3, b4))
     end
 
     function self:read_float64()
-        if self.pos + 7 > self.len then
-            error("xpb: unexpected EOF reading float64")
-        end
-        local bytes = self.data:sub(self.pos, self.pos + 7)
-        local v = string.unpack("d", bytes)
+        local b1, b2, b3, b4, b5, b6, b7, b8 = self.data:byte(self.pos, self.pos + 7)
         self.pos = self.pos + 8
-        return v
+        return string.unpack("d", string.char(b1, b2, b3, b4, b5, b6, b7, b8))
     end
 
     function self:read_compact_length()
-        if self.pos > self.len then
-            error("xpb: unexpected EOF reading length")
-        end
         local first = self.data:byte(self.pos)
         self.pos = self.pos + 1
         if first ~= xpb.COMPACT_LENGTH_MARKER then
             return first
         end
-        if self.pos + 3 > self.len then
-            error("xpb: unexpected EOF reading extended length")
-        end
-        local len_bytes = self.data:sub(self.pos, self.pos + 3)
-        local len = le32_to_num(len_bytes)
+        local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
-        return len
+        return b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
     end
 
     function self:read_string()
         local len = self:read_compact_length()
-        if self.pos + len - 1 > self.len then
-            error("xpb: unexpected EOF reading string")
-        end
+        if len == 0 then return "" end
         local v = self.data:sub(self.pos, self.pos + len - 1)
         self.pos = self.pos + len
         return v
@@ -292,9 +255,7 @@ function xpb.Decoder(data)
 
     function self:read_bytes()
         local len = self:read_compact_length()
-        if self.pos + len - 1 > self.len then
-            error("xpb: unexpected EOF reading bytes")
-        end
+        if len == 0 then return "" end
         local v = self.data:sub(self.pos, self.pos + len - 1)
         self.pos = self.pos + len
         return v
@@ -305,9 +266,6 @@ function xpb.Decoder(data)
     end
 
     function self:skip(n)
-        if self.pos + n - 1 > self.len then
-            error("xpb: unexpected EOF during skip")
-        end
         self.pos = self.pos + n
     end
 
