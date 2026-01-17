@@ -1,4 +1,4 @@
--- XPB V2 Lua Runtime (Optimized)
+-- XPB V2 Lua Runtime (Maximum Performance)
 -- Pure Lua implementation of XPB V2 binary serialization
 
 local xpb = {}
@@ -7,18 +7,14 @@ local xpb = {}
 xpb.COMPACT_LENGTH_THRESHOLD = 254
 xpb.COMPACT_LENGTH_MARKER = 0xFF
 
--- Utility functions
-local function le32_to_num(bytes)
-    if #bytes < 4 then return 0 end
-    local b1, b2, b3, b4 = bytes:byte(1, 4)
+-- Fast bit operations
+local function le32_to_num(b1, b2, b3, b4)
     local n = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
     if n >= 2147483648 then n = n - 4294967296 end
     return n
 end
 
-local function le64_to_num(bytes)
-    if #bytes < 8 then return 0 end
-    local b1, b2, b3, b4, b5, b6, b7, b8 = bytes:byte(1, 8)
+local function le64_to_num(b1, b2, b3, b4, b5, b6, b7, b8)
     local lo = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
     local hi = b5 + (b6 << 8) + (b7 << 16) + (b8 << 24)
     local n = lo + (hi << 32)
@@ -26,79 +22,54 @@ local function le64_to_num(bytes)
     return n
 end
 
-local function num_to_le32(n)
-    n = math.floor(n) % 4294967296
-    return string.char(
-        n & 0xFF,
-        (n >> 8) & 0xFF,
-        (n >> 16) & 0xFF,
-        (n >> 24) & 0xFF
-    )
-end
-
-local function num_to_le64(n)
-    n = math.floor(n)
-    local lo = n & 0xFFFFFFFF
-    local hi = (n >> 32) & 0xFFFFFFFF
-    return string.char(
-        lo & 0xFF,
-        (lo >> 8) & 0xFF,
-        (lo >> 16) & 0xFF,
-        (lo >> 24) & 0xFF,
-        hi & 0xFF,
-        (hi >> 8) & 0xFF,
-        (hi >> 16) & 0xFF,
-        (hi >> 24) & 0xFF
-    )
-end
-
--- Encoder (chunk-based with table buffer)
+-- Encoder (table-based byte buffer)
 function xpb.Encoder(initial_size)
     local self = {
-        chunks = {},
-        pos = 0,
-        chunk_size = 256
+        buf = {},
+        pos = 0
     }
-    if initial_size and initial_size > 0 then
-        self.chunk_size = math.max(256, math.floor(initial_size / 2))
-    end
-    self.chunks[1] = string.rep("\0", self.chunk_size)
+    local buf = self.buf
 
     function self:ensure_capacity(needed)
-        local current = self.chunks[#self.chunks]
-        local used = #current
-        if self.pos + needed <= used then return end
-        self.chunks[#self.chunks] = current:sub(1, self.pos)
-        self.chunks[#self.chunks + 1] = string.rep("\0", self.chunk_size)
-        self.pos = 0
+        while #buf < self.pos + needed do
+            buf[#buf + 1] = 0
+        end
+    end
+
+    function self:write_byte(b)
+        self.pos = self.pos + 1
+        buf[self.pos] = b
     end
 
     function self:write_bool(v)
-        self:ensure_capacity(1)
-        local current = self.chunks[#self.chunks]
         self.pos = self.pos + 1
-        self.chunks[#self.chunks] = current:sub(1, self.pos - 1) .. (v and "\1" or "\0")
+        buf[self.pos] = v and 1 or 0
     end
 
     function self:write_int32(v)
         self:ensure_capacity(4)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
-        self.chunks[#self.chunks] = current:sub(1, p) ..
-            string.char(v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF)
-        self.pos = p + 4
+        local p = self.pos + 1
+        buf[p] = v & 0xFF
+        buf[p + 1] = (v >> 8) & 0xFF
+        buf[p + 2] = (v >> 16) & 0xFF
+        buf[p + 3] = (v >> 24) & 0xFF
+        self.pos = self.pos + 4
     end
 
     function self:write_int64(v)
         self:ensure_capacity(8)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
+        local p = self.pos + 1
         local lo = v & 0xFFFFFFFF
         local hi = (v >> 32) & 0xFFFFFFFF
-        self.chunks[#self.chunks] = current:sub(1, p) ..
-            string.char(lo & 0xFF, (lo >> 8) & 0xFF, (lo >> 16) & 0xFF, (lo >> 24) & 0xFF,
-                       hi & 0xFF, (hi >> 8) & 0xFF, (hi >> 16) & 0xFF, (hi >> 24) & 0xFF)
-        self.pos = p + 8
+        buf[p] = lo & 0xFF
+        buf[p + 1] = (lo >> 8) & 0xFF
+        buf[p + 2] = (lo >> 16) & 0xFF
+        buf[p + 3] = (lo >> 24) & 0xFF
+        buf[p + 4] = hi & 0xFF
+        buf[p + 5] = (hi >> 8) & 0xFF
+        buf[p + 6] = (hi >> 16) & 0xFF
+        buf[p + 7] = (hi >> 24) & 0xFF
+        self.pos = self.pos + 8
     end
 
     function self:write_uint32(v) self:write_int32(v) end
@@ -106,38 +77,44 @@ function xpb.Encoder(initial_size)
 
     function self:write_float32(v)
         self:ensure_capacity(4)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
         local bits = string.unpack("I4", string.pack("f", v))
-        self.chunks[#self.chunks] = current:sub(1, p) ..
-            string.char(bits & 0xFF, (bits >> 8) & 0xFF, (bits >> 16) & 0xFF, (bits >> 24) & 0xFF)
-        self.pos = p + 4
+        local p = self.pos + 1
+        buf[p] = bits & 0xFF
+        buf[p + 1] = (bits >> 8) & 0xFF
+        buf[p + 2] = (bits >> 16) & 0xFF
+        buf[p + 3] = (bits >> 24) & 0xFF
+        self.pos = self.pos + 4
     end
 
     function self:write_float64(v)
         self:ensure_capacity(8)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
         local bits_lo, bits_hi = string.unpack("I4I4", string.pack("d", v))
-        self.chunks[#self.chunks] = current:sub(1, p) ..
-            string.char(bits_lo & 0xFF, (bits_lo >> 8) & 0xFF, (bits_lo >> 16) & 0xFF, (bits_lo >> 24) & 0xFF,
-                       bits_hi & 0xFF, (bits_hi >> 8) & 0xFF, (bits_hi >> 16) & 0xFF, (bits_hi >> 24) & 0xFF)
-        self.pos = p + 8
+        local p = self.pos + 1
+        buf[p] = bits_lo & 0xFF
+        buf[p + 1] = (bits_lo >> 8) & 0xFF
+        buf[p + 2] = (bits_lo >> 16) & 0xFF
+        buf[p + 3] = (bits_lo >> 24) & 0xFF
+        buf[p + 4] = bits_hi & 0xFF
+        buf[p + 5] = (bits_hi >> 8) & 0xFF
+        buf[p + 6] = (bits_hi >> 16) & 0xFF
+        buf[p + 7] = (bits_hi >> 24) & 0xFF
+        self.pos = self.pos + 8
     end
 
     function self:write_compact_length(len)
         if len <= xpb.COMPACT_LENGTH_THRESHOLD then
             self:ensure_capacity(1)
-            local current = self.chunks[#self.chunks]
             self.pos = self.pos + 1
-            self.chunks[#self.chunks] = current:sub(1, self.pos - 1) .. string.char(len)
+            buf[self.pos] = len
         else
             self:ensure_capacity(5)
-            local current = self.chunks[#self.chunks]
-            local p = self.pos
-            self.chunks[#self.chunks] = current:sub(1, p) ..
-                string.char(xpb.COMPACT_LENGTH_MARKER, len & 0xFF, (len >> 8) & 0xFF, (len >> 16) & 0xFF, (len >> 24) & 0xFF)
-            self.pos = p + 5
+            local p = self.pos + 1
+            buf[p] = xpb.COMPACT_LENGTH_MARKER
+            buf[p + 1] = len & 0xFF
+            buf[p + 2] = (len >> 8) & 0xFF
+            buf[p + 3] = (len >> 16) & 0xFF
+            buf[p + 4] = (len >> 24) & 0xFF
+            self.pos = self.pos + 5
         end
     end
 
@@ -145,20 +122,22 @@ function xpb.Encoder(initial_size)
         self:write_compact_length(#v)
         if #v == 0 then return end
         self:ensure_capacity(#v)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
-        self.chunks[#self.chunks] = current:sub(1, p) .. v
-        self.pos = p + #v
+        local p = self.pos + 1
+        for i = 1, #v do
+            buf[p + i - 1] = v:byte(i)
+        end
+        self.pos = self.pos + #v
     end
 
     function self:write_bytes(data)
         self:write_compact_length(#data)
         if #data == 0 then return end
         self:ensure_capacity(#data)
-        local current = self.chunks[#self.chunks]
-        local p = self.pos
-        self.chunks[#self.chunks] = current:sub(1, p) .. data
-        self.pos = p + #data
+        local p = self.pos + 1
+        for i = 1, #data do
+            buf[p + i - 1] = data:byte(i)
+        end
+        self.pos = self.pos + #data
     end
 
     function self:write_message(data)
@@ -166,20 +145,22 @@ function xpb.Encoder(initial_size)
     end
 
     function self:finish()
-        local used = self.chunks[#self.chunks]:sub(1, self.pos)
-        self.chunks[#self.chunks] = used
-        return table.concat(self.chunks)
+        if self.pos == 0 then return "" end
+        local result = {}
+        for i = 1, self.pos do
+            result[i] = buf[i]
+        end
+        return string.char(table.unpack(result))
     end
 
     function self:reset()
         self.pos = 0
-        self.chunks[#self.chunks] = string.rep("\0", self.chunk_size)
     end
 
     return self
 end
 
--- Decoder
+-- Decoder (optimized)
 function xpb.Decoder(data)
     local self = {
         data = data,
@@ -187,13 +168,8 @@ function xpb.Decoder(data)
         pos = 1
     }
 
-    function self:eof()
-        return self.pos > self.len
-    end
-
-    function self:remaining()
-        return self.len - self.pos + 1
-    end
+    function self:eof() return self.pos > self.len end
+    function self:remaining() return self.len - self.pos + 1 end
 
     function self:read_bool()
         local v = self.data:byte(self.pos) ~= 0
@@ -203,20 +179,14 @@ function xpb.Decoder(data)
 
     function self:read_int32()
         local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
-        local n = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
-        if n >= 2147483648 then n = n - 4294967296 end
         self.pos = self.pos + 4
-        return n
+        return le32_to_num(b1, b2, b3, b4)
     end
 
     function self:read_int64()
         local b1, b2, b3, b4, b5, b6, b7, b8 = self.data:byte(self.pos, self.pos + 7)
-        local lo = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
-        local hi = b5 + (b6 << 8) + (b7 << 16) + (b8 << 24)
-        local n = lo + (hi << 32)
-        if n >= 9223372036854775808 then n = n - 18446744073709551616 end
         self.pos = self.pos + 8
-        return n
+        return le64_to_num(b1, b2, b3, b4, b5, b6, b7, b8)
     end
 
     function self:read_uint32() return self:read_int32() end
@@ -242,7 +212,7 @@ function xpb.Decoder(data)
         end
         local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
-        return b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
+        return le32_to_num(b1, b2, b3, b4)
     end
 
     function self:read_string()
@@ -261,13 +231,8 @@ function xpb.Decoder(data)
         return v
     end
 
-    function self:read_message_bytes()
-        return self:read_bytes()
-    end
-
-    function self:skip(n)
-        self.pos = self.pos + n
-    end
+    function self:read_message_bytes() return self:read_bytes() end
+    function self:skip(n) self.pos = self.pos + n end
 
     return self
 end
