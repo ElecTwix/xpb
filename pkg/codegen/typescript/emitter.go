@@ -141,32 +141,25 @@ func (g *Generator) generateFieldEncodeTS(field *ast.Field) {
 		return
 	}
 
-	// Regular (V2 treats optional/required same in struct mode usually, 
-    // but for optional we might need a presence bit or just assume defaults.
-    // For now, mirroring Go: write the value directly. 
-    // Note: If msg.field is undefined, we need defaults to match Go zero-values)
-    
-    // Safety check for undefined
+	// Regular (V2 treats optional/required same in struct mode usually,
+	// but for optional we might need a presence bit or just assume defaults.
+	// For now, mirroring Go: write the value directly.
+	// Note: If msg.field is undefined, we need defaults to match Go zero-values)
+
+	// Safety check for undefined
 	if field.Optional {
-		// V2 TODO: How to handle optional? 
-        // Go implementation writes everything. 
-        // For TS, if it's missing, we should write zero-value to maintain struct alignment.
+		// V2 TODO: How to handle optional?
+		// Go implementation writes everything.
+		// For TS, if it's missing, we should write zero-value to maintain struct alignment.
 	}
-    
-    // Generate safe access with default fallback
-    defaultVal := "0"
-    if field.Type.Kind == ast.TypeBool { defaultVal = "false" }
-    if field.Type.Kind == ast.TypeString { defaultVal = "\"\"" }
-    if field.Type.Kind == ast.TypeBytes { defaultVal = "new Uint8Array(0)" }
-    // Enums, Messages?
-    
+
 	g.generateScalarEncodeTS("msg."+fieldName, field.Type, "    ")
 }
 
 func (g *Generator) generateScalarEncodeTS(varName string, t ast.FieldType, indent string) {
-    // Handle undefined for required fields by assuming valid input or letting it fail/default
-    // Ideally we'd use ?? defaults here if needed.
-    
+	// Handle undefined for required fields by assuming valid input or letting it fail/default
+	// Ideally we'd use ?? defaults here if needed.
+
 	switch t.Kind {
 	case ast.TypeBool:
 		g.printf("%senc.writeBool(%s);\n", indent, varName)
@@ -187,7 +180,7 @@ func (g *Generator) generateScalarEncodeTS(varName string, t ast.FieldType, inde
 	case ast.TypeBytes:
 		g.printf("%senc.writeBytes(%s ?? new Uint8Array(0));\n", indent, varName)
 	case ast.TypeMessage:
-        // V2 Message: length prefix + encoded bytes
+		// V2 Message: length prefix + encoded bytes
 		g.printf("%senc.writeMessage(%s.encode(%s));\n", indent, t.Message, varName)
 	}
 }
@@ -215,12 +208,12 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 		g.printf("      for (let i = 0; i < count; i++) {\n")
 		g.printf("        let k: %s;\n", tsBaseTypeName(*field.Type.KeyType))
 		g.printf("        let v: %s;\n", tsBaseTypeName(*field.Type.ValType))
-        
-        // Read key
-        g.generateScalarDecodeTS("k", *field.Type.KeyType, "        ", false, true)
-        // Read value
-        g.generateScalarDecodeTS("v", *field.Type.ValType, "        ", false, true)
-        
+
+		// Read key
+		g.generateScalarDecodeTS("k", *field.Type.KeyType, "        ", false, true)
+		// Read value
+		g.generateScalarDecodeTS("v", *field.Type.ValType, "        ", false, true)
+
 		g.printf("        msg.%s.set(k!, v!);\n", fieldName)
 		g.printf("      }\n")
 		g.printf("    }\n")
@@ -233,15 +226,15 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 
 func (g *Generator) generateScalarDecodeTS(target string, t ast.FieldType, indent string, isRepeated bool, isLocalVar bool) {
 	readExpr := tsReadCall(t)
-    
-    lhs := ""
-    if isLocalVar {
-        lhs = target
-    } else if isRepeated {
-        lhs = fmt.Sprintf("msg.%s[i]", target)
-    } else {
-        lhs = fmt.Sprintf("msg.%s", target)
-    }
+
+	lhs := ""
+	if isLocalVar {
+		lhs = target
+	} else if isRepeated {
+		lhs = fmt.Sprintf("msg.%s[i]", target)
+	} else {
+		lhs = fmt.Sprintf("msg.%s", target)
+	}
 
 	g.printf("%s%s = %s;\n", indent, lhs, readExpr)
 }
