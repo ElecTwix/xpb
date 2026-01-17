@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"strconv"
 
 	"github.com/anthropic/xpb/pkg/ast"
@@ -49,7 +49,7 @@ func (p *Parser) Parse() (*ast.File, error) {
 		case TokenComment, TokenNewline:
 			p.advance() // Skip comments and newlines
 		default:
-			return nil, fmt.Errorf(FormatError(p.curr.Line, p.curr.Column,
+			return nil, errors.New(FormatError(p.curr.Line, p.curr.Column,
 				"unexpected token %s, expected 'package', 'message', or 'enum'", p.curr.Kind))
 		}
 	}
@@ -67,7 +67,7 @@ func (p *Parser) advance() {
 
 func (p *Parser) expect(kind TokenKind) error {
 	if p.curr.Kind != kind {
-		return fmt.Errorf(FormatError(p.curr.Line, p.curr.Column,
+		return errors.New(FormatError(p.curr.Line, p.curr.Column,
 			"expected %s, got %s", kind, p.curr.Kind))
 	}
 	return nil
@@ -125,7 +125,7 @@ func (p *Parser) parseField() (*ast.Field, error) {
 	}
 	num, err := strconv.ParseUint(p.curr.Value, 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf(FormatError(p.curr.Line, p.curr.Column,
+		return nil, errors.New(FormatError(p.curr.Line, p.curr.Column,
 			"invalid field number: %s", p.curr.Value))
 	}
 	field.Number = uint32(num)
@@ -199,7 +199,7 @@ func (p *Parser) parseField() (*ast.Field, error) {
 		}
 		fieldType, ok := ast.ParseTypeName(p.curr.Value)
 		if !ok {
-			return nil, fmt.Errorf(FormatError(p.curr.Line, p.curr.Column,
+			return nil, errors.New(FormatError(p.curr.Line, p.curr.Column,
 				"unknown type: %s", p.curr.Value))
 		}
 		field.Type = fieldType
@@ -267,7 +267,7 @@ func (p *Parser) parseEnumValue() (*ast.EnumValue, error) {
 	}
 	num, err := strconv.ParseInt(p.curr.Value, 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf(FormatError(p.curr.Line, p.curr.Column,
+		return nil, errors.New(FormatError(p.curr.Line, p.curr.Column,
 			"invalid enum value: %s", p.curr.Value))
 	}
 	p.advance()

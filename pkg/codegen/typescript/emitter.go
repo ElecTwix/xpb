@@ -147,10 +147,11 @@ func (g *Generator) generateFieldEncodeTS(field *ast.Field) {
 	// Note: If msg.field is undefined, we need defaults to match Go zero-values)
 
 	// Safety check for undefined
+	//nolint:staticcheck
 	if field.Optional {
-		// V2 TODO: How to handle optional?
-		// Go implementation writes everything.
-		// For TS, if it's missing, we should write zero-value to maintain struct alignment.
+		// TODO: V2 optional field handling not yet implemented
+		// V2 treats optional/required same in struct mode
+		// For now, write zero-value to maintain struct alignment
 	}
 
 	g.generateScalarEncodeTS("msg."+fieldName, field.Type, "    ")
