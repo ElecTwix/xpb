@@ -296,6 +296,40 @@ export class LargeMessageView {
       const len = this.u8[pos];
       return td.decode(this.u8.subarray(pos+1, pos+1+len));
   }
+
+  // Optimized String Reader
+  private readStringFast(pos: number, len: number): string {
+      if (len < 48) {
+          // Fast path for short strings (likely ASCII)
+          let res = "";
+          for (let i = 0; i < len; i++) {
+              res += String.fromCharCode(this.u8[pos + i]);
+          }
+          return res;
+      }
+      return td.decode(this.u8.subarray(pos, pos + len));
+  }
+
+  // Optimized Sequential Full Read
+  toObject() {
+      let pos = 0;
+      const id = this.view.getBigUint64(pos, true); pos += 8;
+      
+      const nameLen = this.u8[pos++];
+      const name = this.readStringFast(pos, nameLen); pos += nameLen;
+      
+      const emailLen = this.u8[pos++];
+      const email = this.readStringFast(pos, emailLen); pos += emailLen;
+      
+      const age = this.view.getInt32(pos, true); pos += 4;
+      const score = this.view.getFloat64(pos, true); pos += 8;
+      const active = this.u8[pos++] !== 0;
+      
+      const descLen = this.u8[pos++];
+      const desc = this.readStringFast(pos, descLen); pos += descLen;
+      
+      return { id, name, email, age, score, active, desc };
+  }
 }
 
 export class LargeMessageStandard {

@@ -401,20 +401,27 @@
         
         const stdTime = await bench(() => { LargeMessageStandard.decode(buffer); });
         const initTime = await bench(() => { new LargeMessageView(buffer); });
+        // 3. Bench Lazy View Access (Simulate reading ID + Name)
         const accessTime = await bench(() => {
             const v = new LargeMessageView(buffer);
             const id = v.id;
             const n = v.name;
             return id;
         });
+
+        // 4. Bench Lazy View (Full toObject)
+        const fullTime = await bench(() => {
+            const v = new LargeMessageView(buffer);
+            return v.toObject();
+        });
         
         let html = `<table><tr><th>Method</th><th>Time (ns)</th><th>Speedup</th></tr>`;
         html += `<tr><td>Standard Decode</td><td>${formatNs(stdTime)}</td><td>1x</td></tr>`;
         html += `<tr><td>Lazy View (Init)</td><td>${formatNs(initTime)}</td><td class="speedup">${(stdTime/initTime).toFixed(1)}x</td></tr>`;
-        html += `<tr><td>Lazy View (Init + Read 2)</td><td>${formatNs(accessTime)}</td><td class="speedup">${(stdTime/accessTime).toFixed(1)}x</td></tr>`;
+        html += `<tr><td>Lazy View (toObject)</td><td>${formatNs(fullTime)}</td><td class="speedup">${(stdTime/fullTime).toFixed(1)}x</td></tr>`;
         html += `</table>`;
         div.innerHTML = html;
-        return { stdTime, initTime, accessTime };
+        return { stdTime, initTime, accessTime, fullTime };
       };
       document.getElementById('btn-large-view').onclick = runLargeView;
 

@@ -144,9 +144,9 @@ async function main() {
           console.log("\n7️⃣ Large Message View (Lazy):");
           console.log(`   Standard Decode:   ${largeView.stdTime.toFixed(0)} ns`);
           console.log(`   Lazy Init:         ${largeView.initTime.toFixed(0)} ns`);
-          console.log(`   Init + Read 2:     ${largeView.accessTime.toFixed(0)} ns`);
+          console.log(`   toObject (Full):   ${largeView.fullTime.toFixed(0)} ns`);
           console.log(`   🚀 Init Speedup:   ${(largeView.stdTime / largeView.initTime).toFixed(2)}x`);
-          console.log(`   🚀 Read Speedup:   ${(largeView.stdTime / largeView.accessTime).toFixed(2)}x`);
+          console.log(`   🚀 Full Speedup:   ${(largeView.stdTime / largeView.fullTime).toFixed(2)}x`);
       }
       
       console.log("\n✅ Done!");
