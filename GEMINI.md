@@ -1,385 +1,161 @@
-# XPB V2 - High-Performance Binary Serialization
+# XPB V2 Technical Reference
 
-## Overview
+## Wire Format Specification
 
-XPB V2 is a speed-optimized binary serialization format with runtimes for Go, Node.js, and Browser.
+### Integer Encoding
 
-## Supported Platforms
+| Type | Size | Endian | Range |
+|------|------|--------|-------|
+| int32 | 4 bytes | Little | -2^31 to 2^31-1 |
+| int64 | 8 bytes | Little | -2^63 to 2^63-1 |
+| uint32 | 4 bytes | Little | 0 to 2^32-1 |
+| uint64 | 8 bytes | Little | 0 to 2^64-1 |
 
-| Platform    | Runtime              | JIT | Performance vs JSON        |
-| :---------- | :------------------- | :-- | :------------------------- |
-| **Go**      | `runtime/go/xpb`     | N/A | 5-6x encode, 20-40x decode |
-| **Node.js** | `runtime/ts/src`     | ✅  | 6x encode, 3.4x decode     |
-| **Browser** | `benchmarks/browser` | ✅  | 4x encode, 1x decode       |
+Floats use IEEE 754:
+- float32: 4 bytes
+- float64: 8 bytes
 
-## V2 Format
+### Compact Length Encoding
 
-- Struct mode (no tags, fields in declaration order)
-- Fixed-width integers (4/8 bytes, little-endian)
-- Compact length encoding (1 byte if < 255, else 5 bytes)
-
-## Project Structure
+Length prefix for strings, bytes, and messages:
 
 ```
-xpb/
-├── cmd/xpbc/           # CLI code generator
-├── pkg/
-│   ├── ast/            # Abstract Syntax Tree
-│   ├── parser/         # Lexer and Parser
-│   ├── codegen/        # Go and TypeScript generators
-│   └── wire/           # V2 wire format constants
-├── runtime/
-│   ├── go/xpb/         # Go runtime (Encoder/Decoder)
-│   └── ts/src/         # TypeScript runtime + JIT compiler
-├── benchmarks/
-│   ├── go/             # Go benchmarks (comparison, collections, size_scaling)
-│   ├── ts/             # Node.js benchmarks
-│   ├── browser/        # Browser benchmarks (Playwright)
-│   └── run-all.sh      # Unified benchmark runner
-└── tests/              # E2E tests
+Length 0-254:  [length_byte]              // 1 byte
+Length 255+:   [0xFF] [len_u32_le]        // 5 bytes total
 ```
 
-## Benchmark Coverage
+### Message Structure
 
-The benchmark suite tests XPB V2 across multiple dimensions on all platforms:
+Messages encode fields in declaration order without tags:
 
-| Benchmark Type              | Go  | Node.js | Browser |
-| --------------------------- | :-: | :-----: | :-----: |
-| Small Message (3 fields)    | ✅  |   ✅    |   ✅    |
-| Large Message (7 fields)    | ✅  |   ✅    |   ✅    |
-| String Array (100 elements) | ✅  |   ✅    |   ✅    |
-| Int32 Array (100 elements)  | ✅  |   ✅    |   ✅    |
-| String Map (100 entries)    | ✅  |   ✅    |   ✅    |
-| Size Scaling (Tiny→XLarge)  | ✅  |   ✅    |   ✅    |
-| Comparisons: JSON           | ✅  |   ✅    |   ✅    |
-| Comparisons: MessagePack    | ✅  |   ✅    |   ✅    |
-| Comparisons: Protobuf       | ✅  |   ✅    |    -    |
+```xpb
+message User {
+    1: string name    // length-prefixed string
+    2: int32 age      // 4 bytes
+    3: bool active    // 1 byte
+}
+```
 
-## Performance Results (Optimized)
+Encoded bytes for `name="Alice", age=30, active=true`:
+```
+06 41 6C 69 63 65  1E 00 00 00  01
+|  |__________|   |________|  |__|
+|       |            |          |
+|       |            |          +-- bool (1 byte)
+|       |            +-- int32 (4 bytes LE = 0x0000001E)
+|       +-- length (6) + "Alice" (5 bytes)
++-- length byte
+```
 
+### Repeated Fields (Arrays)
 
+Arrays encode count followed by elements:
 
-### Small Message (3 fields: name, age, active)
+```
+[int32 count] [element_0] [element_1] ... [element_n-1]
+```
 
+Example: `["go", "ts"]`
+```
+02 02 67 6F  02 74 73
+|  |__| |____| |__| |__|
+|    |    |     |    |
+|    |    |     |    +-- "ts" (2 bytes)
+|    |    |     +-- length 2 + "go"
+|    |    +-- count = 2
+|    +-- count = 2
+```
 
+### Map Fields
 
-#### Go
+Maps encode count followed by key-value pairs:
 
+```
+[int32 count] [key_0] [value_0] [key_1] [value_1] ...
+```
 
+## Error Handling
 
-| Format      |    Encode |    Decode |     Size |
+Go runtime returns standard library errors:
+- `io.ErrUnexpectedEOF` on incomplete data
+- Custom errors: `xpb.ErrBufferTooSmall`, `xpb.ErrInvalidData`
 
-| :---------- | --------: | --------: | -------: |
+TypeScript runtime throws `Error` with `xpb:` prefix:
+- `Error('xpb: unexpected EOF reading int32')`
 
-| **XPB V2**  | **11 ns** |  **4 ns** | **19 B** |
+## Performance Characteristics
 
-| Protobuf    |     98 ns |    164 ns |     19 B |
+### Memory Allocation
 
-| JSON        |    155 ns |    778 ns |     47 B |
+Go:
+- `NewEncoder`/`NewDecoder`: allocates new buffer
+- `GetEncoder`/`PutEncoder`: uses `sync.Pool`
+- Zero-copy decode via `unsafe.String`
 
-| MessagePack |    288 ns |    346 ns |     33 B |
+TypeScript:
+- Encoder grows buffer 2x when capacity exceeded
+- Buffer.transfer() used when available (zero-copy resize)
 
+### Benchmarking Guidelines
 
-
-#### Node.js (JIT)
-
-
-
-| Format      |    Encode |    Decode |     Size |
-
-| :---------- | --------: | --------: | -------: |
-
-| **XPB V2**  | **12 ns** | **60 ns** | **19 B** |
-
-| Protobuf    |    162 ns |     84 ns |     19 B |
-
-| JSON        |     83 ns |    216 ns |     47 B |
-
-| MessagePack |  1,401 ns |    313 ns |     33 B |
-
-
-
-### Large Message (7 fields: id, name, email, age, score, active, description)
-
-
-
-#### Go
-
-
-
-| Format      |     Encode |     Decode |      Size |
-
-| :---------- | ---------: | ---------: | --------: |
-
-| **XPB V2**  |  **18 ns** |   **8 ns** | **121 B** |
-
-| Protobuf    |     225 ns |     331 ns |     128 B |
-
-| JSON        |     469 ns |   1,916 ns |     192 B |
-
-| MessagePack |     708 ns |     749 ns |     165 B |
-
-
-
-#### Node.js (JIT)
-
-
-
-| Format      |     Encode |     Decode |      Size |
-
-| :---------- | ---------: | ---------: | --------: |
-
-| **XPB V2**  | **156 ns** | **267 ns** | **121 B** |
-
-| Protobuf    |     539 ns |     243 ns |     124 B |
-
-| JSON        |     258 ns |     435 ns |     192 B |
-
-| MessagePack |   1,522 ns |     887 ns |     165 B |
-
-
-
-### Size Scaling (XPB vs JSON)
-
-
-
-XPB provides greatest size savings for smaller messages:
-
-
-
-| Message Size   | XPB (B) | JSON (B) | Size Savings | Encode Speedup | Decode Speedup |
-
-| :------------- | ------: | -------: | -----------: | -------------: | -------------: |
-
-| Tiny (1 bool)  |       1 |       11 |    **90.9%** |           -    |              - |
-
-| Small (3 fld)  |      19 |       47 |    **59.6%** |          13.6x |           180x |
-
-| Medium (8 fld) |     452 |      548 |    **17.5%** |           -    |              - |
-
-| Large (10KB)   |  10,604 |   10,982 |     **3.4%** |          23.7x |           233x |
-
-| XLarge (50KB)  |  52,407 |   53,434 |     **1.9%** |          18.8x |            53x |
-
-
-
-### Collection Types (100 elements, Go)
-
-
-
-| Collection   | XPB Encode | JSON Encode |  Speedup | XPB Decode | JSON Decode |  Speedup |
-
-| :----------- | ---------: | ----------: | -------: | ---------: | ----------: | -------: |
-
-| String Array |     1.6 µs |      3.9 µs | **2.4x** |     1.3 µs |     17.9 µs | **13.7x** |
-
-| Int32 Array  |     462 ns |      1.8 µs | **3.9x** |     376 ns |      9.6 µs |  **25x** |
-
-| String Map   |     4.2 µs |     24.7 µs | **5.8x** |     5.5 µs |     43.0 µs | **7.8x** |
-
-
-
-## Key Insights
-
-
-
-
-
-
-
-1.  **Go Encoding**: XPB is now **13-23x faster** than JSON thanks to `sync.Pool` (zero allocations).
-
-
-
-2.  **Go Decoding**: XPB is **180-230x faster** than JSON thanks to `unsafe` zero-copy strings/bytes.
-
-
-
-3.  **Browser**: XPB is **4.6x faster** than JSON for small message encoding.
-
-
-
-4.  **Hybrid Runtime**: Automatically balances overhead vs throughput (JS < 256B < WASM).
-
-
-
-5.  **Worker Threads**: Optimized workers provide **~3.3x speedup** for large arrays.
-
-
-
-6.  **Size**: Consistent 37-90% reduction.
-
-## Unified Benchmarking (New)
-
-A unified benchmarking tool `xpbench` is available to run and compare tests across all platforms (Go, Node.js, Browser). It aggregates results into a single comparison table.
-
-For detailed analysis of weaknesses and improvement roadmap, see: `docs/ANALYSIS_AND_IMPROVEMENTS.md`.
-
-## Commands
-
+Run benchmarks with:
 ```bash
-# Build CLI
-go build -o xpbc ./cmd/xpbc
-
-# Generate Go code
-./xpbc --lang=go schema.xpb
-
-# Run Unified Benchmarks (Preferred)
-go run ./cmd/xpbench
-
-# Run legacy shell script (custom filters)
-./benchmarks/run-all.sh
-
-# Run selective benchmarks by platform
-./benchmarks/run-all.sh --go              # Go only
-./benchmarks/run-all.sh --nodejs          # Node.js only
-./benchmarks/run-all.sh --browser         # Browser only
-./benchmarks/run-all.sh --nodejs --go     # Multiple platforms
-
-# Run selective benchmarks by test type
-./benchmarks/run-all.sh --small           # Small message tests
-./benchmarks/run-all.sh --large           # Large message tests
-./benchmarks/run-all.sh --collections     # Collection tests (arrays/maps)
-./benchmarks/run-all.sh --scaling         # Size scaling comparison
-
-# Combine platform and test type filters
-./benchmarks/run-all.sh --nodejs --small  # Node.js small tests only
-./benchmarks/run-all.sh --go --collections # Go collection tests only
-
-# Show benchmark help
-./benchmarks/run-all.sh --help
-
-# Run platform-specific benchmarks directly
-cd benchmarks/go && go test -bench=. -count=1
-cd benchmarks/ts && npm run bench
-cd benchmarks/browser && npm run bench
-
-# Run Go tests
-go test ./...
-
-# Run TypeScript tests
-cd runtime/ts && npm test
+go test -bench=. -benchmem -count=1 ./benchmarks/go
 ```
 
-## Browser Bleeding Edge (2025)
+Key metrics:
+- ns/op: nanoseconds per operation
+- B/op: bytes allocated per operation
+- allocs/op: allocation count per operation
 
-XPB V2 implements advanced optimizations for modern browsers (Chrome 133+, Firefox Nightly) using Native Base64 and Zero-Copy Accessors.
+## Comparison with Other Formats
 
-### New Features
+### Byte Layout Comparison (Small Message)
 
-1.  **Native Base64**: Uses `Uint8Array.fromBase64` (C++ SIMD) for **160x faster** binary decoding vs `atob`.
-2.  **Zero-Alloc Base64**: `Encoder.writeBase64AsBytes(str)` writes directly to the buffer using `setFromBase64`, avoiding intermediate allocations.
-3.  **Zero-Copy Accessors**: `XPB.compileAccessor(schema)` creates a View class that reads memory on-demand.
+Message: `{name: "A", age: 30, active: true}`
 
-### Benchmark Results (Browser)
+| Format | Bytes | Notes |
+|--------|-------|-------|
+| XPB V2 | 11 | No field tags, sequential |
+| Protobuf | 19 | Field tags (1 byte each) |
+| MessagePack | 33 | Type indicator per value |
+| JSON | 47 | Key names, whitespace |
 
-| Metric | Specific Test | Comparison | Speedup |
-| :--- | :--- | :--- | :--- |
-| **Binary Data** | Base64 Decode (1MB) | vs JSON (`atob`) | **160x** 🚀 |
-| **Zero-Alloc** | Base64 Write to Encoder | vs Standard XPB | **3.2x** ⚡ |
-| **Lazy Read** | 2 Field Access | vs `JSON.parse` | **2.7x** ⚡ |
+### Encoding Speed Factors
 
-### Usage
+1. XPB advantages:
+   - No reflection/lookup
+   - Sequential memory access
+   - Minimal bounds checking in hot paths
 
-```typescript
-// 1. Binary Data (Fastest)
-const imageBase64 = "iVBORw0KGgo...";
-enc.writeBase64AsBytes(imageBase64); // Zero-Alloc, 160x faster than JSON
+2. XPB disadvantages:
+   - No schema evolution support
+   - No forward compatibility
+   - Order-sensitive decoding
 
-// 2. Zero-Copy Accessor (Lazy Read)
-const UserAccessor = XPB.compileAccessor(userSchema);
-const user = new UserAccessor(buffer);
-console.log(user.id); // Reads 4 bytes from memory. No object allocation.
-```
+## Platform-Specific Optimizations
 
-## Go Usage
+### Go
 
-```go
-enc := xpb.NewEncoder(64)
-enc.WriteString("Alice")
-enc.WriteInt32(30)
-enc.WriteBool(true)
-data := enc.Bytes()
+- `binary.LittleEndian.AppendUint32/64` for zero-allocation writes
+- `unsafe.String` for zero-copy string reads
+- `sync.Pool` for encoder/decoder reuse
 
-dec := xpb.NewDecoder(data)
-name, _ := dec.ReadString()
-age, _ := dec.ReadInt32()
-active, _ := dec.ReadBool()
-```
+### TypeScript
 
-## TypeScript Usage
+- Manual ASCII decoding for short strings (<64 chars)
+- `TextEncoder` fallback for UTF-8
+- Native `Uint8Array.fromBase64` when available (Chrome 133+)
+- Buffer.transfer() when available for zero-copy resize
 
-```typescript
-import { Encoder, Decoder } from "@xpb/runtime";
+### Browser
 
-const enc = new Encoder(64);
-enc.writeString("Alice");
-enc.writeInt32(30);
-enc.writeBool(true);
-const data = enc.finish();
+- `setFromBase64` for zero-allocation Base64 writes
+- Zero-copy accessors via `XPB.compileAccessor`
 
-const dec = new Decoder(data);
-const name = dec.readString();
-const age = dec.readInt32();
-const active = dec.readBool();
-```
+## File References
 
-## Hybrid Runtime (TypeScript)
-
-For optimal performance across all message sizes, use the Hybrid Runtime. It automatically selects:
-- **Pure JS** for small messages (<256 bytes) to minimize overhead.
-- **WASM** for large messages (>=256 bytes) to maximize throughput.
-
-```typescript
-import { createEncoder, createDecoder } from "@xpb/runtime/hybrid";
-
-// Automatically uses JS or WASM based on size/availability
-const enc = createEncoder(); 
-const dec = createDecoder(data);
-```
-
-## Hyper-Speed Runtime (TypeScript)
-
-For **maximum performance** in trusted environments, use the Hyper Runtime.
-- **Zero Function Call Overhead**: Inline implementation.
-- **Zero Allocation**: Reuse encoders/decoders.
-- **Unsafe**: No validation checks.
-
-```typescript
-import { HyperEncoder, HyperDecoder, E, D } from "@xpb/runtime/hyper";
-
-// Encode
-const enc = new HyperEncoder();
-E.str(enc, 1, "Alice");
-E.i32(enc, 2, 30);
-const data = enc.f();
-
-// Decode
-const dec = new HyperDecoder(data);
-const name = D.str(dec); // tag is handled by caller or assumed in struct mode
-```
-
-## Advanced Go Usage (Zero-Copy)
-
-For extreme performance, use unsafe zero-copy methods. These return slices/strings that alias the decoder's buffer.
-
-```go
-// Returns string pointing to decoder buffer memory
-s, _ := dec.ReadString() 
-
-// Returns byte slice pointing to decoder buffer memory
-b, _ := dec.ReadBytesUnsafe()
-```
-
-## Key Files
-
-- `pkg/wire/wire.go` - V2 wire format constants
-- `runtime/go/xpb/xpb.go` - Go Encoder/Decoder (inc. Unsafe)
-- `runtime/ts/src/index.ts` - TypeScript Encoder/Decoder
-- `runtime/ts/src/jit.ts` - JIT Compiler
-- `runtime/ts/src/hybrid.ts` - Hybrid JS/WASM Runtime
-- `runtime/ts/src/hyper.ts` - Hyper-Speed Inline Runtime
-- `benchmarks/browser/src/xpb-browser.ts` - Browser-optimized runtime
-- `benchmarks/go/comparison_test.go` - Go vs JSON/Protobuf/Msgpack
-- `benchmarks/go/collections_test.go` - Array and Map benchmarks
-- `benchmarks/go/size_scaling_test.go` - Size scaling benchmarks
+- Encoder/Decoder: `runtime/go/xpb/xpb.go`, `runtime/ts/src/index.ts`
+- Parser: `pkg/parser/parser.go`
+- Wire constants: `pkg/wire/wire.go`
+- Benchmarks: `benchmarks/go/`, `docs/BENCHMARKS.md`

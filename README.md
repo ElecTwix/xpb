@@ -1,73 +1,75 @@
-# XPB V2 - High-Performance Binary Serialization
+# XPB V2 Binary Serialization
 
-A speed-optimized binary serialization format that beats JSON and Protobuf.
+High-performance binary serialization for Go and TypeScript.
 
-## Supported Platforms
+## Runtimes
 
-| Platform    | Status          | Runtime              |
-| :---------- | :-------------- | :------------------- |
-| **Go**      | ✅ Full Support | `runtime/go/xpb`     |
-| **Node.js** | ✅ Full Support | `runtime/ts/src`     |
-| **Browser** | ✅ Full Support | `benchmarks/browser` |
-
-## Features
-
-- **Blazing Fast** - Up to **5x faster encode** and **39x faster decode** than JSON
-- **Tiny Payloads** - Up to **90% smaller** than JSON
-- **Zero-Copy Decode** - (Go) Direct memory access for ultimate performance
-- **Multi-platform** - Go, Node.js, and Browser support
-- **JIT Compilation** - Runtime-generated optimized encoders/decoders for JS
-- **V2 Wire Format** - Struct mode, fixed-width integers, compact lengths
-
-## Performance (Optimized 2025 Benchmarks)
-
-Benchmarks run on Linux (Intel Core i9-13900H).
-
-### 🏆 Executive Summary
-
-| Platform    |     XPB Encode vs JSON      |    XPB Decode vs JSON    |   Size Savings    |
-| ----------- | :-------------------------: | :----------------------: | :---------------: |
-| **Go**      |   ✅ **13x-23x faster**     |  ✅ **180x-230x faster** | ✅ 37-90% smaller |
-| **Node.js** |   ✅ **1.7x-6.7x faster**   |  ✅ **1.6x-3.6x faster** | ✅ 37-90% smaller |
-| **Browser** |  ✅ **4.6x faster** (small) | ✅ **2.5x faster** (small)| ✅ 37-90% smaller |
-
-### 🚀 Small Message Benchmarks (3 fields)
-
-| Format     | Go Encode | Go Decode | Node Encode | Node Decode | Browser Enc | Browser Dec | Size |
-| :--------- | :-------: | :-------: | :---------: | :---------: | :---------: | :---------: | :--: |
-| **XPB V2** | **11 ns** | **4 ns**  |  **12 ns**  |  **60 ns**  |  **10 ns**  |  **46 ns**  | **19 B** |
-| Protobuf   |   98 ns   |  164 ns   |   162 ns    |    84 ns    |      -      |      -      | 19 B |
-| JSON       |  155 ns   |  778 ns   |    83 ns    |   216 ns    |    46 ns    |   113 ns    | 47 B |
-
-### ⚡ Browser Bleeding Edge (2025)
-
-New runtime features utilizing advanced browser APIs (Chrome 133+):
-
-| Feature | XPB Time | Standard/JSON Time | Speedup |
-| :--- | :--- | :--- | :--- |
-| **Binary Data (1MB)** | **150 µs** | 24,082 µs (atob) | **🚀 160x** |
-| **Zero-Copy Access** | **0.86 µs** | 2.33 µs (Parse) | **⚡ 2.7x** |
-| **Zero-Alloc Write** | **533 µs** | 1,716 µs (Native) | **⚡ 3.2x** |
-
-> **Tech Used:**
-> *   **Native Base64:** `Uint8Array.fromBase64` (SIMD)
-> *   **Zero-Alloc:** `Encoder.writeBase64AsBytes` (Direct Buffer Write)
-> *   **Lazy Accessors:** `XPB.compileAccessor` (Read-on-Demand)
+| Platform | Location | Status |
+|----------|----------|--------|
+| Go | `runtime/go/xpb` | Active |
+| TypeScript | `runtime/ts/src` | Active |
+| Browser | `runtime/ts/src` (browser exports) | Active |
 
 ## Quick Start
 
 ```bash
-# Build compiler
+# Build CLI
 go build -o xpbc ./cmd/xpbc
 
 # Generate code
 ./xpbc --lang=go,ts schema.xpb
-
-# Run all benchmarks
-./benchmarks/run-all.sh
 ```
 
-### Schema Example
+## Go API
+
+```go
+import "github.com/anthropic/xpb/runtime/go/xpb"
+
+// Encode
+enc := xpb.NewEncoder(64)
+enc.WriteString("Alice")
+enc.WriteInt32(30)
+data := enc.Bytes()
+
+// Decode
+dec := xpb.NewDecoder(data)
+name, _ := dec.ReadString()
+age, _ := dec.ReadInt32()
+```
+
+## TypeScript API
+
+```typescript
+import { Encoder, Decoder } from '@xpb/runtime'
+
+// Encode
+const enc = new Encoder(64)
+enc.writeString("Alice")
+enc.writeInt32(30)
+const data = enc.finish()
+
+// Decode
+const dec = new Decoder(data)
+const name = dec.readString()
+const age = dec.readInt32()
+```
+
+## Wire Format
+
+XPB V2 uses struct mode encoding:
+
+- **int32**: 4 bytes, little-endian, two's complement
+- **int64**: 8 bytes, little-endian, two's complement
+- **uint32/uint64**: 4/8 bytes, little-endian
+- **float32/float64**: 4/8 bytes, little-endian IEEE 754
+- **string/bytes**: length prefix + data
+  - Length < 255: 1 byte
+  - Length >= 255: 0xFF marker + 4-byte length
+- **bool**: 1 byte (0 or 1)
+
+Fields are written/read in declaration order with no field tags.
+
+## Schema Example
 
 ```xpb
 package myapp
@@ -82,13 +84,43 @@ message User {
 }
 ```
 
-## V2 Wire Format
+## Commands
 
-- **Struct Mode** - No field tags, fields in declaration order
-- **Fixed-Width Integers** - 4 bytes for int32, 8 bytes for int64
-- **Compact Lengths** - 1 byte if < 255, else 5 bytes
-- **Little-Endian** - All multi-byte values
+```bash
+# Run tests
+go test ./...
+cd runtime/ts && npm test
 
-## License
+# Run benchmarks
+go test -bench=. -benchmem ./benchmarks/go
+cd runtime/ts && npm run bench
 
-MIT
+# Unified benchmark tool
+go run ./cmd/xpbench
+```
+
+## Project Structure
+
+```
+xpb/
+├── cmd/xpbc/           # CLI code generator
+├── cmd/xpbench/        # Unified benchmark runner
+├── pkg/
+│   ├── ast/            # AST definitions
+│   ├── parser/         # Lexer and parser
+│   ├── codegen/        # Go and TypeScript generators
+│   └── wire/           # Wire format constants
+├── runtime/
+│   ├── go/xpb/         # Go runtime
+│   └── ts/src/         # TypeScript runtime
+├── benchmarks/
+│   ├── go/             # Go benchmarks
+│   └── ts/             # Node.js benchmarks
+└── tests/              # E2E tests
+```
+
+## Documentation
+
+- [Wire Format Spec](docs/WIRE_FORMAT.md)
+- [Benchmark Results](docs/BENCHMARKS.md)
+- [Agent Guidelines](AGENTS.md)
