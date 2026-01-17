@@ -44,7 +44,7 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File) {
 		sb.WriteString(fmt.Sprintf("    %s %s;\n", fieldType, fieldName))
 	}
 
-	sb.WriteString(fmt.Sprintf("}} %s;\n\n", typeName))
+	sb.WriteString(fmt.Sprintf("} %s;\n\n", typeName))
 
 	writeMarshalFunction(sb, msg, typeName, file)
 	writeUnmarshalFunction(sb, msg, typeName, file)
@@ -144,7 +144,7 @@ func writeEnum(sb *strings.Builder, enum *xpbast.Enum) {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("}} %s;\n\n", typeName))
+	sb.WriteString(fmt.Sprintf("} %s;\n\n", typeName))
 }
 
 func cType(t xpbast.FieldType, file *xpbast.File) string {
