@@ -10,10 +10,14 @@ xpb.COMPACT_LENGTH_MARKER = 0xFF
 -- Utility functions
 local function le32_to_num(bytes)
     if #bytes < 4 then return 0 end
-    return bytes:byte(1) +
-           (bytes:byte(2) * 256) +
-           (bytes:byte(3) * 65536) +
-           (bytes:byte(4) * 16777216)
+    local n = bytes:byte(1) +
+              (bytes:byte(2) * 256) +
+              (bytes:byte(3) * 65536) +
+              (bytes:byte(4) * 16777216)
+    if n >= 2147483648 then
+        n = n - 4294967296
+    end
+    return n
 end
 
 local function le64_to_num(bytes)
@@ -26,10 +30,15 @@ local function le64_to_num(bytes)
                (bytes:byte(6) * 256) +
                (bytes:byte(7) * 65536) +
                (bytes:byte(8) * 16777216)
-    return lo + (hi * 4294967296)
+    local n = lo + (hi * 4294967296)
+    if n >= 9223372036854775808 then
+        n = n - 18446744073709551616
+    end
+    return n
 end
 
 local function num_to_le32(n)
+    n = math.floor(n) % 4294967296
     return string.char(
         n & 0xFF,
         (n >> 8) & 0xFF,
@@ -39,8 +48,9 @@ local function num_to_le32(n)
 end
 
 local function num_to_le64(n)
+    n = math.floor(n)
     local lo = n & 0xFFFFFFFF
-    local hi = math.floor(n / 4294967296) & 0xFFFFFFFF
+    local hi = (n >> 32) & 0xFFFFFFFF
     return string.char(
         lo & 0xFF,
         (lo >> 8) & 0xFF,
@@ -82,8 +92,7 @@ function xpb.Encoder(initial_size)
 
     function self:write_int32(v)
         self:ensure_capacity(4)
-        local bytes = num_to_le32(v % 4294967296)
-        if v < 0 then bytes = num_to_le32(4294967296 + v) end
+        local bytes = num_to_le32(v)
         for i = 1, 4 do
             self.buf[self.pos + i - 1] = bytes:sub(i, i)
         end
@@ -144,10 +153,6 @@ function xpb.Encoder(initial_size)
     end
 
     function self:write_string(v)
-        local bytes = {string.char(#v)}
-        for i = 1, #v do
-            bytes[i + 1] = v:sub(i, i)
-        end
         self:write_compact_length(#v)
         self:ensure_capacity(#v)
         for i = 1, #v do
