@@ -9,14 +9,17 @@ import (
 	"strings"
 
 	xpbast "github.com/anthropic/xpb/pkg/ast"
+	"github.com/anthropic/xpb/pkg/codegen/cpp"
 	"github.com/anthropic/xpb/pkg/codegen/golang"
+	"github.com/anthropic/xpb/pkg/codegen/java"
+	"github.com/anthropic/xpb/pkg/codegen/lua"
 	"github.com/anthropic/xpb/pkg/codegen/typescript"
 	"github.com/anthropic/xpb/pkg/parser"
 )
 
 func main() {
 	var (
-		lang   = flag.String("lang", "go", "Output language(s): go, ts, or comma-separated list")
+		lang   = flag.String("lang", "go", "Output language(s): go, ts, cpp, lua, java, or comma-separated list")
 		outDir = flag.String("out", ".", "Output directory")
 		stdout = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		help   = flag.Bool("help", false, "Show help")
@@ -30,7 +33,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go user.xpb          Generate Go code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts user.xpb          Generate TypeScript code\n")
-		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate both\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=cpp user.xpb         Generate C++ code\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=lua user.xpb         Generate Lua code\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=java user.xpb        Generate Java code\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate Go and TypeScript\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
 	}
@@ -58,6 +64,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create output directory
+	if err := os.MkdirAll(*outDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Generate code for each requested language
 	baseName := strings.TrimSuffix(filepath.Base(schemaPath), ".xpb")
 	langs := strings.Split(*lang, ",")
@@ -81,6 +93,33 @@ func main() {
 			}
 			if !*stdout {
 				fmt.Printf("Generated: %s/%s.xpb.ts\n", *outDir, baseName)
+			}
+
+		case "cpp", "c++":
+			if err := generateCpp(file, *outDir, baseName, *stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "C++ generation error: %v\n", err)
+				os.Exit(1)
+			}
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.hpp\n", *outDir, baseName)
+			}
+
+		case "lua":
+			if err := generateLua(file, *outDir, baseName, *stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Lua generation error: %v\n", err)
+				os.Exit(1)
+			}
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.lua\n", *outDir, baseName)
+			}
+
+		case "java":
+			if err := generateJava(file, *outDir, baseName, *stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Java generation error: %v\n", err)
+				os.Exit(1)
+			}
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.java\n", *outDir, baseName)
 			}
 
 		default:
@@ -113,5 +152,44 @@ func generateTypeScript(file *xpbast.File, outDir, baseName string, stdout bool)
 		return nil
 	}
 	outPath := filepath.Join(outDir, baseName+".xpb.ts")
+	return os.WriteFile(outPath, code, 0644)
+}
+
+func generateCpp(file *xpbast.File, outDir, baseName string, stdout bool) error {
+	code, err := cpp.Generate(file)
+	if err != nil {
+		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
+	}
+	outPath := filepath.Join(outDir, baseName+".hpp")
+	return os.WriteFile(outPath, code, 0644)
+}
+
+func generateLua(file *xpbast.File, outDir, baseName string, stdout bool) error {
+	code, err := lua.Generate(file)
+	if err != nil {
+		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
+	}
+	outPath := filepath.Join(outDir, baseName+".lua")
+	return os.WriteFile(outPath, code, 0644)
+}
+
+func generateJava(file *xpbast.File, outDir, baseName string, stdout bool) error {
+	code, err := java.Generate(file)
+	if err != nil {
+		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
+	}
+	outPath := filepath.Join(outDir, baseName+".java")
 	return os.WriteFile(outPath, code, 0644)
 }
