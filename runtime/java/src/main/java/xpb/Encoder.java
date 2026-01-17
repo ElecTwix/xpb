@@ -91,7 +91,7 @@ public class Encoder {
             buf[pos++] = (byte) len;
         } else {
             ensureCapacity(5);
-            buf[pos++] = COMPACT_LENGTH_MARKER;
+            buf[pos++] = (byte) COMPACT_LENGTH_MARKER;
             writeInt32(len);
         }
     }
