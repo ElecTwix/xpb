@@ -122,5 +122,6 @@ xpb/
 ## Documentation
 
 - [Wire Format Spec](docs/WIRE_FORMAT.md)
+- [Architecture Overview](docs/ARCHITECTURE.md)
 - [Benchmark Results](docs/BENCHMARKS.md)
 - [Agent Guidelines](AGENTS.md)

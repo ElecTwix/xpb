@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: runtime/ts/package.json
+
+      - name: Install Go dependencies
+        run: go mod download
+
+      - name: Run Go tests with coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload Go coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: go
+          fail_ci_if_error: false
+
+      - name: Build TypeScript runtime
+        run: cd runtime/ts && npm ci && npm run build
+
+      - name: Run TypeScript tests
+        run: cd runtime/ts && npm test
+
+      - name: Upload TypeScript coverage
+        uses: codecov/codecov-action@v4
+        with:
+          directory: ./runtime/ts/coverage
+          flags: typescript
+          fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Run Go linter
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          golangci-lint run ./...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: runtime/ts/package.json
+
+      - name: Run TypeScript linter
+        run: |
+          cd runtime/ts
+          npm ci
+          npm run lint || true

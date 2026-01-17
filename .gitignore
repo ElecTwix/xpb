@@ -21,3 +21,7 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+# Coverage
+coverage/
+*.coverprofile
+*.out

@@ -18,6 +18,7 @@ func main() {
 	var (
 		lang   = flag.String("lang", "go", "Output language(s): go, ts, or comma-separated list")
 		outDir = flag.String("out", ".", "Output directory")
+		stdout = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		help   = flag.Bool("help", false, "Show help")
 	)
 
@@ -31,6 +32,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts user.xpb          Generate TypeScript code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate both\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
 	}
 
 	flag.Parse()
@@ -56,12 +58,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create output directory
-	if err := os.MkdirAll(*outDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Generate code for each requested language
 	baseName := strings.TrimSuffix(filepath.Base(schemaPath), ".xpb")
 	langs := strings.Split(*lang, ",")
@@ -70,18 +66,22 @@ func main() {
 		l = strings.TrimSpace(l)
 		switch l {
 		case "go", "golang":
-			if err := generateGo(file, *outDir, baseName); err != nil {
+			if err := generateGo(file, *outDir, baseName, *stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "Go generation error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Generated: %s/%s.xpb.go\n", *outDir, baseName)
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.xpb.go\n", *outDir, baseName)
+			}
 
 		case "ts", "typescript":
-			if err := generateTypeScript(file, *outDir, baseName); err != nil {
+			if err := generateTypeScript(file, *outDir, baseName, *stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "TypeScript generation error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Generated: %s/%s.xpb.ts\n", *outDir, baseName)
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.xpb.ts\n", *outDir, baseName)
+			}
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown language: %s\n", l)
@@ -90,19 +90,27 @@ func main() {
 	}
 }
 
-func generateGo(file *xpbast.File, outDir, baseName string) error {
+func generateGo(file *xpbast.File, outDir, baseName string, stdout bool) error {
 	code, err := golang.Generate(file)
 	if err != nil {
 		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
 	}
 	outPath := filepath.Join(outDir, baseName+".xpb.go")
 	return os.WriteFile(outPath, code, 0644)
 }
 
-func generateTypeScript(file *xpbast.File, outDir, baseName string) error {
+func generateTypeScript(file *xpbast.File, outDir, baseName string, stdout bool) error {
 	code, err := typescript.Generate(file)
 	if err != nil {
 		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
 	}
 	outPath := filepath.Join(outDir, baseName+".xpb.ts")
 	return os.WriteFile(outPath, code, 0644)

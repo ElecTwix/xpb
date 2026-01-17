@@ -11,6 +11,31 @@
 export const CompactLengthThreshold = 254;
 export const CompactLengthMarker = 0xFF;
 
+// Wire types for future protocol extensions
+export enum WireType {
+  Varint = 0,
+  Fixed64 = 1,
+  LengthDelimited = 2,
+  Fixed32 = 5,
+}
+
+// Zigzag encoding for signed integers (for future varint support)
+export function zigzagEncode32(n: number): number {
+  return (n << 1) ^ (n >> 31);
+}
+
+export function zigzagDecode32(n: number): number {
+  return (n >> 1) ^ -(n & 1);
+}
+
+export function zigzagEncode64(n: bigint): bigint {
+  return (n << 1n) ^ (n >> 63n);
+}
+
+export function zigzagDecode64(n: bigint): bigint {
+  return (n >> 1n) ^ -(n & 1n);
+}
+
 // Fixed sizes
 export const SizeBool = 1;
 export const SizeInt32 = 4;
