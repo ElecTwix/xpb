@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	xpbast "github.com/anthropic/xpb/pkg/ast"
-	"github.com/anthropic/xpb/pkg/codegen/cpp"
+	"github.com/anthropic/xpb/pkg/codegen/c"
 	"github.com/anthropic/xpb/pkg/codegen/golang"
 	"github.com/anthropic/xpb/pkg/codegen/java"
 	"github.com/anthropic/xpb/pkg/codegen/lua"
@@ -19,7 +19,7 @@ import (
 
 func main() {
 	var (
-		lang   = flag.String("lang", "go", "Output language(s): go, ts, cpp, lua, java, or comma-separated list")
+		lang   = flag.String("lang", "go", "Output language(s): go, ts, c, lua, java, or comma-separated list")
 		outDir = flag.String("out", ".", "Output directory")
 		stdout = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		help   = flag.Bool("help", false, "Show help")
@@ -33,7 +33,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go user.xpb          Generate Go code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts user.xpb          Generate TypeScript code\n")
-		fmt.Fprintf(os.Stderr, "  xpbc --lang=cpp user.xpb         Generate C++ code\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=c user.xpb          Generate C code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=lua user.xpb         Generate Lua code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=java user.xpb        Generate Java code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate Go and TypeScript\n")
@@ -95,13 +95,13 @@ func main() {
 				fmt.Printf("Generated: %s/%s.xpb.ts\n", *outDir, baseName)
 			}
 
-		case "cpp", "c++":
-			if err := generateCpp(file, *outDir, baseName, *stdout); err != nil {
-				fmt.Fprintf(os.Stderr, "C++ generation error: %v\n", err)
+		case "c":
+			if err := generateC(file, *outDir, baseName, *stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "C generation error: %v\n", err)
 				os.Exit(1)
 			}
 			if !*stdout {
-				fmt.Printf("Generated: %s/%s.hpp\n", *outDir, baseName)
+				fmt.Printf("Generated: %s/%s.h\n", *outDir, baseName)
 			}
 
 		case "lua":
@@ -155,8 +155,8 @@ func generateTypeScript(file *xpbast.File, outDir, baseName string, stdout bool)
 	return os.WriteFile(outPath, code, 0644)
 }
 
-func generateCpp(file *xpbast.File, outDir, baseName string, stdout bool) error {
-	code, err := cpp.Generate(file)
+func generateC(file *xpbast.File, outDir, baseName string, stdout bool) error {
+	code, err := c.Generate(file)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func generateCpp(file *xpbast.File, outDir, baseName string, stdout bool) error 
 		os.Stdout.Write(code)
 		return nil
 	}
-	outPath := filepath.Join(outDir, baseName+".hpp")
+	outPath := filepath.Join(outDir, baseName+".h")
 	return os.WriteFile(outPath, code, 0644)
 }
 

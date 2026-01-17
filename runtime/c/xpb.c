@@ -1,0 +1,278 @@
+#include "xpb/xpb.h"
+#include <stdlib.h>
+#include <string.h>
+
+/* Encoder implementation */
+struct xpb_encoder {
+    uint8_t* buf;
+    size_t capacity;
+    size_t pos;
+};
+
+static void xpb_encoder_ensure_capacity(struct xpb_encoder* enc, size_t needed) {
+    if (enc->pos + needed > enc->capacity) {
+        size_t new_capacity = enc->capacity * 2;
+        if (new_capacity < enc->pos + needed) {
+            new_capacity = enc->pos + needed;
+        }
+        enc->buf = (uint8_t*)realloc(enc->buf, new_capacity);
+        enc->capacity = new_capacity;
+    }
+}
+
+struct xpb_encoder* xpb_encoder_create(size_t initial_capacity) {
+    struct xpb_encoder* enc = (struct xpb_encoder*)malloc(sizeof(struct xpb_encoder));
+    enc->buf = (uint8_t*)malloc(initial_capacity);
+    enc->capacity = initial_capacity;
+    enc->pos = 0;
+    return enc;
+}
+
+void xpb_encoder_destroy(struct xpb_encoder* enc) {
+    if (enc) {
+        free(enc->buf);
+        free(enc);
+    }
+}
+
+void xpb_encoder_reset(struct xpb_encoder* enc) {
+    enc->pos = 0;
+}
+
+uint8_t* xpb_encoder_finish(struct xpb_encoder* enc, size_t* out_len) {
+    uint8_t* result = (uint8_t*)malloc(enc->pos);
+    memcpy(result, enc->buf, enc->pos);
+    if (out_len) *out_len = enc->pos;
+    return result;
+}
+
+static void xpb_encoder_write_le32(struct xpb_encoder* enc, uint32_t v) {
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
+    enc->buf[enc->pos++] = (uint8_t)(v & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 8) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 16) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 24) & 0xFF);
+#else
+    uint32_t swapped = __builtin_bswap32(v);
+    memcpy(&enc->buf[enc->pos], &swapped, 4);
+    enc->pos += 4;
+#endif
+}
+
+static void xpb_encoder_write_le64(struct xpb_encoder* enc, uint64_t v) {
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
+    enc->buf[enc->pos++] = (uint8_t)(v & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 8) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 16) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 24) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 32) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 40) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 48) & 0xFF);
+    enc->buf[enc->pos++] = (uint8_t)((v >> 56) & 0xFF);
+#else
+    uint64_t swapped = __builtin_bswap64(v);
+    memcpy(&enc->buf[enc->pos], &swapped, 8);
+    enc->pos += 8;
+#endif
+}
+
+void xpb_encoder_write_bool(struct xpb_encoder* enc, bool v) {
+    xpb_encoder_ensure_capacity(enc, 1);
+    enc->buf[enc->pos++] = v ? 1 : 0;
+}
+
+void xpb_encoder_write_int32(struct xpb_encoder* enc, int32_t v) {
+    xpb_encoder_ensure_capacity(enc, 4);
+    xpb_encoder_write_le32(enc, (uint32_t)v);
+}
+
+void xpb_encoder_write_int64(struct xpb_encoder* enc, int64_t v) {
+    xpb_encoder_ensure_capacity(enc, 8);
+    xpb_encoder_write_le64(enc, (uint64_t)v);
+}
+
+void xpb_encoder_write_uint32(struct xpb_encoder* enc, uint32_t v) {
+    xpb_encoder_ensure_capacity(enc, 4);
+    xpb_encoder_write_le32(enc, v);
+}
+
+void xpb_encoder_write_uint64(struct xpb_encoder* enc, uint64_t v) {
+    xpb_encoder_ensure_capacity(enc, 8);
+    xpb_encoder_write_le64(enc, v);
+}
+
+void xpb_encoder_write_float32(struct xpb_encoder* enc, float v) {
+    uint32_t bits;
+    memcpy(&bits, &v, sizeof(bits));
+    xpb_encoder_write_uint32(enc, bits);
+}
+
+void xpb_encoder_write_float64(struct xpb_encoder* enc, double v) {
+    uint64_t bits;
+    memcpy(&bits, &v, sizeof(bits));
+    xpb_encoder_write_uint64(enc, bits);
+}
+
+static void xpb_encoder_write_compact_length(struct xpb_encoder* enc, size_t len) {
+    if (len <= XPB_COMPACT_LENGTH_THRESHOLD) {
+        xpb_encoder_ensure_capacity(enc, 1);
+        enc->buf[enc->pos++] = (uint8_t)len;
+    } else {
+        xpb_encoder_ensure_capacity(enc, 5);
+        enc->buf[enc->pos++] = XPB_COMPACT_LENGTH_MARKER;
+        xpb_encoder_write_le32(enc, (uint32_t)len);
+    }
+}
+
+void xpb_encoder_write_string(struct xpb_encoder* enc, const char* v) {
+    size_t len = strlen(v);
+    xpb_encoder_write_compact_length(enc, len);
+    xpb_encoder_ensure_capacity(enc, len);
+    memcpy(&enc->buf[enc->pos], v, len);
+    enc->pos += len;
+}
+
+void xpb_encoder_write_bytes(struct xpb_encoder* enc, const uint8_t* data, size_t len) {
+    xpb_encoder_write_compact_length(enc, len);
+    xpb_encoder_ensure_capacity(enc, len);
+    memcpy(&enc->buf[enc->pos], data, len);
+    enc->pos += len;
+}
+
+void xpb_encoder_write_message(struct xpb_encoder* enc, const uint8_t* data, size_t len) {
+    xpb_encoder_write_bytes(enc, data, len);
+}
+
+/* Decoder implementation */
+struct xpb_decoder {
+    const uint8_t* data;
+    size_t len;
+    size_t pos;
+};
+
+struct xpb_decoder* xpb_decoder_create(const uint8_t* data, size_t len) {
+    struct xpb_decoder* dec = (struct xpb_decoder*)malloc(sizeof(struct xpb_decoder));
+    dec->data = data;
+    dec->len = len;
+    dec->pos = 0;
+    return dec;
+}
+
+void xpb_decoder_destroy(struct xpb_decoder* dec) {
+    free(dec);
+}
+
+bool xpb_decoder_eof(struct xpb_decoder* dec) {
+    return dec->pos >= dec->len;
+}
+
+size_t xpb_decoder_remaining(struct xpb_decoder* dec) {
+    return dec->len - dec->pos;
+}
+
+static uint32_t xpb_decoder_read_le32(struct xpb_decoder* dec) {
+    uint32_t v;
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
+    v = dec->data[dec->pos] |
+        (dec->data[dec->pos + 1] << 8) |
+        (dec->data[dec->pos + 2] << 16) |
+        (dec->data[dec->pos + 3] << 24);
+#else
+    memcpy(&v, &dec->data[dec->pos], 4);
+    v = __builtin_bswap32(v);
+#endif
+    dec->pos += 4;
+    return v;
+}
+
+static uint64_t xpb_decoder_read_le64(struct xpb_decoder* dec) {
+    uint64_t v;
+#if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
+    uint32_t lo = dec->data[dec->pos] |
+                  (dec->data[dec->pos + 1] << 8) |
+                  (dec->data[dec->pos + 2] << 16) |
+                  (dec->data[dec->pos + 3] << 24);
+    uint32_t hi = dec->data[dec->pos + 4] |
+                  (dec->data[dec->pos + 5] << 8) |
+                  (dec->data[dec->pos + 6] << 16) |
+                  (dec->data[dec->pos + 7] << 24);
+    v = ((uint64_t)lo) | ((uint64_t)hi << 32);
+#else
+    memcpy(&v, &dec->data[dec->pos], 8);
+    v = __builtin_bswap64(v);
+#endif
+    dec->pos += 8;
+    return v;
+}
+
+bool xpb_decoder_read_bool(struct xpb_decoder* dec) {
+    return dec->data[dec->pos++] != 0;
+}
+
+int32_t xpb_decoder_read_int32(struct xpb_decoder* dec) {
+    return (int32_t)xpb_decoder_read_le32(dec);
+}
+
+int64_t xpb_decoder_read_int64(struct xpb_decoder* dec) {
+    return (int64_t)xpb_decoder_read_le64(dec);
+}
+
+uint32_t xpb_decoder_read_uint32(struct xpb_decoder* dec) {
+    return xpb_decoder_read_le32(dec);
+}
+
+uint64_t xpb_decoder_read_uint64(struct xpb_decoder* dec) {
+    return xpb_decoder_read_le64(dec);
+}
+
+float xpb_decoder_read_float32(struct xpb_decoder* dec) {
+    uint32_t bits = xpb_decoder_read_uint32(dec);
+    float v;
+    memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+double xpb_decoder_read_float64(struct xpb_decoder* dec) {
+    uint64_t bits = xpb_decoder_read_uint64(dec);
+    double v;
+    memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+static size_t xpb_decoder_read_compact_length(struct xpb_decoder* dec) {
+    uint8_t first = dec->data[dec->pos++];
+    if (first != XPB_COMPACT_LENGTH_MARKER) {
+        return first;
+    }
+    return xpb_decoder_read_le32(dec);
+}
+
+char* xpb_decoder_read_string(struct xpb_decoder* dec) {
+    size_t len = xpb_decoder_read_compact_length(dec);
+    char* v = (char*)malloc(len + 1);
+    memcpy(v, &dec->data[dec->pos], len);
+    v[len] = '\0';
+    dec->pos += len;
+    return v;
+}
+
+uint8_t* xpb_decoder_read_bytes(struct xpb_decoder* dec, size_t* out_len) {
+    size_t len = xpb_decoder_read_compact_length(dec);
+    uint8_t* v = (uint8_t*)malloc(len);
+    memcpy(v, &dec->data[dec->pos], len);
+    dec->pos += len;
+    if (out_len) *out_len = len;
+    return v;
+}
+
+uint8_t* xpb_decoder_read_message_bytes(struct xpb_decoder* dec, size_t* out_len) {
+    return xpb_decoder_read_bytes(dec, out_len);
+}
+
+void xpb_decoder_skip(struct xpb_decoder* dec, size_t n) {
+    dec->pos += n;
+}
+
+void xpb_free(void* ptr) {
+    free(ptr);
+}
