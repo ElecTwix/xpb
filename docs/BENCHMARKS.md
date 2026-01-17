@@ -78,32 +78,35 @@ Decode speedup: 1.68x vs JSON
 
 | Format | Encode | Decode | Size |
 |--------|--------|--------|------|
-| **XPB V2** | 2784 ns | 8326 ns | 1304 B |
-| JSON | 1155 ns | 2384 ns | 1501 B |
-| MessagePack | 5772 ns | 6952 ns | 1303 B |
+| **XPB V2** | 2122 ns | 7972 ns | 1304 B |
+| JSON | 1177 ns | 2390 ns | 1501 B |
+| MessagePack | 6004 ns | 6835 ns | 1303 B |
 
-⚠️ XPB is **0.41x** encode, **0.29x** decode (slower than JSON)
+⚠️ XPB is **0.55x** encode, **0.30x** decode (slower than JSON)
+- JSON.stringify is highly optimized in V8 for string arrays
+- Int32 arrays work well, but string arrays have significant overhead
 
 ### Int32 Array (100 elements)
 
 | Format | Encode | Decode | Size |
 |--------|--------|--------|------|
-| **XPB V2** | 112 ns | 134 ns | 404 B |
-| JSON | 805 ns | 846 ns | 435 B |
-| MessagePack | 1511 ns | 847 ns | 279 B |
+| **XPB V2** | 113 ns | 132 ns | 404 B |
+| JSON | 809 ns | 843 ns | 435 B |
+| MessagePack | 1522 ns | 809 ns | 279 B |
 
 Encode speedup: 7.2x vs JSON
-Decode speedup: 6.3x vs JSON
+Decode speedup: 6.4x vs JSON
 
 ### String Map (100 entries)
 
 | Format | Encode | Decode | Size |
 |--------|--------|--------|------|
-| **XPB V2** | 5943 ns | 22056 ns | 2604 B |
-| JSON | 4619 ns | 4829 ns | 3001 B |
-| MessagePack | 16976 ns | 38419 ns | 2603 B |
+| **XPB V2** | 5868 ns | 17219 ns | 2604 B |
+| JSON | 4614 ns | 4812 ns | 3001 B |
+| MessagePack | 17046 ns | 39496 ns | 2603 B |
 
-⚠️ XPB is **0.78x** encode, **0.22x** decode (slower than JSON)
+⚠️ XPB is **0.79x** encode, **0.28x** decode (slower than JSON)
+- Same issue as string arrays: JSON.parse/stringify is highly optimized
 
 ## Size Scaling
 
@@ -136,11 +139,14 @@ Decode speedup: 6.3x vs JSON
 
 | Issue | Impact | Workaround |
 |-------|--------|------------|
-| String Array decode | 0.29x vs JSON | Use JSON for string arrays |
-| String Map decode | 0.22x vs JSON | Use JSON for string maps |
-| String Array encode | 0.41x vs JSON | Use JSON for string arrays |
+| String Array decode | 0.30x vs JSON | Use JSON for string arrays |
+| String Map decode | 0.28x vs JSON | Use JSON for string maps |
+| String Array encode | 0.55x vs JSON | Use JSON for string arrays |
 
-These issues are specific to the JIT compiler's handling of strings in collections. Primitive types and numeric arrays perform well.
+These issues are fundamental to competing with V8's highly optimized JSON.stringify/parse for strings. XPB excels with:
+- Primitive types (bool, int, float)
+- Numeric arrays (int32, float64)
+- Small messages with mixed types
 
 ## Running Benchmarks
 

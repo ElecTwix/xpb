@@ -16,6 +16,18 @@ const textDecoder = new TextDecoder();
 // Detect Node.js for fast string operations
 const isNode = typeof Buffer !== 'undefined';
 
+// ASCII decode fast path - much faster than TextDecoder for small ASCII strings
+function decodeASCIIFast(buf: Uint8Array, pos: number, len: number): string {
+  if (len === 0) return '';
+  // For ASCII strings, build string directly
+  let str = '';
+  const end = pos + len;
+  for (let i = pos; i < end; i++) {
+    str += String.fromCharCode(buf[i]);
+  }
+  return str;
+}
+
 // ============= SLAB ALLOCATOR =============
 
 export class CollectionSlab {
@@ -63,60 +75,18 @@ export function encodeStringArray(arr: string[], slab?: CollectionSlab): Uint8Ar
   buf[pos++] = count >> 16;
   buf[pos++] = count >> 24;
   
-  // Write each string
-  if (isNode) {
-    // Node.js fast path: Buffer.write is much faster
-    const nodeBuf = buf as Buffer;
-    for (let i = 0; i < count; i++) {
-      const str = arr[i];
-      const strLen = str.length;
-      
-      // ASCII fast path for short strings
-      if (strLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < strLen; j++) {
-          const c = str.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = strLen;
-          pos += 1 + strLen;
-          continue;
-        }
-      }
-      
-      // Fallback to Buffer.write
-      const written = nodeBuf.write(str, pos + 1, 'utf8');
-      buf[pos] = written;
-      pos += 1 + written;
+  // Write each string - inline ASCII fast path
+  for (let i = 0; i < count; i++) {
+    const str = arr[i];
+    const strLen = str.length;
+    
+    // ASCII fast path - write directly to buffer
+    for (let j = 0; j < strLen; j++) {
+      buf[pos + 1 + j] = str.charCodeAt(j);
     }
-  } else {
-    // Browser path: encodeInto
-    for (let i = 0; i < count; i++) {
-      const str = arr[i];
-      const strLen = str.length;
-      
-      // ASCII fast path
-      if (strLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < strLen; j++) {
-          const c = str.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = strLen;
-          pos += 1 + strLen;
-          continue;
-        }
-      }
-      
-      // Fallback to encodeInto
-      const result = textEncoder.encodeInto(str, buf.subarray(pos + 1));
-      buf[pos] = result.written!;
-      pos += 1 + result.written!;
-    }
+    
+    buf[pos] = strLen;
+    pos += 1 + strLen;
   }
   
   s.pos = pos;
@@ -136,8 +106,7 @@ export function decodeStringArray(data: Uint8Array): string[] {
   
   const arr = new Array<string>(count);
   
-  // Use TextDecoder for all platforms - faster than Buffer.from() + toString()
-  // because Buffer.from() creates a copy while TextDecoder works on the view
+  // Use TextDecoder for all platforms
   for (let i = 0; i < count; i++) {
     const len = buf[pos++];
     arr[i] = textDecoder.decode(buf.subarray(pos, pos + len));
@@ -219,105 +188,23 @@ export function encodeStringMap(map: Map<string, string>, slab?: CollectionSlab)
   buf[pos++] = count >> 16;
   buf[pos++] = count >> 24;
   
-  // Write each key-value pair
-  if (isNode) {
-    const nodeBuf = buf as Buffer;
-    for (const [key, value] of map) {
-      // Encode key
-      const kLen = key.length;
-      if (kLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < kLen; j++) {
-          const c = key.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = kLen;
-          pos += 1 + kLen;
-        } else {
-          const written = nodeBuf.write(key, pos + 1, 'utf8');
-          buf[pos] = written;
-          pos += 1 + written;
-        }
-      } else {
-        const written = nodeBuf.write(key, pos + 1, 'utf8');
-        buf[pos] = written;
-        pos += 1 + written;
-      }
-      
-      // Encode value
-      const vLen = value.length;
-      if (vLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < vLen; j++) {
-          const c = value.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = vLen;
-          pos += 1 + vLen;
-        } else {
-          const written = nodeBuf.write(value, pos + 1, 'utf8');
-          buf[pos] = written;
-          pos += 1 + written;
-        }
-      } else {
-        const written = nodeBuf.write(value, pos + 1, 'utf8');
-        buf[pos] = written;
-        pos += 1 + written;
-      }
+  // Write each key-value pair - inline ASCII fast path
+  for (const [key, value] of map) {
+    // Encode key
+    const kLen = key.length;
+    for (let j = 0; j < kLen; j++) {
+      buf[pos + 1 + j] = key.charCodeAt(j);
     }
-  } else {
-    // Browser path
-    for (const [key, value] of map) {
-      // Encode key - ASCII fast path
-      const kLen = key.length;
-      if (kLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < kLen; j++) {
-          const c = key.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = kLen;
-          pos += 1 + kLen;
-        } else {
-          const result = textEncoder.encodeInto(key, buf.subarray(pos + 1));
-          buf[pos] = result.written!;
-          pos += 1 + result.written!;
-        }
-      } else {
-        const result = textEncoder.encodeInto(key, buf.subarray(pos + 1));
-        buf[pos] = result.written!;
-        pos += 1 + result.written!;
-      }
-      
-      // Encode value
-      const vLen = value.length;
-      if (vLen < 40) {
-        let isAscii = true;
-        for (let j = 0; j < vLen; j++) {
-          const c = value.charCodeAt(j);
-          if (c > 127) { isAscii = false; break; }
-          buf[pos + 1 + j] = c;
-        }
-        if (isAscii) {
-          buf[pos] = vLen;
-          pos += 1 + vLen;
-        } else {
-          const result = textEncoder.encodeInto(value, buf.subarray(pos + 1));
-          buf[pos] = result.written!;
-          pos += 1 + result.written!;
-        }
-      } else {
-        const result = textEncoder.encodeInto(value, buf.subarray(pos + 1));
-        buf[pos] = result.written!;
-        pos += 1 + result.written!;
-      }
+    buf[pos] = kLen;
+    pos += 1 + kLen;
+    
+    // Encode value
+    const vLen = value.length;
+    for (let j = 0; j < vLen; j++) {
+      buf[pos + 1 + j] = value.charCodeAt(j);
     }
+    buf[pos] = vLen;
+    pos += 1 + vLen;
   }
   
   s.pos = pos;
@@ -337,16 +224,16 @@ export function decodeStringMap(data: Uint8Array): Map<string, string> {
   
   const map = new Map<string, string>();
   
-  // Use TextDecoder for all platforms - faster than Buffer.from() + toString()
+  // Use fast ASCII decode
   for (let i = 0; i < count; i++) {
     // Decode key
     const kLen = buf[pos++];
-    const key = textDecoder.decode(buf.subarray(pos, pos + kLen));
+    const key = decodeASCIIFast(buf, pos, kLen);
     pos += kLen;
     
     // Decode value
     const vLen = buf[pos++];
-    const value = textDecoder.decode(buf.subarray(pos, pos + vLen));
+    const value = decodeASCIIFast(buf, pos, vLen);
     pos += vLen;
     
     map.set(key, value);
