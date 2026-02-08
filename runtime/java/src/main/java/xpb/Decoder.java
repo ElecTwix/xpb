@@ -134,6 +134,76 @@ public class Decoder {
         pos += n;
     }
 
+    /** Read array of int32 - format: count (int32) + elements */
+    public int[] readArrayInt32() {
+        int count = readInt32();
+        int[] arr = new int[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readInt32();
+        }
+        return arr;
+    }
+
+    /** Read array of int64 - format: count (int32) + elements */
+    public long[] readArrayInt64() {
+        int count = readInt32();
+        long[] arr = new long[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readInt64();
+        }
+        return arr;
+    }
+
+    /** Read array of uint32 - format: count (int32) + elements */
+    public int[] readArrayUint32() {
+        return readArrayInt32();
+    }
+
+    /** Read array of uint64 - format: count (int32) + elements */
+    public long[] readArrayUint64() {
+        return readArrayInt64();
+    }
+
+    /** Read array of float32 - format: count (int32) + elements */
+    public float[] readArrayFloat32() {
+        int count = readInt32();
+        float[] arr = new float[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readFloat32();
+        }
+        return arr;
+    }
+
+    /** Read array of float64 - format: count (int32) + elements */
+    public double[] readArrayFloat64() {
+        int count = readInt32();
+        double[] arr = new double[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readFloat64();
+        }
+        return arr;
+    }
+
+    /** Read array of bool - format: count (int32) + elements */
+    public boolean[] readArrayBool() {
+        int count = readInt32();
+        boolean[] arr = new boolean[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readBool();
+        }
+        return arr;
+    }
+
+    /** Read array of String - format: count (int32) + elements */
+    public String[] readArrayString() {
+        int count = readInt32();
+        String[] arr = new String[count];
+        for (int i = 0; i < count; i++) {
+            arr[i] = readString();
+        }
+        return arr;
+    }
+
     public static final int COMPACT_LENGTH_THRESHOLD = 254;
     public static final int COMPACT_LENGTH_MARKER = 0xFF;
 }

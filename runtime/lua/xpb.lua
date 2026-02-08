@@ -144,6 +144,62 @@ function xpb.Encoder(initial_size)
         self:write_bytes(data)
     end
 
+    function self:write_array_int32(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_int32(arr[i])
+        end
+    end
+
+    function self:write_array_int64(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_int64(arr[i])
+        end
+    end
+
+    function self:write_array_uint32(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_uint32(arr[i])
+        end
+    end
+
+    function self:write_array_uint64(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_uint64(arr[i])
+        end
+    end
+
+    function self:write_array_float32(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_float32(arr[i])
+        end
+    end
+
+    function self:write_array_float64(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_float64(arr[i])
+        end
+    end
+
+    function self:write_array_bool(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_bool(arr[i])
+        end
+    end
+
+    function self:write_array_string(arr)
+        self:write_int32(#arr)
+        for i = 1, #arr do
+            self:write_string(arr[i])
+        end
+    end
+
     function self:finish()
         if self.pos == 0 then return "" end
         local result = {}
@@ -233,6 +289,79 @@ function xpb.Decoder(data)
 
     function self:read_message_bytes() return self:read_bytes() end
     function self:skip(n) self.pos = self.pos + n end
+
+    -- Array helpers
+    function self:read_array_int32()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_int32()
+        end
+        return arr
+    end
+
+    function self:read_array_int64()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_int64()
+        end
+        return arr
+    end
+
+    function self:read_array_uint32()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_uint32()
+        end
+        return arr
+    end
+
+    function self:read_array_uint64()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_uint64()
+        end
+        return arr
+    end
+
+    function self:read_array_float32()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_float32()
+        end
+        return arr
+    end
+
+    function self:read_array_float64()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_float64()
+        end
+        return arr
+    end
+
+    function self:read_array_bool()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_bool()
+        end
+        return arr
+    end
+
+    function self:read_array_string()
+        local count = self:read_int32()
+        local arr = {}
+        for i = 1, count do
+            arr[i] = self:read_string()
+        end
+        return arr
+    end
 
     return self
 end

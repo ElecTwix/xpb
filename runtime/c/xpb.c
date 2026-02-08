@@ -276,3 +276,155 @@ void xpb_decoder_skip(struct xpb_decoder* dec, size_t n) {
 void xpb_free(void* ptr) {
     free(ptr);
 }
+
+void xpb_free_array(void* ptr, size_t count, size_t elem_size) {
+    (void)count;
+    (void)elem_size;
+    free(ptr);
+}
+
+/* Array encoding implementations */
+void xpb_encoder_write_array_int32(struct xpb_encoder* enc, const int32_t* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_int32(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_int64(struct xpb_encoder* enc, const int64_t* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_int64(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_uint32(struct xpb_encoder* enc, const uint32_t* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_uint32(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_uint64(struct xpb_encoder* enc, const uint64_t* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_uint64(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_float32(struct xpb_encoder* enc, const float* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_float32(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_float64(struct xpb_encoder* enc, const double* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_float64(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_bool(struct xpb_encoder* enc, const bool* arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_bool(enc, arr[i]);
+    }
+}
+
+void xpb_encoder_write_array_string(struct xpb_encoder* enc, const char** arr, size_t count) {
+    xpb_encoder_write_int32(enc, (int32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        xpb_encoder_write_string(enc, arr[i]);
+    }
+}
+
+/* Array decoding implementations */
+int32_t* xpb_decoder_read_array_int32(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    int32_t* arr = (int32_t*)malloc(count * sizeof(int32_t));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_int32(dec);
+    }
+    return arr;
+}
+
+int64_t* xpb_decoder_read_array_int64(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    int64_t* arr = (int64_t*)malloc(count * sizeof(int64_t));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_int64(dec);
+    }
+    return arr;
+}
+
+uint32_t* xpb_decoder_read_array_uint32(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    uint32_t* arr = (uint32_t*)malloc(count * sizeof(uint32_t));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_uint32(dec);
+    }
+    return arr;
+}
+
+uint64_t* xpb_decoder_read_array_uint64(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    uint64_t* arr = (uint64_t*)malloc(count * sizeof(uint64_t));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_uint64(dec);
+    }
+    return arr;
+}
+
+float* xpb_decoder_read_array_float32(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    float* arr = (float*)malloc(count * sizeof(float));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_float32(dec);
+    }
+    return arr;
+}
+
+double* xpb_decoder_read_array_float64(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    double* arr = (double*)malloc(count * sizeof(double));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_float64(dec);
+    }
+    return arr;
+}
+
+bool* xpb_decoder_read_array_bool(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    bool* arr = (bool*)malloc(count * sizeof(bool));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_bool(dec);
+    }
+    return arr;
+}
+
+char** xpb_decoder_read_array_string(struct xpb_decoder* dec, size_t* out_count) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (out_count) *out_count = (size_t)count;
+    if (count == 0) return NULL;
+    char** arr = (char**)malloc(count * sizeof(char*));
+    for (int32_t i = 0; i < count; i++) {
+        arr[i] = xpb_decoder_read_string(dec);
+    }
+    return arr;
+}

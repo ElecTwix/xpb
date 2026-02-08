@@ -1,14 +1,17 @@
 # XPB V2 Binary Serialization
 
-High-performance binary serialization for Go and TypeScript.
+High-performance binary serialization for Go, TypeScript, C, Lua, and Java.
 
 ## Runtimes
 
 | Platform | Location | Status |
 |----------|----------|--------|
-| Go | `runtime/go/xpb` | Active |
-| TypeScript | `runtime/ts/src` | Active |
-| Browser | `runtime/ts/src` (browser exports) | Active |
+| Go | `runtime/go/xpb` | Production-ready |
+| TypeScript | `runtime/ts/src` | Production-ready |
+| C | `runtime/c` | Active |
+| Lua | `runtime/lua` | Active |
+| Java | `runtime/java` | Active |
+| Browser | `runtime/ts/src` (browser exports) | Production-ready |
 
 ## Quick Start
 
@@ -16,8 +19,12 @@ High-performance binary serialization for Go and TypeScript.
 # Build CLI
 go build -o xpbc ./cmd/xpbc
 
-# Generate code
+# Generate code (all languages)
+./xpbc --lang=go,ts,c,lua,java schema.xpb
+
+# Or generate for specific languages
 ./xpbc --lang=go,ts schema.xpb
+./xpbc --lang=c,lua schema.xpb
 ```
 
 ## Go API
@@ -54,6 +61,62 @@ const name = dec.readString()
 const age = dec.readInt32()
 ```
 
+## C API
+
+```c
+#include "xpb/xpb.h"
+
+// Encode
+struct xpb_encoder* enc = xpb_encoder_create(64);
+xpb_encoder_write_string(enc, "Alice");
+xpb_encoder_write_int32(enc, 30);
+size_t len;
+uint8_t* data = xpb_encoder_finish(enc, &len);
+xpb_encoder_destroy(enc);
+
+// Decode
+struct xpb_decoder* dec = xpb_decoder_create(data, len);
+char* name = xpb_decoder_read_string(dec);
+int32_t age = xpb_decoder_read_int32(dec);
+xpb_free(name);
+xpb_decoder_destroy(dec);
+```
+
+## Lua API
+
+```lua
+local xpb = require("xpb")
+
+-- Encode
+local enc = xpb.Encoder(64)
+enc:write_string("Alice")
+enc:write_int32(30)
+local data = enc:finish()
+
+-- Decode
+local dec = xpb.Decoder(data)
+local name = dec:read_string()
+local age = dec:read_int32()
+```
+
+## Java API
+
+```java
+import xpb.Encoder;
+import xpb.Decoder;
+
+// Encode
+Encoder enc = new Encoder(64);
+enc.writeString("Alice");
+enc.writeInt32(30);
+byte[] data = enc.finish();
+
+// Decode
+Decoder dec = new Decoder(data);
+String name = dec.readString();
+int age = dec.readInt32();
+```
+
 ## Wire Format
 
 XPB V2 uses struct mode encoding:
@@ -87,9 +150,21 @@ message User {
 ## Commands
 
 ```bash
-# Run tests
+# Run Go tests
 go test ./...
+
+# Run TypeScript tests
 cd runtime/ts && npm test
+
+# Run C tests
+gcc -Wall -Wextra -I runtime/c/include tests/c/xpb_test.c runtime/c/xpb.c -o /tmp/xpb_test && /tmp/xpb_test
+
+# Run Lua tests
+lua5.4 -e "package.path='./runtime/lua/?.lua;'" tests/lua/xpb_test.lua
+
+# Run Java tests
+javac -d /tmp/runtime_test runtime/java/src/main/java/xpb/*.java tests/java/XpbTest.java
+java -cp /tmp/runtime_test xpb.XpbTest
 
 # Run benchmarks
 go test -bench=. -benchmem ./benchmarks/go
@@ -108,14 +183,20 @@ xpb/
 ├── pkg/
 │   ├── ast/            # AST definitions
 │   ├── parser/         # Lexer and parser
-│   ├── codegen/        # Go and TypeScript generators
+│   ├── codegen/        # Go, TypeScript, C, Lua, Java generators
 │   └── wire/           # Wire format constants
 ├── runtime/
 │   ├── go/xpb/         # Go runtime
-│   └── ts/src/         # TypeScript runtime
+│   ├── ts/src/         # TypeScript runtime
+│   ├── c/              # C runtime
+│   ├── lua/            # Lua runtime
+│   └── java/           # Java runtime
 ├── benchmarks/
 │   ├── go/             # Go benchmarks
-│   └── ts/             # Node.js benchmarks
+│   ├── ts/             # Node.js benchmarks
+│   ├── c/              # C benchmarks
+│   ├── lua/            # Lua benchmarks
+│   └── java/           # Java benchmarks
 └── tests/              # E2E tests
 ```
 

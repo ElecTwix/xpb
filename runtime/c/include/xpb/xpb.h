@@ -62,8 +62,28 @@ uint8_t* xpb_decoder_read_bytes(struct xpb_decoder* dec, size_t* out_len);
 uint8_t* xpb_decoder_read_message_bytes(struct xpb_decoder* dec, size_t* out_len);
 void xpb_decoder_skip(struct xpb_decoder* dec, size_t n);
 
+/* Array API - Arrays are encoded as: count (int32) + elements */
+void xpb_encoder_write_array_int32(struct xpb_encoder* enc, const int32_t* arr, size_t count);
+void xpb_encoder_write_array_int64(struct xpb_encoder* enc, const int64_t* arr, size_t count);
+void xpb_encoder_write_array_uint32(struct xpb_encoder* enc, const uint32_t* arr, size_t count);
+void xpb_encoder_write_array_uint64(struct xpb_encoder* enc, const uint64_t* arr, size_t count);
+void xpb_encoder_write_array_float32(struct xpb_encoder* enc, const float* arr, size_t count);
+void xpb_encoder_write_array_float64(struct xpb_encoder* enc, const double* arr, size_t count);
+void xpb_encoder_write_array_bool(struct xpb_encoder* enc, const bool* arr, size_t count);
+void xpb_encoder_write_array_string(struct xpb_encoder* enc, const char** arr, size_t count);
+
+int32_t* xpb_decoder_read_array_int32(struct xpb_decoder* dec, size_t* out_count);
+int64_t* xpb_decoder_read_array_int64(struct xpb_decoder* dec, size_t* out_count);
+uint32_t* xpb_decoder_read_array_uint32(struct xpb_decoder* dec, size_t* out_count);
+uint64_t* xpb_decoder_read_array_uint64(struct xpb_decoder* dec, size_t* out_count);
+float* xpb_decoder_read_array_float32(struct xpb_decoder* dec, size_t* out_count);
+double* xpb_decoder_read_array_float64(struct xpb_decoder* dec, size_t* out_count);
+bool* xpb_decoder_read_array_bool(struct xpb_decoder* dec, size_t* out_count);
+char** xpb_decoder_read_array_string(struct xpb_decoder* dec, size_t* out_count);
+
 /* Utility - free string/bytes allocated by decoder */
 void xpb_free(void* ptr);
+void xpb_free_array(void* ptr, size_t count, size_t elem_size);
 
 #ifdef __cplusplus
 }

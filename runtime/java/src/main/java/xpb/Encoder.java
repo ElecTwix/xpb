@@ -118,6 +118,70 @@ public class Encoder {
         writeBytes(data);
     }
 
+    /** Write array of int32 - format: count (int32) + elements */
+    public void writeArrayInt32(int[] arr) {
+        writeInt32(arr.length);
+        for (int v : arr) {
+            writeInt32(v);
+        }
+    }
+
+    /** Write array of int64 - format: count (int32) + elements */
+    public void writeArrayInt64(long[] arr) {
+        writeInt32(arr.length);
+        for (long v : arr) {
+            writeInt64(v);
+        }
+    }
+
+    /** Write array of uint32 - format: count (int32) + elements */
+    public void writeArrayUint32(int[] arr) {
+        writeInt32(arr.length);
+        for (int v : arr) {
+            writeUint32(v);
+        }
+    }
+
+    /** Write array of uint64 - format: count (int32) + elements */
+    public void writeArrayUint64(long[] arr) {
+        writeInt32(arr.length);
+        for (long v : arr) {
+            writeUint64(v);
+        }
+    }
+
+    /** Write array of float32 - format: count (int32) + elements */
+    public void writeArrayFloat32(float[] arr) {
+        writeInt32(arr.length);
+        for (float v : arr) {
+            writeFloat32(v);
+        }
+    }
+
+    /** Write array of float64 - format: count (int32) + elements */
+    public void writeArrayFloat64(double[] arr) {
+        writeInt32(arr.length);
+        for (double v : arr) {
+            writeFloat64(v);
+        }
+    }
+
+    /** Write array of bool - format: count (int32) + elements */
+    public void writeArrayBool(boolean[] arr) {
+        writeInt32(arr.length);
+        for (boolean v : arr) {
+            writeBool(v);
+        }
+    }
+
+    /** Write array of String - format: count (int32) + elements */
+    public void writeArrayString(String[] arr) {
+        writeInt32(arr.length);
+        for (String v : arr) {
+            writeString(v);
+        }
+    }
+
     public static final int COMPACT_LENGTH_THRESHOLD = 254;
     public static final int COMPACT_LENGTH_MARKER = 0xFF;
 }
