@@ -1,26 +1,12 @@
 {
   "name": "@xpb/runtime",
   "version": "0.3.0",
-  "description": "XPB runtime library for TypeScript with runtime-specific optimizations",
+  "description": "XPB runtime library for TypeScript - high-performance binary serialization",
   "type": "module",
   "exports": {
     ".": {
-      "node": {
-        "types": "./dist/node.d.ts",
-        "default": "./dist/node.js"
-      },
-      "bun": {
-        "types": "./dist/node.d.ts",
-        "default": "./dist/node.js"
-      },
-      "browser": {
-        "types": "./dist/browser.d.ts",
-        "default": "./dist/browser.js"
-      },
-      "default": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      }
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./node": {
       "types": "./dist/node.d.ts",
@@ -29,14 +15,6 @@
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
-    },
-    "./hybrid": {
-      "types": "./dist/hybrid.d.ts",
-      "default": "./dist/hybrid.js"
-    },
-    "./wasm": {
-      "types": "./dist/wasm.d.ts",
-      "default": "./dist/wasm.js"
     }
   },
   "main": "dist/index.js",

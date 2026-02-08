@@ -250,6 +250,70 @@ export class Encoder {
   writeMessage(data: Uint8Array): void {
     this.writeBytes(data);
   }
+
+  /** Write array of int32 - format: count (int32) + elements */
+  writeArrayInt32(arr: number[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeInt32(v);
+    }
+  }
+
+  /** Write array of int64 - format: count (int32) + elements */
+  writeArrayInt64(arr: bigint[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeInt64(v);
+    }
+  }
+
+  /** Write array of uint32 - format: count (int32) + elements */
+  writeArrayUint32(arr: number[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeUint32(v);
+    }
+  }
+
+  /** Write array of uint64 - format: count (int32) + elements */
+  writeArrayUint64(arr: bigint[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeUint64(v);
+    }
+  }
+
+  /** Write array of float32 - format: count (int32) + elements */
+  writeArrayFloat32(arr: number[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeFloat32(v);
+    }
+  }
+
+  /** Write array of float64 - format: count (int32) + elements */
+  writeArrayFloat64(arr: number[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeFloat64(v);
+    }
+  }
+
+  /** Write array of bool - format: count (int32) + elements */
+  writeArrayBool(arr: boolean[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeBool(v);
+    }
+  }
+
+  /** Write array of string - format: count (int32) + elements */
+  writeArrayString(arr: string[]): void {
+    this.writeInt32(arr.length);
+    for (const v of arr) {
+      this.writeString(v);
+    }
+  }
 }
 
 /**
@@ -453,7 +517,88 @@ export class Decoder {
     }
     this.pos += n;
   }
+
+  /** Read array of int32 - format: count (int32) + elements */
+  readArrayInt32(): number[] {
+    const count = this.readInt32();
+    const arr: number[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readInt32();
+    }
+    return arr;
+  }
+
+  /** Read array of int64 - format: count (int32) + elements */
+  readArrayInt64(): bigint[] {
+    const count = this.readInt32();
+    const arr: bigint[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readInt64();
+    }
+    return arr;
+  }
+
+  /** Read array of uint32 - format: count (int32) + elements */
+  readArrayUint32(): number[] {
+    const count = this.readInt32();
+    const arr: number[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readUint32();
+    }
+    return arr;
+  }
+
+  /** Read array of uint64 - format: count (int32) + elements */
+  readArrayUint64(): bigint[] {
+    const count = this.readInt32();
+    const arr: bigint[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readUint64();
+    }
+    return arr;
+  }
+
+  /** Read array of float32 - format: count (int32) + elements */
+  readArrayFloat32(): number[] {
+    const count = this.readInt32();
+    const arr: number[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readFloat32();
+    }
+    return arr;
+  }
+
+  /** Read array of float64 - format: count (int32) + elements */
+  readArrayFloat64(): number[] {
+    const count = this.readInt32();
+    const arr: number[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readFloat64();
+    }
+    return arr;
+  }
+
+  /** Read array of bool - format: count (int32) + elements */
+  readArrayBool(): boolean[] {
+    const count = this.readInt32();
+    const arr: boolean[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readBool();
+    }
+    return arr;
+  }
+
+  /** Read array of string - format: count (int32) + elements */
+  readArrayString(): string[] {
+    const count = this.readInt32();
+    const arr: string[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      arr[i] = this.readString();
+    }
+    return arr;
+  }
 }
+
 export * from './worker-pool';
 export * from './view';
 
