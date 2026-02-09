@@ -25,3 +25,8 @@ Thumbs.db
 coverage/
 *.coverprofile
 *.out
+
+# Browser test results and reports
+runtime/ts/benchmarks/test-results/
+runtime/ts/benchmarks/playwright-report/
+runtime/ts/benchmarks/results/*.json

@@ -30,7 +30,12 @@
     "bench:compare": "node benchmarks/run-benchmarks.js compare",
     "bench:ci": "node benchmarks/run-benchmarks.js ci",
     "track:report": "ts-node benchmarks/performance-tracker.ts report",
-    "track:history": "ts-node benchmarks/performance-tracker.ts history"
+    "track:history": "ts-node benchmarks/performance-tracker.ts history",
+    "test:browser": "playwright test",
+    "test:browser:chrome": "playwright test --project=chrome",
+    "test:browser:firefox": "playwright test --project=firefox",
+    "test:browser:bench": "playwright test benchmarks/browser-benchmarks.spec.ts",
+    "bench:browser": "npm run build && playwright test benchmarks/browser-benchmarks.spec.ts"
   },
   "files": [
     "dist",
@@ -47,8 +52,10 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "^1.41.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^1.0.0",
+    "playwright": "^1.41.0",
     "typescript": "^5.3.0",
     "vitest": "^1.0.0"
   }

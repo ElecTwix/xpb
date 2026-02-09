@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XPB Browser Benchmarks</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .browser-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .result {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            margin: 5px 0;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .result.pass {
+            border-left: 4px solid #4CAF50;
+        }
+        .result.fail {
+            border-left: 4px solid #f44336;
+        }
+        .metric {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+        .progress {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.3s;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .chart {
+            width: 100%;
+            height: 300px;
+            margin: 20px 0;
+        }
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>🏃 XPB Browser Performance Benchmarks</h1>
+    
+    <div class="browser-info">
+        <h3>🌐 Browser Information</h3>
+        <p><strong>Browser:</strong> <span id="browser-name">Detecting...</span></p>
+        <p><strong>Version:</strong> <span id="browser-version">...</span></p>
+        <p><strong>Hardware Cores:</strong> <span id="hardware-cores">...</span></p>
+        <p><strong>Device Memory:</strong> <span id="device-memory">...</span> GB</p>
+    </div>
+
+    <div class="browser-info" style="background: #fff3e0;">
+        <h3>🔧 Feature Support</h3>
+        <div id="feature-list"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🎯 Benchmark Controls</h3>
+        <button onclick="runAllBenchmarks()" id="run-all-btn">Run All Benchmarks</button>
+        <button onclick="exportResults()">Export Results (JSON)</button>
+        <div class="progress" id="overall-progress" style="display: none;">
+            <div class="progress-bar" id="overall-progress-bar" style="width: 0%;"></div>
+        </div>
+    </div>
+
+    <div id="results-container">
+        <h3>📊 Results will appear here</h3>
+    </div>
+
+    <script type="module">
+        // Load XPB library
+        import { Encoder, Decoder } from '../dist/index.js';
+        import { StringArrayView } from '../dist/view.js';
+
+        // Make available globally
+        window.XPB = { Encoder, Decoder, StringArrayView };
+
+        // Configuration
+        const WARMUP_RUNS = 3;
+        const MEASUREMENT_RUNS = 10;
+        const DATA_SIZES = [1000, 10000, 100000];
+
+        // Results storage
+        let benchmarkResults = [];
+
+        // Detect browser
+        function detectBrowser() {
+            const ua = navigator.userAgent;
+            const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
+            const isFirefox = /Firefox/.test(ua);
+            const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
+            
+            let name = 'Unknown';
+            let version = 'unknown';
+            
+            if (isChrome) {
+                name = 'Chrome';
+                version = ua.match(/Chrome\/(\d+\.\d+)/)?.[1] || 'unknown';
+            } else if (isFirefox) {
+                name = 'Firefox';
+                version = ua.match(/Firefox\/(\d+\.\d+)/)?.[1] || 'unknown';
+            } else if (isSafari) {
+                name = 'Safari';
+                version = ua.match(/Version\/(\d+\.\d+)/)?.[1] || 'unknown';
+            }
+            
+            return { name, version };
+        }
+
+        // Check features
+        function checkFeatures() {
+            return {
+                'WebAssembly': typeof WebAssembly === 'object',
+                'Web Workers': typeof Worker !== 'undefined',
+                'Compression Streams': typeof CompressionStream !== 'undefined',
+                'Native Base64': typeof Uint8Array.prototype.toBase64 === 'function',
+                'ArrayBuffer.transfer': typeof ArrayBuffer.prototype.transfer === 'function',
+                'SharedArrayBuffer': typeof SharedArrayBuffer !== 'undefined',
+                'BigInt': typeof BigInt !== 'undefined',
+                'TextEncoder': typeof TextEncoder !== 'undefined',
+                'TextDecoder': typeof TextDecoder !== 'undefined',
+            };
+        }
+
+        // Generate test data
+        function generateData(size) {
+            const ints = [];
+            const strings = [];
+            let remaining = size;
+            let i = 0;
+            while (remaining > 0) {
+                if (i % 2 === 0) {
+                    ints.push(Math.floor(Math.random() * 1000000) - 500000);
+                    remaining -= 4;
+                } else {
+                    const str = 'test-data-' + i + '-content';
+                    strings.push(str);
+                    remaining -= str.length * 2;
+                }
+                i++;
+            }
+            return { ints, strings };
+        }
+
+        // Run benchmark
+        async function runBenchmark(name, feature, dataSize, fn) {
+            const times = [];
+            
+            // Warmup
+            for (let i = 0; i < WARMUP_RUNS; i++) {
+                await fn();
+            }
+            
+            // Measurement
+            for (let i = 0; i < MEASUREMENT_RUNS; i++) {
+                const start = performance.now();
+                await fn();
+                const end = performance.now();
+                times.push(end - start);
+            }
+            
+            const avg = times.reduce((a, b) => a + b, 0) / times.length;
+            const min = Math.min(...times);
+            const max = Math.max(...times);
+            const variance = times.reduce((sum, t) => sum + Math.pow(t - avg, 2), 0) / times.length;
+            const stdDev = Math.sqrt(variance);
+            
+            const browser = detectBrowser();
+            
+            return {
+                browser: browser.name,
+                browserVersion: browser.version,
+                name,
+                feature,
+                dataSize,
+                opsPerSecond: 1000 / avg,
+                avgTime: avg,
+                minTime: min,
+                maxTime: max,
+                stdDev,
+                timestamp: new Date().toISOString(),
+            };
+        }
+
+        // Display result
+        function displayResult(result) {
+            const container = document.getElementById('results-container');
+            
+            let section = document.getElementById(`section-${result.feature}`);
+            if (!section) {
+                section = document.createElement('div');
+                section.className = 'test-section';
+                section.id = `section-${result.feature}`;
+                section.innerHTML = `<h3>${result.name}</h3>`;
+                container.appendChild(section);
+            }
+            
+            const div = document.createElement('div');
+            div.className = 'result pass';
+            div.innerHTML = `
+                <span>${result.dataSize}B: <strong>${result.opsPerSecond.toFixed(0)}</strong> ops/sec</span>
+                <span class="metric">${result.avgTime.toFixed(2)}ms ±${result.stdDev.toFixed(2)}ms</span>
+            `;
+            section.appendChild(div);
+        }
+
+        // Baseline benchmarks
+        async function runBaselineBenchmarks(updateProgress) {
+            const results = [];
+            
+            for (const size of DATA_SIZES) {
+                const data = generateData(size);
+                
+                // Encode
+                const encodeResult = await runBenchmark('Baseline Encode', 'none', size, () => {
+                    const enc = new Encoder(size * 2);
+                    for (const n of data.ints) enc.writeInt32(n);
+                    for (const s of data.strings) enc.writeString(s);
+                    return enc.finish();
+                });
+                results.push(encodeResult);
+                displayResult(encodeResult);
+                updateProgress();
+                
+                // Pre-encode for decode test
+                const enc = new Encoder(size * 2);
+                for (const n of data.ints) enc.writeInt32(n);
+                for (const s of data.strings) enc.writeString(s);
+                const encoded = enc.finish();
+                
+                // Decode
+                const decodeResult = await runBenchmark('Baseline Decode', 'none', size, () => {
+                    const dec = new Decoder(encoded);
+                    for (let i = 0; i < data.ints.length; i++) dec.readInt32();
+                    for (let i = 0; i < data.strings.length; i++) dec.readString();
+                });
+                results.push(decodeResult);
+                displayResult(decodeResult);
+                updateProgress();
+            }
+            
+            return results;
+        }
+
+        // Lazy view benchmarks
+        async function runLazyViewBenchmarks(updateProgress) {
+            const results = [];
+            const size = 50000;
+            const stringCount = Math.min(1000, size / 10);
+            const strings = Array.from({ length: stringCount }, (_, i) => 
+                'test-string-' + i + '-with-content'
+            );
+            
+            const enc = new Encoder(size * 2);
+            enc.writeInt32(strings.length);
+            for (const s of strings) enc.writeString(s);
+            const encoded = enc.finish();
+            
+            // Eager decode
+            const eagerResult = await runBenchmark('String[] Eager', 'eager-decode', size, () => {
+                const dec = new Decoder(encoded);
+                const count = dec.readInt32();
+                const result = new Array(count);
+                for (let i = 0; i < count; i++) {
+                    result[i] = dec.readString();
+                }
+                return result;
+            });
+            results.push(eagerResult);
+            displayResult(eagerResult);
+            updateProgress();
+            
+            // Lazy init only
+            const lazyInitResult = await runBenchmark('String[] Lazy Init', 'lazy-view', size, () => {
+                const view = new StringArrayView(encoded);
+                const first = view.get(0);
+                const middle = view.get(Math.floor(view.length / 2));
+                const last = view.get(view.length - 1);
+                return [first, middle, last];
+            });
+            results.push(lazyInitResult);
+            displayResult(lazyInitResult);
+            updateProgress();
+            
+            // Lazy full iteration
+            const lazyFullResult = await runBenchmark('String[] Lazy Full', 'lazy-view-full', size, () => {
+                const view = new StringArrayView(encoded);
+                for (let i = 0; i < view.length; i++) {
+                    view.get(i);
+                }
+            });
+            results.push(lazyFullResult);
+            displayResult(lazyFullResult);
+            updateProgress();
+            
+            return results;
+        }
+
+        // Native Base64 benchmarks
+        async function runBase64Benchmarks(updateProgress) {
+            const results = [];
+            const hasNative = typeof Uint8Array.prototype.toBase64 === 'function';
+            
+            for (const size of [1000, 10000]) {
+                const data = new Uint8Array(size);
+                for (let i = 0; i < size; i++) data[i] = i % 256;
+                
+                if (hasNative) {
+                    const nativeResult = await runBenchmark('Base64 Native', 'native-base64', size, () => {
+                        const base64 = data.toBase64();
+                        const decoded = Uint8Array.fromBase64(base64);
+                        return decoded;
+                    });
+                    results.push(nativeResult);
+                    displayResult(nativeResult);
+                }
+                
+                // Polyfill
+                const polyfillResult = await runBenchmark('Base64 Polyfill', 'polyfill-base64', size, () => {
+                    let binary = '';
+                    const len = data.length;
+                    const CHUNK = 0x8000;
+                    for (let i = 0; i < len; i += CHUNK) {
+                        binary += String.fromCharCode.apply(null, data.subarray(i, Math.min(i + CHUNK, len)));
+                    }
+                    const base64 = btoa(binary);
+                    
+                    const binaryString = atob(base64);
+                    const decoded = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        decoded[i] = binaryString.charCodeAt(i);
+                    }
+                    return decoded;
+                });
+                results.push(polyfillResult);
+                displayResult(polyfillResult);
+                updateProgress();
+            }
+            
+            return results;
+        }
+
+        // Compression benchmarks
+        async function runCompressionBenchmarks(updateProgress) {
+            const results = [];
+            const hasCompression = typeof CompressionStream !== 'undefined';
+            
+            if (!hasCompression) {
+                const container = document.getElementById('results-container');
+                const div = document.createElement('div');
+                div.className = 'test-section';
+                div.innerHTML = '<h3>Compression Streams</h3><p>Not available in this browser</p>';
+                container.appendChild(div);
+                return results;
+            }
+            
+            for (const size of [10000, 50000]) {
+                const data = generateData(size);
+                const enc = new Encoder(size * 2);
+                for (const n of data.ints) enc.writeInt32(n);
+                for (const s of data.strings) enc.writeString(s);
+                const encoded = enc.finish();
+                
+                // Compression
+                const compressResult = await runBenchmark('Compress (gzip)', 'compression', size, async () => {
+                    const cs = new CompressionStream('gzip');
+                    const writer = cs.writable.getWriter();
+                    writer.write(encoded);
+                    writer.close();
+                    
+                    const reader = cs.readable.getReader();
+                    while (true) {
+                        const { done } = await reader.read();
+                        if (done) break;
+                    }
+                });
+                results.push(compressResult);
+                displayResult(compressResult);
+                
+                // Pre-compress for decompression test
+                const cs = new CompressionStream('gzip');
+                const writer = cs.writable.getWriter();
+                writer.write(encoded);
+                writer.close();
+                const reader = cs.readable.getReader();
+                const chunks = [];
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                }
+                const compressedSize = chunks.reduce((sum, c) => sum + c.length, 0);
+                const compressed = new Uint8Array(compressedSize);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    compressed.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                
+                // Decompression
+                const decompressResult = await runBenchmark('Decompress (gzip)', 'decompression', size, async () => {
+                    const ds = new DecompressionStream('gzip');
+                    const writer = ds.writable.getWriter();
+                    writer.write(compressed);
+                    writer.close();
+                    
+                    const reader = ds.readable.getReader();
+                    while (true) {
+                        const { done } = await reader.read();
+                        if (done) break;
+                    }
+                });
+                results.push(decompressResult);
+                displayResult(decompressResult);
+                updateProgress();
+                
+                // Display compression ratio
+                const ratio = encoded.length / compressedSize;
+                const div = document.createElement('div');
+                div.className = 'result pass';
+                div.innerHTML = `<span><strong>Compression Ratio (${size}B)</strong></span><span class="metric">${ratio.toFixed(2)}x</span>`;
+                document.getElementById('section-compression').appendChild(div);
+            }
+            
+            return results;
+        }
+
+        // Run all benchmarks
+        window.runAllBenchmarks = async function() {
+            const btn = document.getElementById('run-all-btn');
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            
+            document.getElementById('results-container').innerHTML = '<h3>📊 Running Benchmarks...</h3>';
+            benchmarkResults = [];
+            
+            const progressEl = document.getElementById('overall-progress');
+            const progressBar = document.getElementById('overall-progress-bar');
+            progressEl.style.display = 'block';
+            
+            const totalTests = (DATA_SIZES.length * 2) + 3 + 4 + 4; // baseline + lazy + base64 + compression
+            let completed = 0;
+            
+            function updateProgress() {
+                completed++;
+                const pct = (completed / totalTests) * 100;
+                progressBar.style.width = pct + '%';
+            }
+            
+            try {
+                benchmarkResults.push(...await runBaselineBenchmarks(updateProgress));
+                benchmarkResults.push(...await runLazyViewBenchmarks(updateProgress));
+                benchmarkResults.push(...await runBase64Benchmarks(updateProgress));
+                benchmarkResults.push(...await runCompressionBenchmarks(updateProgress));
+                
+                // Summary
+                const container = document.getElementById('results-container');
+                const summary = document.createElement('div');
+                summary.className = 'test-section';
+                summary.innerHTML = `
+                    <h3>✅ Benchmark Complete!</h3>
+                    <p>Total tests: ${benchmarkResults.length}</p>
+                    <button onclick="exportResults()">Export Results</button>
+                `;
+                container.insertBefore(summary, container.firstChild);
+                
+            } catch (error) {
+                console.error('Benchmark error:', error);
+                const container = document.getElementById('results-container');
+                const div = document.createElement('div');
+                div.className = 'result fail';
+                div.innerHTML = `<span><strong>Error:</strong> ${error.message}</span>`;
+                container.appendChild(div);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run All Benchmarks';
+                progressBar.style.width = '100%';
+            }
+        };
+
+        // Export results
+        window.exportResults = function() {
+            const data = {
+                timestamp: new Date().toISOString(),
+                browser: detectBrowser(),
+                features: checkFeatures(),
+                results: benchmarkResults,
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `xpb-benchmark-${data.browser.name}-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            const browser = detectBrowser();
+            document.getElementById('browser-name').textContent = browser.name;
+            document.getElementById('browser-version').textContent = browser.version;
+            document.getElementById('hardware-cores').textContent = navigator.hardwareConcurrency || 'unknown';
+            document.getElementById('device-memory').textContent = navigator.deviceMemory || 'unknown';
+            
+            const features = checkFeatures();
+            const featureList = document.getElementById('feature-list');
+            for (const [name, supported] of Object.entries(features)) {
+                const div = document.createElement('div');
+                div.style.padding = '5px';
+                div.innerHTML = `${supported ? '✅' : '❌'} ${name}`;
+                featureList.appendChild(div);
+            }
+        });
+    </script>
+</body>
+</html>
