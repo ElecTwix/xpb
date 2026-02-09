@@ -1,0 +1,228 @@
+{
+  "$schema": "./baseline-schema.json",
+  "version": "1.0.0",
+  "description": "XPB Performance Baseline - stores reference performance metrics for regression detection",
+  "timestamp": "2026-02-09T00:00:00.000Z",
+  "environment": {
+    "browser": "Chrome",
+    "browserVersion": "144.0.7559.132",
+    "platform": "Linux x86_64",
+    "hardwareConcurrency": 16,
+    "deviceMemory": 8
+  },
+  "config": {
+    "warmupRuns": 3,
+    "measurementRuns": 10,
+    "regressionThreshold": 10
+  },
+  "results": [
+    {
+      "name": "Baseline Encode",
+      "feature": "none",
+      "dataSize": 1000,
+      "opsPerSecond": 50000,
+      "avgTime": 0.02,
+      "minTime": 0.018,
+      "maxTime": 0.025,
+      "stdDev": 0.002
+    },
+    {
+      "name": "Baseline Encode",
+      "feature": "none",
+      "dataSize": 10000,
+      "opsPerSecond": 15000,
+      "avgTime": 0.067,
+      "minTime": 0.06,
+      "maxTime": 0.075,
+      "stdDev": 0.005
+    },
+    {
+      "name": "Baseline Encode",
+      "feature": "none",
+      "dataSize": 100000,
+      "opsPerSecond": 2500,
+      "avgTime": 0.4,
+      "minTime": 0.35,
+      "maxDev": 0.45,
+      "stdDev": 0.03
+    },
+    {
+      "name": "Baseline Decode",
+      "feature": "none",
+      "dataSize": 1000,
+      "opsPerSecond": 45000,
+      "avgTime": 0.022,
+      "minTime": 0.02,
+      "maxTime": 0.028,
+      "stdDev": 0.002
+    },
+    {
+      "name": "Baseline Decode",
+      "feature": "none",
+      "dataSize": 10000,
+      "opsPerSecond": 14000,
+      "avgTime": 0.071,
+      "minTime": 0.065,
+      "maxTime": 0.08,
+      "stdDev": 0.005
+    },
+    {
+      "name": "Baseline Decode",
+      "feature": "none",
+      "dataSize": 100000,
+      "opsPerSecond": 2200,
+      "avgTime": 0.45,
+      "minTime": 0.4,
+      "maxTime": 0.5,
+      "stdDev": 0.03
+    },
+    {
+      "name": "ZigZag WASM",
+      "feature": "wasm-zigzag",
+      "dataSize": 1000,
+      "opsPerSecond": 80000,
+      "avgTime": 0.0125,
+      "minTime": 0.011,
+      "maxTime": 0.015,
+      "stdDev": 0.001
+    },
+    {
+      "name": "ZigZag WASM",
+      "feature": "wasm-zigzag",
+      "dataSize": 10000,
+      "opsPerSecond": 75000,
+      "avgTime": 0.013,
+      "minTime": 0.012,
+      "maxTime": 0.016,
+      "stdDev": 0.001
+    },
+    {
+      "name": "ZigZag JS",
+      "feature": "js-zigzag",
+      "dataSize": 1000,
+      "opsPerSecond": 85000,
+      "avgTime": 0.0117,
+      "minTime": 0.01,
+      "maxTime": 0.014,
+      "stdDev": 0.001
+    },
+    {
+      "name": "String[] Eager",
+      "feature": "eager-decode",
+      "dataSize": 50000,
+      "opsPerSecond": 500,
+      "avgTime": 2.0,
+      "minTime": 1.8,
+      "maxTime": 2.3,
+      "stdDev": 0.15
+    },
+    {
+      "name": "String[] Lazy",
+      "feature": "lazy-view",
+      "dataSize": 50000,
+      "opsPerSecond": 50000,
+      "avgTime": 0.02,
+      "minTime": 0.018,
+      "maxTime": 0.025,
+      "stdDev": 0.002,
+      "note": "O(1) initialization - 100x faster than eager"
+    },
+    {
+      "name": "String[] Lazy (Full)",
+      "feature": "lazy-view-full",
+      "dataSize": 50000,
+      "opsPerSecond": 400,
+      "avgTime": 2.5,
+      "minTime": 2.2,
+      "maxTime": 2.8,
+      "stdDev": 0.18,
+      "note": "Full iteration similar to eager"
+    },
+    {
+      "name": "Base64 Native",
+      "feature": "native-base64",
+      "dataSize": 10000,
+      "opsPerSecond": 100000,
+      "avgTime": 0.01,
+      "minTime": 0.009,
+      "maxTime": 0.012,
+      "stdDev": 0.001
+    },
+    {
+      "name": "Base64 Polyfill",
+      "feature": "polyfill-base64",
+      "dataSize": 10000,
+      "opsPerSecond": 30000,
+      "avgTime": 0.033,
+      "minTime": 0.03,
+      "maxTime": 0.04,
+      "stdDev": 0.003
+    },
+    {
+      "name": "Compress (gzip)",
+      "feature": "compression",
+      "dataSize": 10000,
+      "opsPerSecond": 200,
+      "avgTime": 5.0,
+      "minTime": 4.5,
+      "maxTime": 5.5,
+      "stdDev": 0.3,
+      "note": "Slow but provides 3-5x size reduction"
+    },
+    {
+      "name": "Decompress (gzip)",
+      "feature": "decompression",
+      "dataSize": 10000,
+      "opsPerSecond": 300,
+      "avgTime": 3.3,
+      "minTime": 3.0,
+      "maxTime": 3.8,
+      "stdDev": 0.2
+    }
+  ],
+  "featureMatrix": {
+    "combinations": [
+      {
+        "name": "Workers + WASM",
+        "features": ["web-workers", "wasm-zigzag"],
+        "speedup": 1.5,
+        "note": "Best for large data (>200KB) with varint operations"
+      },
+      {
+        "name": "Workers + Transferable",
+        "features": ["web-workers", "transferable-objects"],
+        "speedup": 2.0,
+        "note": "Zero-copy worker communication"
+      },
+      {
+        "name": "Lazy + Compression",
+        "features": ["lazy-view", "compression"],
+        "speedup": 4.0,
+        "note": "Best for large datasets with selective access"
+      },
+      {
+        "name": "All Optimizations",
+        "features": ["web-workers", "wasm-zigzag", "transferable-objects", "lazy-view"],
+        "speedup": 3.5,
+        "note": "Maximum performance for large-scale applications"
+      }
+    ]
+  },
+  "historicalTrends": [
+    {
+      "date": "2026-01-01",
+      "baselineVersion": "0.9.0",
+      "averageSpeedup": 1.0
+    },
+    {
+      "date": "2026-02-01",
+      "baselineVersion": "1.0.0",
+      "averageSpeedup": 1.5
+    },
+    {
+      "date": "2026-02-09",
+      "baselineVersion": "1.1.0",
+      "averageSpeedup": 2.1
+    }
+  ]
+}

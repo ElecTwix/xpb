@@ -24,7 +24,13 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "bench": "tsx ../benchmarks/ts/src/benchmark.ts"
+    "bench": "tsx ../benchmarks/ts/src/benchmark.ts",
+    "bench:features": "vitest run benchmarks/feature-benchmarks.test.ts",
+    "bench:baseline": "node benchmarks/run-benchmarks.js baseline",
+    "bench:compare": "node benchmarks/run-benchmarks.js compare",
+    "bench:ci": "node benchmarks/run-benchmarks.js ci",
+    "track:report": "ts-node benchmarks/performance-tracker.ts report",
+    "track:history": "ts-node benchmarks/performance-tracker.ts history"
   },
   "files": [
     "dist",
