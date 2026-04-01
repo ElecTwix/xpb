@@ -1,0 +1,8 @@
+[package]
+name = "xpb"
+version = "0.1.0"
+edition = "2021"
+description = "XPB V2 binary serialization runtime for Rust"
+license = "MIT"
+
+[dev-dependencies]
