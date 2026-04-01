@@ -4,7 +4,7 @@ package benchmark
 import (
 	"testing"
 
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 // SimpleUser represents a simple test message for benchmarking.

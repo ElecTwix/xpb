@@ -4,8 +4,8 @@ package integration
 import (
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/parser"
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	"github.com/ElecTwix/xpb/pkg/parser"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 func TestE2E_GoRoundTrip_SimpleMessage(t *testing.T) {

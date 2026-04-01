@@ -189,7 +189,7 @@ const file_benchmarks_go_proto_bench_proto_rawDesc = "" +
 	"\x03age\x18\x04 \x01(\x05R\x03age\x12\x14\n" +
 	"\x05score\x18\x05 \x01(\x01R\x05score\x12\x16\n" +
 	"\x06active\x18\x06 \x01(\bR\x06active\x12 \n" +
-	"\vdescription\x18\a \x01(\tR\vdescriptionB.Z,github.com/anthropic/xpb/benchmarks/go/protob\x06proto3"
+	"\vdescription\x18\a \x01(\tR\vdescriptionB.Z,github.com/ElecTwix/xpb/benchmarks/go/protob\x06proto3"
 
 var (
 	file_benchmarks_go_proto_bench_proto_rawDescOnce sync.Once

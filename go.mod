@@ -1,4 +1,4 @@
-module github.com/anthropic/xpb
+module github.com/ElecTwix/xpb
 
 go 1.23.0
 

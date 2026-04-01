@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	xpbast "github.com/anthropic/xpb/pkg/ast"
+	xpbast "github.com/ElecTwix/xpb/pkg/ast"
 )
 
 func Generate(file *xpbast.File) ([]byte, error) {

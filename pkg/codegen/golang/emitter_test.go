@@ -3,7 +3,7 @@ package golang
 import (
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/ast"
 )
 
 func TestGenerate_SimpleMessage(t *testing.T) {

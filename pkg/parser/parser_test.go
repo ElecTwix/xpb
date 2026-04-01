@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/ast"
 )
 
 func TestLexer_BasicTokens(t *testing.T) {

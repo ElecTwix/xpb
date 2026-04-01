@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/codegen/golang"
-	"github.com/anthropic/xpb/pkg/parser"
+	"github.com/ElecTwix/xpb/pkg/codegen/golang"
+	"github.com/ElecTwix/xpb/pkg/parser"
 )
 
 func TestGoCodegen_SimpleSchema(t *testing.T) {

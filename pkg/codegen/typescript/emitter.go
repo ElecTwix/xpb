@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropic/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/ast"
 )
 
 // Generator generates TypeScript code from an AST.

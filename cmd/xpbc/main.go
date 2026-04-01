@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	xpbast "github.com/anthropic/xpb/pkg/ast"
-	"github.com/anthropic/xpb/pkg/codegen/c"
-	"github.com/anthropic/xpb/pkg/codegen/golang"
-	"github.com/anthropic/xpb/pkg/codegen/java"
-	"github.com/anthropic/xpb/pkg/codegen/lua"
-	"github.com/anthropic/xpb/pkg/codegen/rust"
-	"github.com/anthropic/xpb/pkg/codegen/typescript"
-	"github.com/anthropic/xpb/pkg/parser"
+	xpbast "github.com/ElecTwix/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/codegen/c"
+	"github.com/ElecTwix/xpb/pkg/codegen/golang"
+	"github.com/ElecTwix/xpb/pkg/codegen/java"
+	"github.com/ElecTwix/xpb/pkg/codegen/lua"
+	"github.com/ElecTwix/xpb/pkg/codegen/rust"
+	"github.com/ElecTwix/xpb/pkg/codegen/typescript"
+	"github.com/ElecTwix/xpb/pkg/parser"
 )
 
 func main() {

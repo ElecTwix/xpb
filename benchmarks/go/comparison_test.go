@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	pb "github.com/anthropic/xpb/benchmarks/go/proto"
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	pb "github.com/ElecTwix/xpb/benchmarks/go/proto"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 	"github.com/vmihailenco/msgpack/v5"
 	"google.golang.org/protobuf/proto"
 )

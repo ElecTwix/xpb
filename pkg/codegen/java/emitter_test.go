@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/parser"
+	"github.com/ElecTwix/xpb/pkg/parser"
 )
 
 func TestGenerate_SimpleMessage(t *testing.T) {

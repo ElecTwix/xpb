@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 	"github.com/vmihailenco/msgpack/v5"
 )
 

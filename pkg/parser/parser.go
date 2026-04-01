@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/anthropic/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/ast"
 )
 
 // Parser parses XPB schema files into an AST.

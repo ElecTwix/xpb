@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/anthropic/xpb/pkg/wire"
+	"github.com/ElecTwix/xpb/pkg/wire"
 )
 
 // Common errors.

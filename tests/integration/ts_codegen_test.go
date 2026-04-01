@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropic/xpb/pkg/ast"
-	"github.com/anthropic/xpb/pkg/codegen/typescript"
+	"github.com/ElecTwix/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/codegen/typescript"
 )
 
 func TestTSCodegen_SimpleMessage(t *testing.T) {

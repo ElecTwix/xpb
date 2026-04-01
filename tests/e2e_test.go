@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 // TestSimpleMessage_RoundTrip tests encoding and decoding a simple message with V2.

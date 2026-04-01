@@ -7,8 +7,8 @@ import (
 	"go/format"
 	"strings"
 
-	"github.com/anthropic/xpb/pkg/ast"
-	"github.com/anthropic/xpb/pkg/wire"
+	"github.com/ElecTwix/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/wire"
 )
 
 // Generator generates Go code from an AST.
@@ -41,7 +41,7 @@ func (g *Generator) generate(file *ast.File) ([]byte, error) {
 	g.printf("package %s\n\n", pkg)
 
 	g.printf("import (\n")
-	g.printf("\t\"github.com/anthropic/xpb/runtime/go/xpb\"\n")
+	g.printf("\t\"github.com/ElecTwix/xpb/runtime/go/xpb\"\n")
 	g.printf(")\n\n")
 
 	g.printf("var _ = xpb.NewEncoder\n\n")

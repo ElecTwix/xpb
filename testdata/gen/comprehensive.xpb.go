@@ -2,8 +2,8 @@
 package myapp
 
 import (
-	"github.com/anthropic/xpb/pkg/wire"
-	"github.com/anthropic/xpb/runtime/go/xpb"
+	"github.com/ElecTwix/xpb/pkg/wire"
+	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 var _ = xpb.NewEncoder
