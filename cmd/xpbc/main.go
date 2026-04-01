@@ -13,13 +13,14 @@ import (
 	"github.com/anthropic/xpb/pkg/codegen/golang"
 	"github.com/anthropic/xpb/pkg/codegen/java"
 	"github.com/anthropic/xpb/pkg/codegen/lua"
+	"github.com/anthropic/xpb/pkg/codegen/rust"
 	"github.com/anthropic/xpb/pkg/codegen/typescript"
 	"github.com/anthropic/xpb/pkg/parser"
 )
 
 func main() {
 	var (
-		lang   = flag.String("lang", "go", "Output language(s): go, ts, c, lua, java, or comma-separated list")
+		lang   = flag.String("lang", "go", "Output language(s): go, ts, c, lua, java, rust, or comma-separated list")
 		outDir = flag.String("out", ".", "Output directory")
 		stdout = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		help   = flag.Bool("help", false, "Show help")
@@ -36,6 +37,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=c user.xpb          Generate C code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=lua user.xpb         Generate Lua code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=java user.xpb        Generate Java code\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=rust user.xpb        Generate Rust code\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate Go and TypeScript\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
@@ -122,6 +124,15 @@ func main() {
 				fmt.Printf("Generated: %s/%s.java\n", *outDir, baseName)
 			}
 
+		case "rust":
+			if err := generateRust(file, *outDir, baseName, *stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Rust generation error: %v\n", err)
+				os.Exit(1)
+			}
+			if !*stdout {
+				fmt.Printf("Generated: %s/%s.xpb.rs\n", *outDir, baseName)
+			}
+
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown language: %s\n", l)
 			os.Exit(1)
@@ -191,5 +202,18 @@ func generateJava(file *xpbast.File, outDir, baseName string, stdout bool) error
 		return nil
 	}
 	outPath := filepath.Join(outDir, baseName+".java")
+	return os.WriteFile(outPath, code, 0644)
+}
+
+func generateRust(file *xpbast.File, outDir, baseName string, stdout bool) error {
+	code, err := rust.Generate(file)
+	if err != nil {
+		return err
+	}
+	if stdout {
+		os.Stdout.Write(code)
+		return nil
+	}
+	outPath := filepath.Join(outDir, baseName+".xpb.rs")
 	return os.WriteFile(outPath, code, 0644)
 }
