@@ -18,23 +18,60 @@ class FastDecoder {
     this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   }
 
+  remaining(): number {
+    return this.data.length - this.pos;
+  }
+
   readInt32(): number {
+    if (this.pos + 4 > this.data.length) {
+      throw new Error('xpb: unexpected EOF reading int32');
+    }
     const v = this.view.getInt32(this.pos, true);
     this.pos += 4;
     return v;
   }
-  
+
+  /**
+   * Read an array length and bound it against the remaining buffer
+   * (mirrors Decoder.readArrayCount in index.ts). Each element on the
+   * wire occupies at least elementMinBytes, so a count claiming more
+   * elements than (remaining bytes / elementMinBytes) cannot be honest
+   * and is rejected before any allocation.
+   */
+  readArrayCount(elementMinBytes: number): number {
+    const n = this.readInt32();
+    if (n < 0) {
+      throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (elementMinBytes > 0) {
+      const max = Math.floor(this.remaining() / elementMinBytes);
+      if (n > max) {
+        throw new Error(`xpb: array count ${n} exceeds buffer-bounded max ${max}`);
+      }
+    }
+    return n;
+  }
+
   readStringLength(): number {
+    if (this.pos >= this.data.length) {
+      throw new Error('xpb: unexpected EOF reading length');
+    }
     const len = this.data[this.pos++];
     if (len === 255) {
+         if (this.pos + 4 > this.data.length) {
+           throw new Error('xpb: unexpected EOF reading extended length');
+         }
          const v = this.view.getUint32(this.pos, true);
          this.pos += 4;
          return v;
     }
     return len;
   }
-  
+
   readRawStringBytes(len: number): Uint8Array {
+      if (this.pos + len > this.data.length) {
+        throw new Error('xpb: unexpected EOF reading string bytes');
+      }
       const bytes = this.data.subarray(this.pos, this.pos + len);
       this.pos += len;
       return bytes;
@@ -46,13 +83,13 @@ class FastDecoder {
  */
 function decodeInt32Array(buffer: Uint8Array): { result: Int32Array, transfer: Transferable[] } {
   const decoder = new FastDecoder(buffer);
-  const count = decoder.readInt32();
-  
+  const count = decoder.readArrayCount(4);
+
   const result = new Int32Array(count);
   for (let i = 0; i < count; i++) {
     result[i] = decoder.readInt32();
   }
-  
+
   return { result, transfer: [result.buffer] };
 }
 
@@ -62,8 +99,11 @@ function decodeInt32Array(buffer: Uint8Array): { result: Int32Array, transfer: T
  */
 function decodeStringArray(buffer: Uint8Array): { result: any, transfer: Transferable[] } {
   const decoder = new FastDecoder(buffer);
-  const count = decoder.readInt32();
-  
+  // Each string occupies at least 1 byte on the wire (the compact-length
+  // prefix even for the empty string), so the count is bounded by the
+  // remaining buffer.
+  const count = decoder.readArrayCount(1);
+
   const offsets = new Int32Array(count + 1);
   
   // We allocate a buffer for the data. In a perfect world we'd verify size first.
