@@ -121,6 +121,11 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 
 	// Unmarshal - V2: no tags, read fields in order
 	g.printf("func (m *%s) Unmarshal(data []byte) error {\n", name)
+	g.printf("\treturn m.unmarshalAt(data, 0)\n")
+	g.printf("}\n\n")
+
+	g.printf("func (m *%s) unmarshalAt(data []byte, depth int) error {\n", name)
+	g.printf("\tif depth > xpb.MaxDecodeDepth { return xpb.ErrMaxDepthExceeded }\n")
 	g.printf("\tdec := xpb.NewDecoder(data)\n")
 	for _, field := range msg.Fields {
 		g.generateFieldDecode(field)
@@ -309,7 +314,7 @@ func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, in
 		g.printf("%sdata, err := dec.ReadMessageBytes()\n", indent)
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = &%s{}\n", indent, varName, t.Message)
-		g.printf("%sif err := %s.Unmarshal(data); err != nil { return err }\n", indent, varName)
+		g.printf("%sif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
 	}
 }
 

@@ -148,14 +148,36 @@ struct xpb_decoder {
     const uint8_t* data;
     size_t len;
     size_t pos;
+    bool error; /* sticky: once set, every read becomes a no-op */
 };
 
 struct xpb_decoder* xpb_decoder_create(const uint8_t* data, size_t len) {
     struct xpb_decoder* dec = (struct xpb_decoder*)malloc(sizeof(struct xpb_decoder));
+    if (dec == NULL) return NULL;
     dec->data = data;
     dec->len = len;
     dec->pos = 0;
+    dec->error = false;
     return dec;
+}
+
+bool xpb_decoder_ok(const struct xpb_decoder* dec) {
+    return dec != NULL && !dec->error;
+}
+
+/*
+ * xpb_decoder_can_read: returns true if n more bytes are available, sets
+ * the sticky error flag and returns false otherwise. Every read function
+ * funnels through this so a single malformed length can't run off the end
+ * of the buffer.
+ */
+static bool xpb_decoder_can_read(struct xpb_decoder* dec, size_t n) {
+    if (dec->error) return false;
+    if (n > dec->len || dec->pos > dec->len - n) {
+        dec->error = true;
+        return false;
+    }
+    return true;
 }
 
 void xpb_decoder_destroy(struct xpb_decoder* dec) {
@@ -170,6 +192,11 @@ size_t xpb_decoder_remaining(struct xpb_decoder* dec) {
     return dec->len - dec->pos;
 }
 
+/*
+ * xpb_decoder_read_le32: caller must hold the bounds check before this is
+ * invoked. We keep this pattern because it's called from int32 / uint32 /
+ * float32 / compact-length paths — each does its own xpb_decoder_can_read.
+ */
 static uint32_t xpb_decoder_read_le32(struct xpb_decoder* dec) {
     uint32_t v;
 #if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
@@ -206,22 +233,27 @@ static uint64_t xpb_decoder_read_le64(struct xpb_decoder* dec) {
 }
 
 bool xpb_decoder_read_bool(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 1)) return false;
     return dec->data[dec->pos++] != 0;
 }
 
 int32_t xpb_decoder_read_int32(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 4)) return 0;
     return (int32_t)xpb_decoder_read_le32(dec);
 }
 
 int64_t xpb_decoder_read_int64(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 8)) return 0;
     return (int64_t)xpb_decoder_read_le64(dec);
 }
 
 uint32_t xpb_decoder_read_uint32(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 4)) return 0;
     return xpb_decoder_read_le32(dec);
 }
 
 uint64_t xpb_decoder_read_uint64(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 8)) return 0;
     return xpb_decoder_read_le64(dec);
 }
 
@@ -240,16 +272,23 @@ double xpb_decoder_read_float64(struct xpb_decoder* dec) {
 }
 
 static size_t xpb_decoder_read_compact_length(struct xpb_decoder* dec) {
+    if (!xpb_decoder_can_read(dec, 1)) return 0;
     uint8_t first = dec->data[dec->pos++];
     if (first != XPB_COMPACT_LENGTH_MARKER) {
         return first;
     }
+    if (!xpb_decoder_can_read(dec, 4)) return 0;
     return xpb_decoder_read_le32(dec);
 }
 
 char* xpb_decoder_read_string(struct xpb_decoder* dec) {
     size_t len = xpb_decoder_read_compact_length(dec);
+    if (!xpb_decoder_can_read(dec, len)) return NULL;
     char* v = (char*)malloc(len + 1);
+    if (v == NULL) {
+        dec->error = true;
+        return NULL;
+    }
     memcpy(v, &dec->data[dec->pos], len);
     v[len] = '\0';
     dec->pos += len;
@@ -258,7 +297,21 @@ char* xpb_decoder_read_string(struct xpb_decoder* dec) {
 
 uint8_t* xpb_decoder_read_bytes(struct xpb_decoder* dec, size_t* out_len) {
     size_t len = xpb_decoder_read_compact_length(dec);
+    if (!xpb_decoder_can_read(dec, len)) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    /* malloc(0) is implementation-defined; return NULL with len=0. */
+    if (len == 0) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
     uint8_t* v = (uint8_t*)malloc(len);
+    if (v == NULL) {
+        dec->error = true;
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
     memcpy(v, &dec->data[dec->pos], len);
     dec->pos += len;
     if (out_len) *out_len = len;
@@ -270,6 +323,7 @@ uint8_t* xpb_decoder_read_message_bytes(struct xpb_decoder* dec, size_t* out_len
 }
 
 void xpb_decoder_skip(struct xpb_decoder* dec, size_t n) {
+    if (!xpb_decoder_can_read(dec, n)) return;
     dec->pos += n;
 }
 
@@ -340,90 +394,161 @@ void xpb_encoder_write_array_string(struct xpb_encoder* enc, const char** arr, s
     }
 }
 
+/*
+ * xpb_decoder_validate_array_count: read a 4-byte count and validate it
+ * against the per-element minimum on-wire size (each element occupies at
+ * least element_min_bytes). Rejects negative counts and counts that
+ * cannot possibly fit in the remaining buffer. Returns true on success
+ * with *out_count set; false on failure (sticky decoder error set, *out_count = 0).
+ */
+static bool xpb_decoder_validate_array_count(
+    struct xpb_decoder* dec, size_t element_min_bytes, size_t* out_count
+) {
+    int32_t count = xpb_decoder_read_int32(dec);
+    if (dec->error || count < 0) {
+        dec->error = true;
+        if (out_count) *out_count = 0;
+        return false;
+    }
+    if (element_min_bytes > 0) {
+        size_t remaining = dec->len - dec->pos;
+        size_t max = remaining / element_min_bytes;
+        if ((size_t)count > max) {
+            dec->error = true;
+            if (out_count) *out_count = 0;
+            return false;
+        }
+    }
+    if (out_count) *out_count = (size_t)count;
+    return true;
+}
+
 /* Array decoding implementations */
 int32_t* xpb_decoder_read_array_int32(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(int32_t), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     int32_t* arr = (int32_t*)malloc(count * sizeof(int32_t));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_int32(dec);
     }
     return arr;
 }
 
 int64_t* xpb_decoder_read_array_int64(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(int64_t), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     int64_t* arr = (int64_t*)malloc(count * sizeof(int64_t));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_int64(dec);
     }
     return arr;
 }
 
 uint32_t* xpb_decoder_read_array_uint32(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(uint32_t), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     uint32_t* arr = (uint32_t*)malloc(count * sizeof(uint32_t));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_uint32(dec);
     }
     return arr;
 }
 
 uint64_t* xpb_decoder_read_array_uint64(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(uint64_t), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     uint64_t* arr = (uint64_t*)malloc(count * sizeof(uint64_t));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_uint64(dec);
     }
     return arr;
 }
 
 float* xpb_decoder_read_array_float32(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(float), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     float* arr = (float*)malloc(count * sizeof(float));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_float32(dec);
     }
     return arr;
 }
 
 double* xpb_decoder_read_array_float64(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(double), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     double* arr = (double*)malloc(count * sizeof(double));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_float64(dec);
     }
     return arr;
 }
 
 bool* xpb_decoder_read_array_bool(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, sizeof(bool), &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     bool* arr = (bool*)malloc(count * sizeof(bool));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_bool(dec);
     }
     return arr;
 }
 
 char** xpb_decoder_read_array_string(struct xpb_decoder* dec, size_t* out_count) {
-    int32_t count = xpb_decoder_read_int32(dec);
-    if (out_count) *out_count = (size_t)count;
+    /* Strings are variable-length; minimum on-wire size per element is 1
+     * byte (the compact-length prefix for an empty string). */
+    size_t count = 0;
+    if (!xpb_decoder_validate_array_count(dec, 1, &count)) {
+        if (out_count) *out_count = 0;
+        return NULL;
+    }
+    if (out_count) *out_count = count;
     if (count == 0) return NULL;
     char** arr = (char**)malloc(count * sizeof(char*));
-    for (int32_t i = 0; i < count; i++) {
+    if (arr == NULL) { dec->error = true; if (out_count) *out_count = 0; return NULL; }
+    for (size_t i = 0; i < count; i++) {
         arr[i] = xpb_decoder_read_string(dec);
     }
     return arr;

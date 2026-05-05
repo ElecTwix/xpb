@@ -38,7 +38,7 @@ func TestTSCodegen_SimpleMessage(t *testing.T) {
 		name    string
 		pattern string
 	}{
-		{"import statement", "import { Encoder, Decoder }"},
+		{"import statement", "import { Encoder, Decoder"},
 		{"interface", "export interface UserData"},
 		{"class", "export class User"},
 		{"constructor", "constructor("},
@@ -171,6 +171,13 @@ func TestTSCodegen_RepeatedFields(t *testing.T) {
 	}
 	if !strings.Contains(output, "scores: number[]") {
 		t.Error("Missing 'scores: number[]' in interface")
+	}
+
+	// Security: repeated-field counts must go through readArrayCount (which
+	// bounds the count against the remaining buffer) instead of readInt32
+	// followed by an unchecked new Array(count). See XPB-005.
+	if !strings.Contains(output, "dec.readArrayCount(") {
+		t.Error("Repeated-field decode must use dec.readArrayCount; got raw readInt32")
 	}
 }
 

@@ -16,9 +16,15 @@ import (
 
 // Common errors.
 var (
-	ErrBufferTooSmall = errors.New("xpb: buffer too small")
-	ErrInvalidData    = errors.New("xpb: invalid data")
+	ErrBufferTooSmall    = errors.New("xpb: buffer too small")
+	ErrInvalidData       = errors.New("xpb: invalid data")
+	ErrMaxDepthExceeded  = errors.New("xpb: max decode depth exceeded")
 )
+
+// MaxDecodeDepth caps the recursion depth for nested message decoding,
+// preventing stack exhaustion from adversarial deeply-nested payloads.
+// Generated unmarshalAt(depth int) helpers compare against this constant.
+const MaxDecodeDepth = 64
 
 var encoderPool = sync.Pool{
 	New: func() interface{} {

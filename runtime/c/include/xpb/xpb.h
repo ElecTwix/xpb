@@ -50,6 +50,16 @@ void xpb_decoder_destroy(struct xpb_decoder* dec);
 bool xpb_decoder_eof(struct xpb_decoder* dec);
 size_t xpb_decoder_remaining(struct xpb_decoder* dec);
 
+/*
+ * Returns true if no error has been encountered while decoding. Once any
+ * read overflows the buffer, encounters a malformed length, or fails an
+ * allocation, the decoder enters a sticky error state and every
+ * subsequent read returns a zero/NULL value with no side effects. Callers
+ * MUST check xpb_decoder_ok() after a sequence of reads before trusting
+ * the values, or check it after each read for fail-fast semantics.
+ */
+bool xpb_decoder_ok(const struct xpb_decoder* dec);
+
 bool xpb_decoder_read_bool(struct xpb_decoder* dec);
 int32_t xpb_decoder_read_int32(struct xpb_decoder* dec);
 int64_t xpb_decoder_read_int64(struct xpb_decoder* dec);

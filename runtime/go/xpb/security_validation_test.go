@@ -11,6 +11,7 @@ package xpb
 
 import (
 	"encoding/binary"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,79 @@ func TestSecurity_XPB002_DisabledUpperBound(t *testing.T) {
 	}
 	if Got != Bogus {
 		t.Fatalf("ReadArrayCount returned %d, want %d", Got, Bogus)
+	}
+}
+
+// SecurityFinding: XPB-003
+// Severity: Medium
+// Description: Generated Unmarshal previously called itself directly for
+//   nested messages with no depth limit. A self-referential message type
+//   (`message Node { 1: ?Node child }`) accepts a 16 MB payload of nested
+//   1-byte length prefixes — that's ~16 M Unmarshal frames on the stack.
+//   Go grows goroutine stacks up to 1 GB before crashing with "stack
+//   overflow" (process-wide signal — uteka's recover() can't catch it).
+//
+//   Fix: the codegen now wraps the public Unmarshal as a thin shim that
+//   delegates to unmarshalAt(data, 0). unmarshalAt checks
+//   `depth > MaxDecodeDepth` on entry and returns ErrMaxDepthExceeded.
+//   Each nested decode passes depth+1.
+//
+//   This test simulates the generated pattern (the lib doesn't ship a
+//   recursive type itself) and asserts an attacker payload that nests
+//   deeper than MaxDecodeDepth is rejected before exhausting the stack.
+type recNode struct {
+	Child *recNode
+}
+
+func (m *recNode) Unmarshal(data []byte) error { return m.unmarshalAt(data, 0) }
+func (m *recNode) unmarshalAt(data []byte, depth int) error {
+	if depth > MaxDecodeDepth {
+		return ErrMaxDepthExceeded
+	}
+	dec := NewDecoder(data)
+	if dec.EOF() {
+		return nil
+	}
+	childData, err := dec.ReadMessageBytes()
+	if err != nil {
+		return err
+	}
+	if len(childData) == 0 {
+		return nil
+	}
+	m.Child = &recNode{}
+	return m.Child.unmarshalAt(childData, depth+1)
+}
+
+func encodeRecNode(depth int) []byte {
+	enc := NewEncoder(depth + 4)
+	// Innermost is empty; wrap depth times.
+	inner := []byte{}
+	for i := 0; i < depth; i++ {
+		enc.Reset()
+		enc.WriteMessage(inner)
+		inner = append([]byte(nil), enc.Bytes()...)
+	}
+	return inner
+}
+
+func TestSecurity_XPB003_NestedMessageDepthCapped(t *testing.T) {
+	Payload := encodeRecNode(MaxDecodeDepth + 5)
+	var Root recNode
+	Err := Root.Unmarshal(Payload)
+	if Err == nil {
+		t.Fatal("FIX REGRESSED: payload nested past MaxDecodeDepth was accepted")
+	}
+	if !errors.Is(Err, ErrMaxDepthExceeded) {
+		t.Fatalf("unexpected error: %v (want ErrMaxDepthExceeded)", Err)
+	}
+	t.Logf("FIX VERIFIED XPB-003: depth cap %d enforced; over-deep payload rejected", MaxDecodeDepth)
+}
+
+func TestSecurity_XPB003_LegitimateNestingAccepted(t *testing.T) {
+	Payload := encodeRecNode(MaxDecodeDepth)
+	var Root recNode
+	if Err := Root.Unmarshal(Payload); Err != nil {
+		t.Fatalf("legitimate payload at exactly MaxDecodeDepth was rejected: %v", Err)
 	}
 }
