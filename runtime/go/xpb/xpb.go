@@ -5,6 +5,7 @@ package xpb
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -330,4 +331,27 @@ func (d *Decoder) Skip(n int) error {
 	}
 	d.pos += n
 	return nil
+}
+
+// ReadArrayCount reads a 4-byte signed array length used by repeated and map
+// fields, validating it before the caller allocates a backing slice. It rejects
+// negative counts and counts that cannot possibly fit in the remaining buffer
+// (each element must occupy at least elementMinBytes on the wire). Pass 1 when
+// elements are variable-length (string, bytes, message). Pass 0 to skip the
+// upper-bound check (not recommended for untrusted input).
+func (d *Decoder) ReadArrayCount(elementMinBytes int) (int32, error) {
+	n, err := d.ReadInt32()
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("xpb: negative array count: %d", n)
+	}
+	if elementMinBytes > 0 {
+		max := d.Remaining() / elementMinBytes
+		if int(n) > max {
+			return 0, fmt.Errorf("xpb: array count %d exceeds buffer-bounded max %d", n, max)
+		}
+	}
+	return n, nil
 }
