@@ -92,43 +92,71 @@ func writeMarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName str
 }
 
 func writeUnmarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName string, file *xpbast.File) {
-	sb.WriteString(fmt.Sprintf("%s %s_unmarshal(const uint8_t* data, size_t len) {\n", typeName, typeName))
-	sb.WriteString(fmt.Sprintf("    %s m = {0};\n", typeName))
+	// Returns true on a clean decode, false if the underlying decoder set its
+	// sticky error flag (truncated input, bounds violation, allocation
+	// failure, etc.) or if any nested unmarshal failed. On failure, *out
+	// holds whatever fields were successfully read so the caller can free
+	// any owned strings/bytes/messages before discarding.
+	sb.WriteString(fmt.Sprintf("bool %s_unmarshal(%s* out, const uint8_t* data, size_t len) {\n", typeName, typeName))
+	sb.WriteString("    if (out == NULL) return false;\n")
+	sb.WriteString(fmt.Sprintf("    %s zero = {0};\n", typeName))
+	sb.WriteString("    *out = zero;\n")
 	sb.WriteString("    struct xpb_decoder* dec = xpb_decoder_create(data, len);\n")
+	sb.WriteString("    if (dec == NULL) return false;\n")
+
+	hasNested := false
+	for _, field := range msg.Fields {
+		if field.Type.Kind == xpbast.TypeMessage {
+			hasNested = true
+			break
+		}
+	}
+	if hasNested {
+		sb.WriteString("    bool nested_ok = true;\n")
+	}
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
 		switch field.Type.Kind {
 		case xpbast.TypeBool:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_bool(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_bool(dec);\n", fieldName))
 		case xpbast.TypeInt32:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_int32(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_int32(dec);\n", fieldName))
 		case xpbast.TypeInt64:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_int64(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_int64(dec);\n", fieldName))
 		case xpbast.TypeUint32:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_uint32(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_uint32(dec);\n", fieldName))
 		case xpbast.TypeUint64:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_uint64(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_uint64(dec);\n", fieldName))
 		case xpbast.TypeFloat32:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_float32(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_float32(dec);\n", fieldName))
 		case xpbast.TypeFloat64:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_float64(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_float64(dec);\n", fieldName))
 		case xpbast.TypeString:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_string(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_string(dec);\n", fieldName))
 		case xpbast.TypeBytes:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_bytes(dec, &m.%s_len);\n", fieldName, fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_bytes(dec, &out->%s_len);\n", fieldName, fieldName))
 		case xpbast.TypeMessage:
-			sb.WriteString(fmt.Sprintf("    size_t %s_len;\n", fieldName))
-			sb.WriteString(fmt.Sprintf("    uint8_t* %s_data = xpb_decoder_read_message_bytes(dec, &%s_len);\n", fieldName, fieldName))
-			sb.WriteString(fmt.Sprintf("    m.%s = %s_unmarshal(%s_data, %s_len);\n", fieldName, capitalize(field.Type.Message), fieldName, fieldName))
-			sb.WriteString(fmt.Sprintf("    free(%s_data);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    {\n"))
+			sb.WriteString(fmt.Sprintf("        size_t %s_len = 0;\n", fieldName))
+			sb.WriteString(fmt.Sprintf("        uint8_t* %s_data = xpb_decoder_read_message_bytes(dec, &%s_len);\n", fieldName, fieldName))
+			sb.WriteString(fmt.Sprintf("        if (xpb_decoder_ok(dec)) {\n"))
+			sb.WriteString(fmt.Sprintf("            if (!%s_unmarshal(&out->%s, %s_data, %s_len)) nested_ok = false;\n", capitalize(field.Type.Message), fieldName, fieldName, fieldName))
+			sb.WriteString(fmt.Sprintf("        }\n"))
+			sb.WriteString(fmt.Sprintf("        free(%s_data);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    }\n"))
 		case xpbast.TypeEnum:
-			sb.WriteString(fmt.Sprintf("    m.%s = xpb_decoder_read_int32(dec);\n", fieldName))
+			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_int32(dec);\n", fieldName))
 		}
 	}
 
+	sb.WriteString("    bool ok = xpb_decoder_ok(dec)")
+	if hasNested {
+		sb.WriteString(" && nested_ok")
+	}
+	sb.WriteString(";\n")
 	sb.WriteString("    xpb_decoder_destroy(dec);\n")
-	sb.WriteString("    return m;\n")
+	sb.WriteString("    return ok;\n")
 	sb.WriteString("}\n\n")
 }
 

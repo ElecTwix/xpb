@@ -226,4 +226,23 @@ export class Decoder {
   skip(n: number): void {
     this.pos += n;
   }
+
+  /**
+   * Read a 4-byte signed array length and bound it against the remaining
+   * buffer (each element occupies at least elementMinBytes on the wire).
+   * Mirrors index.ts so callers in worker-pool.ts can use either variant.
+   */
+  readArrayCount(elementMinBytes: number): number {
+    const n = this.readInt32();
+    if (n < 0) {
+      throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (elementMinBytes > 0) {
+      const max = Math.floor((this.data.length - this.pos) / elementMinBytes);
+      if (n > max) {
+        throw new Error(`xpb: array count ${n} exceeds buffer-bounded max ${max}`);
+      }
+    }
+    return n;
+  }
 }

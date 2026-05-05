@@ -106,7 +106,7 @@ export class XPBWorkerPool {
   async decodeInt32Array(buffer: ArrayBuffer): Promise<Int32Array> {
     if (buffer.byteLength < THRESHOLD_INTS) {
       const decoder = new Decoder(new Uint8Array(buffer));
-      const count = decoder.readInt32();
+      const count = decoder.readArrayCount(4);
       const result = new Int32Array(count);
       for (let i = 0; i < count; i++) {
         result[i] = decoder.readInt32();
@@ -131,7 +131,7 @@ export class XPBWorkerPool {
   async decodeStringArray(buffer: ArrayBuffer): Promise<string[]> {
     if (buffer.byteLength < THRESHOLD_STRINGS) {
       const decoder = new Decoder(new Uint8Array(buffer));
-      const count = decoder.readInt32();
+      const count = decoder.readArrayCount(1);
       const result = new Array(count);
       for (let i = 0; i < count; i++) {
         result[i] = decoder.readString();

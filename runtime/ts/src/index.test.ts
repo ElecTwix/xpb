@@ -463,3 +463,44 @@ describe('Security: readArrayCount bounds attacker-supplied counts', () => {
     expect(() => dec.readArrayInt32()).toThrow(/exceeds buffer-bounded max/);
   });
 });
+
+// Review finding F1: WorkerPool's main-thread fast paths used
+// readInt32() + new Array(count) directly, bypassing the readArrayCount
+// gate added in PR #1. This re-introduced the same OOM/RangeError class
+// that PR #1 closed in the public Decoder.
+//
+// The threshold is 200 KB for ints / 10 KB for strings; below that the
+// pool decodes synchronously on the main thread. We exercise that path
+// here. The worker-thread path uses a private FastDecoder in worker.ts
+// which gained the same readArrayCount gate; that's covered by direct
+// review of worker.ts and would require a real Worker runtime to test.
+describe('Security: WorkerPool main-thread fast paths bound array counts', () => {
+  test('decodeInt32Array rejects an oversized count below the worker threshold', async () => {
+    // Construct a small payload (< 200 KB) whose count claims billions of
+    // int32 elements.
+    const enc = new Encoder(8);
+    enc.writeInt32(1 << 30);
+    const buffer = enc.finish().buffer.slice(
+      enc.finish().byteOffset,
+      enc.finish().byteOffset + enc.finish().byteLength,
+    ) as ArrayBuffer;
+
+    // Lazy-import to avoid circular load on test bootstrap.
+    const { XPBWorkerPool } = await import('./worker-pool');
+    const pool = new XPBWorkerPool(0);
+    await expect(pool.decodeInt32Array(buffer)).rejects.toThrow(/exceeds buffer-bounded max/);
+  });
+
+  test('decodeStringArray rejects an oversized count below the worker threshold', async () => {
+    const enc = new Encoder(8);
+    enc.writeInt32(1 << 30);
+    const buffer = enc.finish().buffer.slice(
+      enc.finish().byteOffset,
+      enc.finish().byteOffset + enc.finish().byteLength,
+    ) as ArrayBuffer;
+
+    const { XPBWorkerPool } = await import('./worker-pool');
+    const pool = new XPBWorkerPool(0);
+    await expect(pool.decodeStringArray(buffer)).rejects.toThrow(/exceeds buffer-bounded max/);
+  });
+});
