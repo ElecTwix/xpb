@@ -403,14 +403,63 @@ describe('V2 Performance', () => {
     const enc = new Encoder(64);
     enc.writeString('Alice');
     enc.writeMessage(innerEnc.finish());
-    
+
     // Decode
     const dec = new Decoder(enc.finish());
     expect(dec.readString()).toBe('Alice');
-    
+
     const innerData = dec.readMessageBytes();
     const innerDec = new Decoder(innerData);
     expect(innerDec.readString()).toBe('New York');
     expect(innerDec.readString()).toBe('USA');
+  });
+});
+
+// SecurityFinding: XPB-005
+// Severity: High
+// Description: TypeScript decoder readArrayInt32 / readArrayBool / etc and
+//   the pattern emitted by the TS codegen previously did:
+//     const count = this.readInt32();
+//     const arr = new Array(count);
+//   Two attacks: (a) negative count throws RangeError mid-decode after
+//   side effects, (b) count up to 2^31-1 pre-allocates a multi-GB array
+//   from a 4-byte payload. readArrayCount(elementMinBytes) now validates
+//   both before any allocation.
+describe('Security: readArrayCount bounds attacker-supplied counts', () => {
+  test('rejects negative count', () => {
+    const enc = new Encoder(8);
+    enc.writeInt32(-1);
+    const dec = new Decoder(enc.finish());
+    expect(() => dec.readArrayCount(4)).toThrow(/negative array count/);
+  });
+
+  test('rejects count that cannot fit in remaining buffer', () => {
+    // 4-byte buffer carries a count of 1 << 30 — would allocate ~4 GB if honored
+    const enc = new Encoder(8);
+    enc.writeInt32(1 << 30);
+    const dec = new Decoder(enc.finish());
+    expect(() => dec.readArrayCount(4)).toThrow(/exceeds buffer-bounded max/);
+  });
+
+  test('accepts honest count', () => {
+    const enc = new Encoder(64);
+    enc.writeInt32(8);
+    for (let i = 0; i < 8; i++) enc.writeInt32(i);
+    const dec = new Decoder(enc.finish());
+    expect(dec.readArrayCount(4)).toBe(8);
+  });
+
+  test('elementMinBytes=0 disables the upper-bound check (escape hatch)', () => {
+    const enc = new Encoder(8);
+    enc.writeInt32(1 << 30);
+    const dec = new Decoder(enc.finish());
+    expect(dec.readArrayCount(0)).toBe(1 << 30);
+  });
+
+  test('readArrayInt32 propagates the bound', () => {
+    const enc = new Encoder(8);
+    enc.writeInt32(1 << 30); // 4 GB worth of int32 in an 8-byte buffer
+    const dec = new Decoder(enc.finish());
+    expect(() => dec.readArrayInt32()).toThrow(/exceeds buffer-bounded max/);
   });
 });

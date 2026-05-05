@@ -11,6 +11,20 @@
 export const CompactLengthThreshold = 254;
 export const CompactLengthMarker = 0xFF;
 
+/**
+ * MaxDecodeDepth caps the recursion depth for nested message decoding,
+ * preventing stack exhaustion from adversarial deeply-nested payloads.
+ * Generated decodeAt(depth) helpers compare against this constant.
+ */
+export const MaxDecodeDepth = 64;
+
+export class MaxDecodeDepthExceededError extends Error {
+  constructor() {
+    super('xpb: max decode depth exceeded');
+    this.name = 'MaxDecodeDepthExceededError';
+  }
+}
+
 // Wire types for future protocol extensions
 export enum WireType {
   Varint = 0,
@@ -518,9 +532,32 @@ export class Decoder {
     this.pos += n;
   }
 
+  /**
+   * Read a 4-byte signed array length used by repeated and map fields,
+   * validating it before the caller allocates a backing array. Rejects
+   * negative counts and counts that cannot possibly fit in the remaining
+   * buffer (each element occupies at least elementMinBytes on the wire).
+   * Pass 1 when elements are variable-length (string, bytes, message).
+   * Pass 0 to skip the upper-bound check (not recommended for untrusted
+   * input).
+   */
+  readArrayCount(elementMinBytes: number): number {
+    const n = this.readInt32();
+    if (n < 0) {
+      throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (elementMinBytes > 0) {
+      const max = Math.floor((this.data.length - this.pos) / elementMinBytes);
+      if (n > max) {
+        throw new Error(`xpb: array count ${n} exceeds buffer-bounded max ${max}`);
+      }
+    }
+    return n;
+  }
+
   /** Read array of int32 - format: count (int32) + elements */
   readArrayInt32(): number[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(4);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readInt32();
@@ -530,7 +567,7 @@ export class Decoder {
 
   /** Read array of int64 - format: count (int32) + elements */
   readArrayInt64(): bigint[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(8);
     const arr: bigint[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readInt64();
@@ -540,7 +577,7 @@ export class Decoder {
 
   /** Read array of uint32 - format: count (int32) + elements */
   readArrayUint32(): number[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(4);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readUint32();
@@ -550,7 +587,7 @@ export class Decoder {
 
   /** Read array of uint64 - format: count (int32) + elements */
   readArrayUint64(): bigint[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(8);
     const arr: bigint[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readUint64();
@@ -560,7 +597,7 @@ export class Decoder {
 
   /** Read array of float32 - format: count (int32) + elements */
   readArrayFloat32(): number[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(4);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readFloat32();
@@ -570,7 +607,7 @@ export class Decoder {
 
   /** Read array of float64 - format: count (int32) + elements */
   readArrayFloat64(): number[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(8);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readFloat64();
@@ -580,7 +617,7 @@ export class Decoder {
 
   /** Read array of bool - format: count (int32) + elements */
   readArrayBool(): boolean[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(1);
     const arr: boolean[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readBool();
@@ -590,7 +627,7 @@ export class Decoder {
 
   /** Read array of string - format: count (int32) + elements */
   readArrayString(): string[] {
-    const count = this.readInt32();
+    const count = this.readArrayCount(1);
     const arr: string[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readString();
