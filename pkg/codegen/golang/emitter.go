@@ -207,8 +207,9 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 
 	// Handle repeated fields - V2: read count then elements
 	if field.Repeated {
+		elemMin := minWireBytes(field.Type, isEnum)
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadInt32()\n")
+		g.printf("\t\tcount, err := dec.ReadArrayCount(%d)\n", elemMin)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s, count)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
@@ -226,8 +227,10 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 
 	// Handle map fields - V2: read count then key-value pairs
 	if field.Type.Kind == ast.TypeMap {
+		keyMin := minWireBytes(*field.Type.KeyType, false)
+		valMin := minWireBytes(*field.Type.ValType, g.isEnumType(*field.Type.ValType))
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadInt32()\n")
+		g.printf("\t\tcount, err := dec.ReadArrayCount(%d)\n", keyMin+valMin)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
@@ -394,4 +397,24 @@ func estimateSize(msg *ast.Message) int {
 		return 64
 	}
 	return size
+}
+
+// minWireBytes returns the smallest possible on-wire size for one element of
+// the given type. Used to bound the count of a repeated/map field against the
+// remaining buffer in ReadArrayCount.
+func minWireBytes(t ast.FieldType, isEnum bool) int {
+	if isEnum {
+		return 4
+	}
+	switch t.Kind {
+	case ast.TypeBool:
+		return 1
+	case ast.TypeInt32, ast.TypeUint32, ast.TypeFloat32:
+		return 4
+	case ast.TypeInt64, ast.TypeUint64, ast.TypeFloat64:
+		return 8
+	case ast.TypeString, ast.TypeBytes, ast.TypeMessage:
+		return 1
+	}
+	return 1
 }

@@ -208,6 +208,13 @@ message Container {
 	if !strings.Contains(normalized, "Scores []int32") {
 		t.Error("Missing Scores []int32 field")
 	}
+
+	// Security: repeated-field counts must go through ReadArrayCount
+	// (which bounds the count against the remaining buffer) instead of
+	// ReadInt32 followed by an unchecked make([]T, count). See XPB-001/002.
+	if !strings.Contains(output, "dec.ReadArrayCount(") {
+		t.Error("Repeated-field decode must use dec.ReadArrayCount; got raw ReadInt32")
+	}
 }
 
 func TestGoCodegen_NestedMessages(t *testing.T) {
