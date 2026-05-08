@@ -119,7 +119,13 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	}
 	g.printf("}\n\n")
 
-	// Unmarshal - V2: no tags, read fields in order
+	// Unmarshal - V2: no tags, read fields in order.
+	// The depth-cap helper unmarshalAt is unexported on purpose: xpbc emits
+	// one Go package per .xpb file and the schema grammar has no `import`
+	// directive (see pkg/parser/parser.go), so every nested call is intra-
+	// package. If cross-package message references are ever added, this
+	// helper must be promoted to UnmarshalAt or the depth must be threaded
+	// some other way.
 	g.printf("func (m *%s) Unmarshal(data []byte) error {\n", name)
 	g.printf("\treturn m.unmarshalAt(data, 0)\n")
 	g.printf("}\n\n")

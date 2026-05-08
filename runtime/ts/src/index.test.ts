@@ -480,10 +480,8 @@ describe('Security: WorkerPool main-thread fast paths bound array counts', () =>
     // int32 elements.
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30);
-    const buffer = enc.finish().buffer.slice(
-      enc.finish().byteOffset,
-      enc.finish().byteOffset + enc.finish().byteLength,
-    ) as ArrayBuffer;
+    const view = enc.finish();
+    const buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
 
     // Lazy-import to avoid circular load on test bootstrap.
     const { XPBWorkerPool } = await import('./worker-pool');
@@ -494,10 +492,8 @@ describe('Security: WorkerPool main-thread fast paths bound array counts', () =>
   test('decodeStringArray rejects an oversized count below the worker threshold', async () => {
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30);
-    const buffer = enc.finish().buffer.slice(
-      enc.finish().byteOffset,
-      enc.finish().byteOffset + enc.finish().byteLength,
-    ) as ArrayBuffer;
+    const view = enc.finish();
+    const buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
 
     const { XPBWorkerPool } = await import('./worker-pool');
     const pool = new XPBWorkerPool(0);

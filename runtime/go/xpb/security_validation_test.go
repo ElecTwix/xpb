@@ -30,19 +30,19 @@ import (
 // Expected: After fix — ReadArrayCount returns a non-nil error containing
 //   "negative array count" when the wire bytes encode -1.
 func TestSecurity_XPB001_NegativeArrayCountRejected(t *testing.T) {
-	var Negative int32 = -1
-	var Buf [4]byte
-	binary.LittleEndian.PutUint32(Buf[:], uint32(Negative))
+	var negative int32 = -1
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(negative))
 
-	Dec := NewDecoder(Buf[:])
-	N, Err := Dec.ReadArrayCount(4)
-	if Err == nil {
-		t.Fatalf("FIX REGRESSED: negative count accepted (got %d, expected error)", N)
+	dec := NewDecoder(buf[:])
+	n, err := dec.ReadArrayCount(4)
+	if err == nil {
+		t.Fatalf("FIX REGRESSED: negative count accepted (got %d, expected error)", n)
 	}
-	if !strings.Contains(Err.Error(), "negative array count") {
-		t.Fatalf("unexpected error shape: %v", Err)
+	if !strings.Contains(err.Error(), "negative array count") {
+		t.Fatalf("unexpected error shape: %v", err)
 	}
-	t.Logf("FIX VERIFIED XPB-001: negative array count rejected with %q", Err)
+	t.Logf("FIX VERIFIED XPB-001: negative array count rejected with %q", err)
 }
 
 // SecurityFinding: XPB-002
@@ -60,36 +60,36 @@ func TestSecurity_XPB001_NegativeArrayCountRejected(t *testing.T) {
 // Expected: After fix — a count of 2^31-1 with only a few trailing bytes
 //   in the buffer returns an "exceeds buffer-bounded max" error.
 func TestSecurity_XPB002_OversizedArrayCountRejected(t *testing.T) {
-	const Bogus int32 = 1 << 30 // a bit over 1 billion entries
+	const bogus int32 = 1 << 30 // a bit over 1 billion entries
 
-	var Buf [4]byte
-	binary.LittleEndian.PutUint32(Buf[:], uint32(Bogus))
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(bogus))
 
-	Dec := NewDecoder(Buf[:])
-	N, Err := Dec.ReadArrayCount(4) // claim each element is 4 bytes (int32)
-	if Err == nil {
-		t.Fatalf("FIX REGRESSED: count %d accepted in %d-byte buffer (would allocate ~4 GB)", N, len(Buf))
+	dec := NewDecoder(buf[:])
+	n, err := dec.ReadArrayCount(4) // claim each element is 4 bytes (int32)
+	if err == nil {
+		t.Fatalf("FIX REGRESSED: count %d accepted in %d-byte buffer (would allocate ~4 GB)", n, len(buf))
 	}
-	if !strings.Contains(Err.Error(), "exceeds buffer-bounded max") {
-		t.Fatalf("unexpected error shape: %v", Err)
+	if !strings.Contains(err.Error(), "exceeds buffer-bounded max") {
+		t.Fatalf("unexpected error shape: %v", err)
 	}
-	t.Logf("FIX VERIFIED XPB-002: oversized array count rejected with %q", Err)
+	t.Logf("FIX VERIFIED XPB-002: oversized array count rejected with %q", err)
 }
 
 // Regression: legitimate counts that fit in the buffer must still pass.
 // elementMinBytes=4 and a 16-element claim with 64+4 bytes available is honest.
 func TestSecurity_XPB002_LegitimateCountAccepted(t *testing.T) {
-	const N int32 = 16
-	Buf := make([]byte, 4+int(N)*4)
-	binary.LittleEndian.PutUint32(Buf[:4], uint32(N))
+	const want int32 = 16
+	buf := make([]byte, 4+int(want)*4)
+	binary.LittleEndian.PutUint32(buf[:4], uint32(want))
 
-	Dec := NewDecoder(Buf)
-	Got, Err := Dec.ReadArrayCount(4)
-	if Err != nil {
-		t.Fatalf("legitimate count rejected: %v", Err)
+	dec := NewDecoder(buf)
+	got, err := dec.ReadArrayCount(4)
+	if err != nil {
+		t.Fatalf("legitimate count rejected: %v", err)
 	}
-	if Got != N {
-		t.Fatalf("ReadArrayCount returned %d, want %d", Got, N)
+	if got != want {
+		t.Fatalf("ReadArrayCount returned %d, want %d", got, want)
 	}
 }
 
@@ -97,17 +97,17 @@ func TestSecurity_XPB002_LegitimateCountAccepted(t *testing.T) {
 // knows what it's doing (e.g., decoding a trusted payload). Negative
 // counts are still rejected.
 func TestSecurity_XPB002_DisabledUpperBound(t *testing.T) {
-	const Bogus int32 = 1 << 30
-	var Buf [4]byte
-	binary.LittleEndian.PutUint32(Buf[:], uint32(Bogus))
+	const bogus int32 = 1 << 30
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(bogus))
 
-	Dec := NewDecoder(Buf[:])
-	Got, Err := Dec.ReadArrayCount(0)
-	if Err != nil {
-		t.Fatalf("elementMinBytes=0 should skip upper-bound check, got error %v", Err)
+	dec := NewDecoder(buf[:])
+	got, err := dec.ReadArrayCount(0)
+	if err != nil {
+		t.Fatalf("elementMinBytes=0 should skip upper-bound check, got error %v", err)
 	}
-	if Got != Bogus {
-		t.Fatalf("ReadArrayCount returned %d, want %d", Got, Bogus)
+	if got != bogus {
+		t.Fatalf("ReadArrayCount returned %d, want %d", got, bogus)
 	}
 }
 
@@ -165,22 +165,22 @@ func encodeRecNode(depth int) []byte {
 }
 
 func TestSecurity_XPB003_NestedMessageDepthCapped(t *testing.T) {
-	Payload := encodeRecNode(MaxDecodeDepth + 5)
-	var Root recNode
-	Err := Root.Unmarshal(Payload)
-	if Err == nil {
+	payload := encodeRecNode(MaxDecodeDepth + 5)
+	var root recNode
+	err := root.Unmarshal(payload)
+	if err == nil {
 		t.Fatal("FIX REGRESSED: payload nested past MaxDecodeDepth was accepted")
 	}
-	if !errors.Is(Err, ErrMaxDepthExceeded) {
-		t.Fatalf("unexpected error: %v (want ErrMaxDepthExceeded)", Err)
+	if !errors.Is(err, ErrMaxDepthExceeded) {
+		t.Fatalf("unexpected error: %v (want ErrMaxDepthExceeded)", err)
 	}
 	t.Logf("FIX VERIFIED XPB-003: depth cap %d enforced; over-deep payload rejected", MaxDecodeDepth)
 }
 
 func TestSecurity_XPB003_LegitimateNestingAccepted(t *testing.T) {
-	Payload := encodeRecNode(MaxDecodeDepth)
-	var Root recNode
-	if Err := Root.Unmarshal(Payload); Err != nil {
-		t.Fatalf("legitimate payload at exactly MaxDecodeDepth was rejected: %v", Err)
+	payload := encodeRecNode(MaxDecodeDepth)
+	var root recNode
+	if err := root.Unmarshal(payload); err != nil {
+		t.Fatalf("legitimate payload at exactly MaxDecodeDepth was rejected: %v", err)
 	}
 }

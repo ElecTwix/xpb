@@ -94,9 +94,15 @@ func writeMarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName str
 func writeUnmarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName string, file *xpbast.File) {
 	// Returns true on a clean decode, false if the underlying decoder set its
 	// sticky error flag (truncated input, bounds violation, allocation
-	// failure, etc.) or if any nested unmarshal failed. On failure, *out
-	// holds whatever fields were successfully read so the caller can free
-	// any owned strings/bytes/messages before discarding.
+	// failure, etc.) or if any nested unmarshal failed.
+	//
+	// On failure, *out holds whatever fields were successfully read up to the
+	// point the decoder gave up. The caller MUST free any owned pointer
+	// fields (string, bytes, message) before discarding — and for nested
+	// `message` fields, that cleanup is recursive: a partially decoded
+	// `Sub sub` inside the parent may itself contain owned strings/bytes
+	// from before its own unmarshal returned false. Until xpbc emits a
+	// generated `T_free(T*)` helper, callers must walk the schema by hand.
 	sb.WriteString(fmt.Sprintf("bool %s_unmarshal(%s* out, const uint8_t* data, size_t len) {\n", typeName, typeName))
 	sb.WriteString("    if (out == NULL) return false;\n")
 	sb.WriteString(fmt.Sprintf("    %s zero = {0};\n", typeName))
