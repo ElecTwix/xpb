@@ -245,7 +245,11 @@ export class Decoder {
       throw new Error(`xpb: array count ${n} exceeds caller-supplied max ${maxElements}`);
     }
     if (elementMinBytes > 0) {
-      const max = Math.floor((this.data.length - this.pos) / elementMinBytes);
+      // Node decoder field is `this.buf` (Buffer), not the `this.data`
+      // name index.ts uses — the body was originally copied without
+      // renaming and threw `ReferenceError: this.data is not defined`
+      // at runtime as soon as any caller hit the bound check.
+      const max = Math.floor((this.buf.length - this.pos) / elementMinBytes);
       if (n > max) {
         throw new Error(`xpb: array count ${n} exceeds buffer-bounded max ${max}`);
       }

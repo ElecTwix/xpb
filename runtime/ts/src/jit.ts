@@ -262,7 +262,13 @@ export function compileDecoder<T>(
       // SIGNED so `< 0` catches the wire's negative range, then the
       // caller-max check fires before any allocation, then the
       // remaining-buffer check guarantees the per-element reads can
-      // actually be satisfied.
+      // actually be satisfied — bounded by the field's minimum on-wire
+      // size, not 1 byte (an int32 array of N elements needs 4N bytes;
+      // a flat `count > (end - pos)` check would let through a payload
+      // with too few bytes for the actual element type and synthesize
+      // garbage values past the buffer).
+      const elemMin = jitMinWireBytes(field.type);
+      const elemMinLit = JSON.stringify(elemMin);
       lines.push(`
         {
           var count = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
@@ -273,8 +279,9 @@ export function compileDecoder<T>(
           if (count > ${maxLit}) {
             throw new Error('xpb: array count ' + count + ' exceeds caller-supplied max ' + ${maxLit});
           }
-          if (count > (end - pos)) {
-            throw new Error('xpb: array count ' + count + ' exceeds buffer-bounded max ' + (end - pos));
+          var __maxFromBuf = Math.floor((end - pos) / ${elemMinLit});
+          if (count > __maxFromBuf) {
+            throw new Error('xpb: array count ' + count + ' exceeds buffer-bounded max ' + __maxFromBuf);
           }
           obj.${field.name} = new Array(count);
           for (var i = 0; i < count; i++) {
@@ -295,6 +302,35 @@ export function compileDecoder<T>(
 
   return new Function('textDecoder', 'isNode', 'buf', 'end', lines.join('\n'))
     .bind(null, textDecoder, isNode) as any;
+}
+
+/**
+ * Smallest possible on-wire size for one element of `t`. The JIT
+ * uses this to bound a repeated-field count: a count of N elements
+ * cannot be honest if the remaining buffer is smaller than N * minBytes.
+ * Variable-length elements (string, bytes, message) occupy at least
+ * 1 byte on the wire — the compact-length prefix even for an empty
+ * value. Mirrors tsMinWireBytes in pkg/codegen/typescript/emitter.go.
+ */
+function jitMinWireBytes(t: FieldType): number {
+  switch (t) {
+    case FieldType.Bool:
+      return 1;
+    case FieldType.Int32:
+    case FieldType.Uint32:
+    case FieldType.Float32:
+      return 4;
+    case FieldType.Int64:
+    case FieldType.Uint64:
+    case FieldType.Float64:
+      return 8;
+    case FieldType.String:
+    case FieldType.Bytes:
+    case FieldType.Message:
+      return 1;
+    default:
+      return 1;
+  }
 }
 
 function generateFieldRead(field: FieldDef): string {

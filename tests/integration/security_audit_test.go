@@ -429,6 +429,70 @@ func TestSecurityAudit_XPB124_TSJITRequiresMaxElements(t *testing.T) {
 	t.Log("XPB-124 OK: JIT compileDecoder requires explicit maxElements and bounds-checks before allocation")
 }
 
+// SecurityFinding: XPB-125 (Codex re-review)
+// Severity: P1
+// Original symptom: node.ts:248 referenced `this.data.length` inside
+// the new readArrayCount bound check, but the Node decoder's field is
+// `this.buf` (Buffer-backed, not the Uint8Array name index.ts uses).
+// The body was copied wholesale from index.ts in the XPB-122 fix
+// without renaming. Any @xpb/runtime/node caller using the new array
+// guard hit `ReferenceError: this.data is not defined` at runtime and
+// the file would fail TS strict-mode compilation once node_modules
+// were installed.
+//
+// Fix: rename to `this.buf` in node.ts.
+func TestSecurityAudit_XPB125_NodeDecoderUsesCorrectField(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "runtime/ts/src/node.ts"))
+	if err != nil {
+		t.Fatalf("read node.ts: %v", err)
+	}
+	body := string(src)
+	if strings.Contains(body, "this.data.length") {
+		t.Fatalf("REGRESSION: node.ts references this.data; field is named this.buf")
+	}
+	// And confirm the buffer-bound branch is still wired up.
+	if !strings.Contains(body, "this.buf.length - this.pos") {
+		t.Fatalf("REGRESSION: node.ts no longer computes the buffer-bound max")
+	}
+	t.Log("XPB-125 OK: node.ts uses this.buf for the bound check")
+}
+
+// SecurityFinding: XPB-126 (Codex re-review)
+// Severity: P2
+// Original symptom: jit.ts:276 bound the repeated-field count with
+// `count > (end - pos)` — implicitly assuming each element is 1 byte.
+// For int32 / float64 / etc. fields, a count claiming N elements only
+// needs N bytes remaining to pass, but the per-element loop reads N*4
+// or N*8 bytes and walks past the buffer, returning JS-undefined-laden
+// garbage values up the call chain. The runtime Decoder.readArrayCount
+// already used `Math.floor((remaining) / elementMinBytes)` for exactly
+// this reason; the JIT skipped it.
+//
+// Fix: jit.ts now divides by the field's minimum on-wire size via
+// jitMinWireBytes(field.type) before comparing — same shape as the
+// runtime gate.
+func TestSecurityAudit_XPB126_TSJITUsesElementMinBytes(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "runtime/ts/src/jit.ts"))
+	if err != nil {
+		t.Fatalf("read jit.ts: %v", err)
+	}
+	body := string(src)
+	// The fix introduces a per-field-type minimum + a divide before the
+	// comparison. The pre-fix shape was `count > (end - pos)`.
+	if strings.Contains(body, "if (count > (end - pos))") {
+		t.Fatalf("REGRESSION: JIT buffer-bound check still assumes 1 byte/element")
+	}
+	if !strings.Contains(body, "jitMinWireBytes(field.type)") {
+		t.Fatalf("REGRESSION: JIT no longer consults jitMinWireBytes")
+	}
+	if !strings.Contains(body, "Math.floor((end - pos) /") {
+		t.Fatalf("REGRESSION: JIT no longer divides remaining bytes by per-element size")
+	}
+	t.Log("XPB-126 OK: JIT bound check uses per-field minimum wire size")
+}
+
 // SecurityFinding: XPB-119 (post-review uniformity)
 // Severity: High
 // Description: After the audit, every runtime decoder's array-count gate
