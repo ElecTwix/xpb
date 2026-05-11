@@ -35,7 +35,7 @@ func TestSecurity_XPB001_NegativeArrayCountRejected(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[:], uint32(negative))
 
 	dec := NewDecoder(buf[:])
-	n, err := dec.ReadArrayCount(4)
+	n, err := dec.ReadArrayCount(4, 1024)
 	if err == nil {
 		t.Fatalf("FIX REGRESSED: negative count accepted (got %d, expected error)", n)
 	}
@@ -66,7 +66,9 @@ func TestSecurity_XPB002_OversizedArrayCountRejected(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[:], uint32(bogus))
 
 	dec := NewDecoder(buf[:])
-	n, err := dec.ReadArrayCount(4) // claim each element is 4 bytes (int32)
+	// Pass a high caller-supplied max so the failure is the buffer-bound,
+	// not the new explicit-max gate — keeps the test's original intent.
+	n, err := dec.ReadArrayCount(4, 1<<30)
 	if err == nil {
 		t.Fatalf("FIX REGRESSED: count %d accepted in %d-byte buffer (would allocate ~4 GB)", n, len(buf))
 	}
@@ -84,7 +86,7 @@ func TestSecurity_XPB002_LegitimateCountAccepted(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[:4], uint32(want))
 
 	dec := NewDecoder(buf)
-	got, err := dec.ReadArrayCount(4)
+	got, err := dec.ReadArrayCount(4, 64)
 	if err != nil {
 		t.Fatalf("legitimate count rejected: %v", err)
 	}
@@ -102,12 +104,55 @@ func TestSecurity_XPB002_DisabledUpperBound(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[:], uint32(bogus))
 
 	dec := NewDecoder(buf[:])
-	got, err := dec.ReadArrayCount(0)
+	// elementMinBytes=0 disables the buffer bound — but the caller's
+	// explicit max still applies (we pass a high value to keep the
+	// historical behavior of this test).
+	got, err := dec.ReadArrayCount(0, 1<<30)
 	if err != nil {
 		t.Fatalf("elementMinBytes=0 should skip upper-bound check, got error %v", err)
 	}
 	if got != bogus {
 		t.Fatalf("ReadArrayCount returned %d, want %d", got, bogus)
+	}
+}
+
+// SecurityFinding: XPB-002b (post-review)
+// Severity: High
+// Description: After the audit, ReadArrayCount gained an explicit
+//   `maxElements` parameter so every call site declares its allocation
+//   policy. The runtime checks the caller's max BEFORE the buffer bound
+//   so a tight per-call-site cap can refuse even buffer-fitting payloads.
+func TestSecurity_XPB002b_CallerMaxEnforced(t *testing.T) {
+	const want int32 = 100
+	buf := make([]byte, 4+int(want)*4)
+	binary.LittleEndian.PutUint32(buf[:4], uint32(want))
+
+	dec := NewDecoder(buf)
+	// Caller-supplied max is 50 — wire count of 100 must be rejected
+	// before any allocation, even though the buffer could hold it.
+	_, err := dec.ReadArrayCount(4, 50)
+	if err == nil {
+		t.Fatal("FIX REGRESSED: caller-supplied max ignored")
+	}
+	if !strings.Contains(err.Error(), "exceeds caller-supplied max") {
+		t.Fatalf("unexpected error shape: %v", err)
+	}
+	t.Logf("FIX VERIFIED XPB-002b: caller-supplied max rejected count > max: %q", err)
+}
+
+// Negative maxElements is itself a caller bug — surfaced as a clear error
+// rather than silently treated as zero / unbounded.
+func TestSecurity_XPB002b_NegativeMaxRejected(t *testing.T) {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(int32(0)))
+
+	dec := NewDecoder(buf[:])
+	_, err := dec.ReadArrayCount(4, -1)
+	if err == nil {
+		t.Fatal("negative maxElements should be rejected")
+	}
+	if !strings.Contains(err.Error(), "maxElements must be >= 0") {
+		t.Fatalf("unexpected error shape: %v", err)
 	}
 }
 

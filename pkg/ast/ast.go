@@ -131,3 +131,33 @@ func (t FieldType) IsScalar() bool {
 		return false
 	}
 }
+
+// EnumSet records which type names in a parsed file are enums. The parser
+// emits TypeMessage{Message: name} for *any* unresolved type reference —
+// enums included — so every codegen needs this lookup to distinguish a
+// real nested message from an enum reference. Centralizing the helper
+// here keeps the codegens from re-deriving it (and getting it wrong, as
+// the C/Java/Lua codegens originally did).
+type EnumSet map[string]bool
+
+// NewEnumSet builds an EnumSet from every enum declared in `file`.
+func NewEnumSet(file *File) EnumSet {
+	s := make(EnumSet, len(file.Enums))
+	for _, e := range file.Enums {
+		s[e.Name] = true
+	}
+	return s
+}
+
+// IsEnum returns true when `t` names an enum — either explicitly
+// (TypeEnum) or by referencing an enum from this file's enum set
+// (TypeMessage whose name happens to be a declared enum).
+func (s EnumSet) IsEnum(t FieldType) bool {
+	if t.Kind == TypeEnum {
+		return true
+	}
+	if t.Kind == TypeMessage && s[t.Message] {
+		return true
+	}
+	return false
+}

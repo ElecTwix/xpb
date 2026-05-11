@@ -88,6 +88,46 @@ impl<'a> Decoder<'a> {
         self.read_bytes()
     }
 
+    /// Validate and return an array length read from the wire. The caller
+    /// MUST supply `max_elements` — the runtime does not pick a default,
+    /// so application-level allocation policy is visible at every call
+    /// site. A count that is negative, exceeds `max_elements`, or cannot
+    /// fit in the remaining buffer (each element occupies at least
+    /// `element_min_bytes` on the wire) is rejected before any
+    /// allocation. Pass `element_min_bytes = 1` for variable-length
+    /// elements (string, bytes, message). Pass `element_min_bytes = 0` to
+    /// skip the buffer bound (only safe for fully trusted input).
+    pub fn read_array_count(
+        &mut self,
+        element_min_bytes: usize,
+        max_elements: usize,
+    ) -> Result<usize> {
+        let n = self.read_int32()?;
+        if n < 0 {
+            return Err(XpbError::InvalidData(format!(
+                "negative array count: {}",
+                n
+            )));
+        }
+        let n_usize = n as usize;
+        if n_usize > max_elements {
+            return Err(XpbError::InvalidData(format!(
+                "array count {} exceeds caller-supplied max {}",
+                n, max_elements
+            )));
+        }
+        if element_min_bytes > 0 {
+            let max = self.remaining() / element_min_bytes;
+            if n_usize > max {
+                return Err(XpbError::InvalidData(format!(
+                    "array count {} exceeds buffer-bounded max {}",
+                    n, max
+                )));
+            }
+        }
+        Ok(n_usize)
+    }
+
     fn read_fixed(&mut self, n: usize) -> Result<&'a [u8]> {
         self.read_n(n)
     }

@@ -426,19 +426,23 @@ describe('V2 Performance', () => {
 //   from a 4-byte payload. readArrayCount(elementMinBytes) now validates
 //   both before any allocation.
 describe('Security: readArrayCount bounds attacker-supplied counts', () => {
+  // After the post-review refactor, readArrayCount requires an explicit
+  // maxElements arg. The buffer-bound check still runs as a second line
+  // of defense.
+  const HIGH_MAX = 1 << 30; // permissive cap so these tests still hit the buffer-bound path
+
   test('rejects negative count', () => {
     const enc = new Encoder(8);
     enc.writeInt32(-1);
     const dec = new Decoder(enc.finish());
-    expect(() => dec.readArrayCount(4)).toThrow(/negative array count/);
+    expect(() => dec.readArrayCount(4, HIGH_MAX)).toThrow(/negative array count/);
   });
 
   test('rejects count that cannot fit in remaining buffer', () => {
-    // 4-byte buffer carries a count of 1 << 30 — would allocate ~4 GB if honored
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30);
     const dec = new Decoder(enc.finish());
-    expect(() => dec.readArrayCount(4)).toThrow(/exceeds buffer-bounded max/);
+    expect(() => dec.readArrayCount(4, HIGH_MAX)).toThrow(/exceeds buffer-bounded max/);
   });
 
   test('accepts honest count', () => {
@@ -446,21 +450,38 @@ describe('Security: readArrayCount bounds attacker-supplied counts', () => {
     enc.writeInt32(8);
     for (let i = 0; i < 8; i++) enc.writeInt32(i);
     const dec = new Decoder(enc.finish());
-    expect(dec.readArrayCount(4)).toBe(8);
+    expect(dec.readArrayCount(4, 64)).toBe(8);
   });
 
-  test('elementMinBytes=0 disables the upper-bound check (escape hatch)', () => {
+  test('elementMinBytes=0 disables the buffer bound (escape hatch)', () => {
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30);
     const dec = new Decoder(enc.finish());
-    expect(dec.readArrayCount(0)).toBe(1 << 30);
+    expect(dec.readArrayCount(0, HIGH_MAX)).toBe(1 << 30);
   });
 
   test('readArrayInt32 propagates the bound', () => {
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30); // 4 GB worth of int32 in an 8-byte buffer
     const dec = new Decoder(enc.finish());
-    expect(() => dec.readArrayInt32()).toThrow(/exceeds buffer-bounded max/);
+    expect(() => dec.readArrayInt32(HIGH_MAX)).toThrow(/exceeds buffer-bounded max/);
+  });
+
+  // The new explicit-max gate fires BEFORE the buffer bound, so a tight
+  // caller cap rejects payloads the buffer would otherwise accept.
+  test('rejects count above caller-supplied max even when buffer can hold it', () => {
+    const enc = new Encoder(8 + 100 * 4);
+    enc.writeInt32(100);
+    for (let i = 0; i < 100; i++) enc.writeInt32(i);
+    const dec = new Decoder(enc.finish());
+    expect(() => dec.readArrayInt32(50)).toThrow(/exceeds caller-supplied max/);
+  });
+
+  test('rejects negative max as a caller-bug RangeError', () => {
+    const enc = new Encoder(8);
+    enc.writeInt32(0);
+    const dec = new Decoder(enc.finish());
+    expect(() => dec.readArrayCount(4, -1)).toThrow(/non-negative integer maxElements/);
   });
 });
 
@@ -475,18 +496,21 @@ describe('Security: readArrayCount bounds attacker-supplied counts', () => {
 // which gained the same readArrayCount gate; that's covered by direct
 // review of worker.ts and would require a real Worker runtime to test.
 describe('Security: WorkerPool main-thread fast paths bound array counts', () => {
+  // Pool wraps the decoder and passes a constant POOL_DEFAULT_MAX_ELEMENTS
+  // (1 << 24); a wire count of 1 << 30 fails the caller-supplied-max gate
+  // before the buffer bound would have caught it. Either rejection is
+  // proof that the gate is wired up; we match both messages.
+  const REJECTED = /exceeds caller-supplied max|exceeds buffer-bounded max/;
+
   test('decodeInt32Array rejects an oversized count below the worker threshold', async () => {
-    // Construct a small payload (< 200 KB) whose count claims billions of
-    // int32 elements.
     const enc = new Encoder(8);
     enc.writeInt32(1 << 30);
     const view = enc.finish();
     const buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
 
-    // Lazy-import to avoid circular load on test bootstrap.
     const { XPBWorkerPool } = await import('./worker-pool');
     const pool = new XPBWorkerPool(0);
-    await expect(pool.decodeInt32Array(buffer)).rejects.toThrow(/exceeds buffer-bounded max/);
+    await expect(pool.decodeInt32Array(buffer)).rejects.toThrow(REJECTED);
   });
 
   test('decodeStringArray rejects an oversized count below the worker threshold', async () => {
@@ -497,6 +521,6 @@ describe('Security: WorkerPool main-thread fast paths bound array counts', () =>
 
     const { XPBWorkerPool } = await import('./worker-pool');
     const pool = new XPBWorkerPool(0);
-    await expect(pool.decodeStringArray(buffer)).rejects.toThrow(/exceeds buffer-bounded max/);
+    await expect(pool.decodeStringArray(buffer)).rejects.toThrow(REJECTED);
   });
 });

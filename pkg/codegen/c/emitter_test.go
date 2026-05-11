@@ -33,8 +33,14 @@ message User {
 	if !contains(output, "#include <xpb/xpb.h>") {
 		t.Error("Output should include xpb header")
 	}
-	if !contains(output, "typedef struct {") {
-		t.Error("Output should contain typedef struct")
+	// Forward-declare + named-struct definition (the form that supports
+	// self-referential types — `typedef struct User User;` + `struct User
+	// { ... };`).
+	if !contains(output, "typedef struct User User;") {
+		t.Error("Output should forward-declare the message typedef")
+	}
+	if !contains(output, "struct User {") {
+		t.Error("Output should contain named struct definition")
 	}
 	if !contains(output, "char* name;") {
 		t.Error("Output should contain char* name field")
@@ -164,11 +170,13 @@ message User {
 	}
 
 	output := string(code)
-	if !contains(output, "typedef struct {") {
-		t.Error("Output should contain Address typedef")
+	if !contains(output, "typedef struct Address Address;") {
+		t.Error("Output should forward-declare Address typedef")
 	}
-	if !contains(output, "Address address;") {
-		t.Error("Output should contain Address field in User")
+	// Nested messages are pointer-indirected so that recursive / mutual-
+	// recursive schemas compile.
+	if !contains(output, "Address* address;") {
+		t.Error("Output should contain Address* address field in User")
 	}
 	if !contains(output, "Address_marshal") {
 		t.Error("Output should marshal nested message")

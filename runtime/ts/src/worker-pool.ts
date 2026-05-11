@@ -23,6 +23,12 @@ interface StringArrayResult {
 const THRESHOLD_STRINGS = 10 * 1024;
 const THRESHOLD_INTS = 200 * 1024;
 
+// Default budget for main-thread fast-path array decodes — matches the
+// codegen constant in pkg/codegen/common.DefaultMaxElements (1 << 24).
+// The pool runs unannotated data through this path; applications that
+// need a tighter cap should call Decoder.readArrayInt32(max) directly.
+const POOL_DEFAULT_MAX_ELEMENTS = 1 << 24;
+
 export class XPBWorkerPool {
   private workers: Worker[] = [];
   private workerQueue: Worker[] = [];
@@ -106,7 +112,7 @@ export class XPBWorkerPool {
   async decodeInt32Array(buffer: ArrayBuffer): Promise<Int32Array> {
     if (buffer.byteLength < THRESHOLD_INTS) {
       const decoder = new Decoder(new Uint8Array(buffer));
-      const count = decoder.readArrayCount(4);
+      const count = decoder.readArrayCount(4, POOL_DEFAULT_MAX_ELEMENTS);
       const result = new Int32Array(count);
       for (let i = 0; i < count; i++) {
         result[i] = decoder.readInt32();
@@ -131,7 +137,7 @@ export class XPBWorkerPool {
   async decodeStringArray(buffer: ArrayBuffer): Promise<string[]> {
     if (buffer.byteLength < THRESHOLD_STRINGS) {
       const decoder = new Decoder(new Uint8Array(buffer));
-      const count = decoder.readArrayCount(1);
+      const count = decoder.readArrayCount(1, POOL_DEFAULT_MAX_ELEMENTS);
       const result = new Array(count);
       for (let i = 0; i < count; i++) {
         result[i] = decoder.readString();

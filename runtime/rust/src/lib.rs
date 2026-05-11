@@ -6,3 +6,4 @@ pub mod decoder;
 pub use encoder::Encoder;
 pub use decoder::Decoder;
 pub use error::{XpbError, Result};
+pub use wire::MAX_DECODE_DEPTH;

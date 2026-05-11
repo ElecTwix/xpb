@@ -32,16 +32,21 @@ class FastDecoder {
   }
 
   /**
-   * Read an array length and bound it against the remaining buffer
-   * (mirrors Decoder.readArrayCount in index.ts). Each element on the
-   * wire occupies at least elementMinBytes, so a count claiming more
-   * elements than (remaining bytes / elementMinBytes) cannot be honest
-   * and is rejected before any allocation.
+   * Read an array length and bound it against (1) the caller's supplied
+   * maxElements and (2) the remaining buffer. Mirrors
+   * Decoder.readArrayCount in index.ts so the worker fast path enforces
+   * the same policy as the synchronous decoder.
    */
-  readArrayCount(elementMinBytes: number): number {
+  readArrayCount(elementMinBytes: number, maxElements: number): number {
+    if (!Number.isInteger(maxElements) || maxElements < 0) {
+      throw new RangeError(`xpb: readArrayCount requires non-negative integer maxElements`);
+    }
     const n = this.readInt32();
     if (n < 0) {
       throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (n > maxElements) {
+      throw new Error(`xpb: array count ${n} exceeds caller-supplied max ${maxElements}`);
     }
     if (elementMinBytes > 0) {
       const max = Math.floor(this.remaining() / elementMinBytes);
@@ -81,9 +86,14 @@ class FastDecoder {
 /**
  * Decode Int32Array directly into a Transferable Int32Array (Zero-Copy)
  */
+// Default budget for worker-pool array decodes. Matches the codegen's
+// constant (pkg/codegen/common.DefaultMaxElements) so a worker-decoded
+// payload follows the same allocation policy as a synchronous decode.
+const WORKER_DEFAULT_MAX_ELEMENTS = 1 << 24;
+
 function decodeInt32Array(buffer: Uint8Array): { result: Int32Array, transfer: Transferable[] } {
   const decoder = new FastDecoder(buffer);
-  const count = decoder.readArrayCount(4);
+  const count = decoder.readArrayCount(4, WORKER_DEFAULT_MAX_ELEMENTS);
 
   const result = new Int32Array(count);
   for (let i = 0; i < count; i++) {
@@ -101,8 +111,8 @@ function decodeStringArray(buffer: Uint8Array): { result: any, transfer: Transfe
   const decoder = new FastDecoder(buffer);
   // Each string occupies at least 1 byte on the wire (the compact-length
   // prefix even for the empty string), so the count is bounded by the
-  // remaining buffer.
-  const count = decoder.readArrayCount(1);
+  // remaining buffer in addition to the caller's max.
+  const count = decoder.readArrayCount(1, WORKER_DEFAULT_MAX_ELEMENTS);
 
   const offsets = new Int32Array(count + 1);
   

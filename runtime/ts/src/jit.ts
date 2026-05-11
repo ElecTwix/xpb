@@ -300,16 +300,24 @@ function generateFieldRead(field: FieldDef): string {
       `;
 
     case FieldType.String:
-      // V2: Compact length + string bytes
+      // V2: Compact length + string bytes. Handles both forms:
+      //   short form: 1 byte length when len <= 254
+      //   long form:  0xFF marker + 4-byte little-endian uint32 length
+      // Missing the long-form branch silently mis-parses every string
+      // >= 255 bytes (the JIT decoder reads the 0xFF marker as len=255
+      // and consumes 255 bytes starting inside the 4-byte length field).
       return `
-        // Read compact length (1 byte for short strings)
-        len = buf[pos++];
-        
-        // Fast path: Buffer.toString for Node
+        first = buf[pos++];
+        if (first === 255) {
+          len = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          pos += 4;
+        } else {
+          len = first;
+        }
+
         if (isNode) {
           val = buf.toString('utf8', pos, pos + len);
         } else {
-          // Browser optimization: Manual decode for short strings (< 20 chars)
           if (len < 20) {
             var isAscii = true;
             for (var i = 0; i < len; i++) {

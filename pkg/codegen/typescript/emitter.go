@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ElecTwix/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/codegen/common"
 )
 
 // Generator generates TypeScript code from an AST.
@@ -55,6 +56,20 @@ func (g *Generator) generateEnum(enum *ast.Enum) {
 func (g *Generator) generateMessage(msg *ast.Message) {
 	name := msg.Name
 
+	hasOptional := false
+	for _, f := range msg.Fields {
+		if f.Optional {
+			hasOptional = true
+			break
+		}
+	}
+	if hasOptional {
+		g.printf("// NOTE: schema contains `optional` fields. The XPB V2 wire format has no\n")
+		g.printf("// presence bit, so this codegen emits them as required on the wire.\n")
+		g.printf("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
+		g.printf("// relying on optional semantics.\n")
+	}
+
 	// Interface
 	g.printf("export interface %sData {\n", name)
 	for _, field := range msg.Fields {
@@ -85,9 +100,22 @@ func (g *Generator) generateMessage(msg *ast.Message) {
 	}
 	g.printf("\n")
 
-	// Constructor
+	// Constructor — assigns each schema-declared field explicitly. Object.assign
+	// would happily walk a `__proto__` own property and pollute the prototype
+	// chain (e.g. `new Foo(JSON.parse('{"__proto__":{"isAdmin":true}}'))`).
+	// Naming every field here means only declared field names are copied
+	// from `data`, and the prototype is untouched regardless of input.
 	g.printf("  constructor(data: Partial<%sData> = {}) {\n", name)
-	g.printf("    Object.assign(this, data);\n")
+	for _, field := range msg.Fields {
+		fieldName := toCamelCaseTS(field.Name)
+		if field.Repeated {
+			g.printf("    if (data.%s !== undefined) this.%s = data.%s;\n", fieldName, fieldName, fieldName)
+		} else if field.Type.Kind == ast.TypeMap {
+			g.printf("    if (data.%s !== undefined) this.%s = data.%s;\n", fieldName, fieldName, fieldName)
+		} else {
+			g.printf("    if (data.%s !== undefined) this.%s = data.%s;\n", fieldName, fieldName, fieldName)
+		}
+	}
 	g.printf("  }\n\n")
 
 	// Encode
@@ -198,7 +226,7 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 	if field.Repeated {
 		elemMin := tsMinWireBytes(field.Type)
 		g.printf("    {\n")
-		g.printf("      const count = dec.readArrayCount(%d);\n", elemMin)
+		g.printf("      const count = dec.readArrayCount(%d, %d);\n", elemMin, common.DefaultMaxElements)
 		g.printf("      msg.%s = new Array(count);\n", fieldName)
 		g.printf("      for (let i = 0; i < count; i++) {\n")
 		g.generateScalarDecodeTS(fieldName, field.Type, "        ", true, false)
@@ -212,7 +240,7 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 		keyMin := tsMinWireBytes(*field.Type.KeyType)
 		valMin := tsMinWireBytes(*field.Type.ValType)
 		g.printf("    {\n")
-		g.printf("      const count = dec.readArrayCount(%d);\n", keyMin+valMin)
+		g.printf("      const count = dec.readArrayCount(%d, %d);\n", keyMin+valMin, common.DefaultMaxElements)
 		g.printf("      msg.%s = new Map();\n", fieldName)
 		g.printf("      for (let i = 0; i < count; i++) {\n")
 		g.printf("        let k: %s;\n", tsBaseTypeName(*field.Type.KeyType))

@@ -534,17 +534,28 @@ export class Decoder {
 
   /**
    * Read a 4-byte signed array length used by repeated and map fields,
-   * validating it before the caller allocates a backing array. Rejects
-   * negative counts and counts that cannot possibly fit in the remaining
-   * buffer (each element occupies at least elementMinBytes on the wire).
-   * Pass 1 when elements are variable-length (string, bytes, message).
-   * Pass 0 to skip the upper-bound check (not recommended for untrusted
-   * input).
+   * validating it before the caller allocates a backing array. The
+   * caller MUST supply maxElements — the runtime does not pick a
+   * default, so application-level allocation policy is visible at every
+   * call site.
+   *
+   * Validation order, fail-closed: negative counts rejected first, then
+   * counts above maxElements, then counts that cannot fit in the
+   * remaining buffer (each element occupies at least elementMinBytes on
+   * the wire). Pass elementMinBytes=1 for variable-length elements
+   * (string, bytes, message). Pass elementMinBytes=0 to skip the buffer
+   * bound (only safe for fully trusted input).
    */
-  readArrayCount(elementMinBytes: number): number {
+  readArrayCount(elementMinBytes: number, maxElements: number): number {
+    if (!Number.isInteger(maxElements) || maxElements < 0) {
+      throw new RangeError(`xpb: readArrayCount requires non-negative integer maxElements`);
+    }
     const n = this.readInt32();
     if (n < 0) {
       throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (n > maxElements) {
+      throw new Error(`xpb: array count ${n} exceeds caller-supplied max ${maxElements}`);
     }
     if (elementMinBytes > 0) {
       const max = Math.floor((this.data.length - this.pos) / elementMinBytes);
@@ -555,9 +566,9 @@ export class Decoder {
     return n;
   }
 
-  /** Read array of int32 - format: count (int32) + elements */
-  readArrayInt32(): number[] {
-    const count = this.readArrayCount(4);
+  /** Read array of int32. Caller MUST provide maxElements. */
+  readArrayInt32(maxElements: number): number[] {
+    const count = this.readArrayCount(4, maxElements);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readInt32();
@@ -565,9 +576,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of int64 - format: count (int32) + elements */
-  readArrayInt64(): bigint[] {
-    const count = this.readArrayCount(8);
+  /** Read array of int64. Caller MUST provide maxElements. */
+  readArrayInt64(maxElements: number): bigint[] {
+    const count = this.readArrayCount(8, maxElements);
     const arr: bigint[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readInt64();
@@ -575,9 +586,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of uint32 - format: count (int32) + elements */
-  readArrayUint32(): number[] {
-    const count = this.readArrayCount(4);
+  /** Read array of uint32. Caller MUST provide maxElements. */
+  readArrayUint32(maxElements: number): number[] {
+    const count = this.readArrayCount(4, maxElements);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readUint32();
@@ -585,9 +596,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of uint64 - format: count (int32) + elements */
-  readArrayUint64(): bigint[] {
-    const count = this.readArrayCount(8);
+  /** Read array of uint64. Caller MUST provide maxElements. */
+  readArrayUint64(maxElements: number): bigint[] {
+    const count = this.readArrayCount(8, maxElements);
     const arr: bigint[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readUint64();
@@ -595,9 +606,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of float32 - format: count (int32) + elements */
-  readArrayFloat32(): number[] {
-    const count = this.readArrayCount(4);
+  /** Read array of float32. Caller MUST provide maxElements. */
+  readArrayFloat32(maxElements: number): number[] {
+    const count = this.readArrayCount(4, maxElements);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readFloat32();
@@ -605,9 +616,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of float64 - format: count (int32) + elements */
-  readArrayFloat64(): number[] {
-    const count = this.readArrayCount(8);
+  /** Read array of float64. Caller MUST provide maxElements. */
+  readArrayFloat64(maxElements: number): number[] {
+    const count = this.readArrayCount(8, maxElements);
     const arr: number[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readFloat64();
@@ -615,9 +626,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of bool - format: count (int32) + elements */
-  readArrayBool(): boolean[] {
-    const count = this.readArrayCount(1);
+  /** Read array of bool. Caller MUST provide maxElements. */
+  readArrayBool(maxElements: number): boolean[] {
+    const count = this.readArrayCount(1, maxElements);
     const arr: boolean[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readBool();
@@ -625,9 +636,9 @@ export class Decoder {
     return arr;
   }
 
-  /** Read array of string - format: count (int32) + elements */
-  readArrayString(): string[] {
-    const count = this.readArrayCount(1);
+  /** Read array of string. Caller MUST provide maxElements. */
+  readArrayString(maxElements: number): string[] {
+    const count = this.readArrayCount(1, maxElements);
     const arr: string[] = new Array(count);
     for (let i = 0; i < count; i++) {
       arr[i] = this.readString();

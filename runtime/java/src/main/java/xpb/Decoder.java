@@ -82,7 +82,9 @@ public class Decoder {
         return Double.longBitsToDouble(bits);
     }
 
-    /** Read compact length prefix */
+    /** Read compact length prefix. Rejects negative long-form lengths
+     *  (the 4-byte int32 path can decode values larger than INT_MAX,
+     *  which Java interprets as negative). */
     private int readCompactLength() {
         if (pos >= length) {
             throw new RuntimeException("xpb: unexpected EOF reading length");
@@ -95,13 +97,16 @@ public class Decoder {
             throw new RuntimeException("xpb: unexpected EOF reading extended length");
         }
         int len = readInt32();
+        if (len < 0) {
+            throw new RuntimeException("xpb: negative or oversized compact length");
+        }
         return len;
     }
 
     /** Read string with compact length prefix */
     public String readString() {
         int len = readCompactLength();
-        if (pos + len > length) {
+        if (len > length - pos) {
             throw new RuntimeException("xpb: unexpected EOF reading string");
         }
         String v = new String(data, pos, len, java.nio.charset.StandardCharsets.UTF_8);
@@ -112,7 +117,7 @@ public class Decoder {
     /** Read bytes with compact length prefix */
     public byte[] readBytes() {
         int len = readCompactLength();
-        if (pos + len > length) {
+        if (len > length - pos) {
             throw new RuntimeException("xpb: unexpected EOF reading bytes");
         }
         byte[] v = new byte[len];
@@ -134,9 +139,45 @@ public class Decoder {
         pos += n;
     }
 
-    /** Read array of int32 - format: count (int32) + elements */
-    public int[] readArrayInt32() {
-        int count = readInt32();
+    /**
+     * Validate and return an array length read from the wire. The decoder
+     * does NOT pick a default — the caller MUST pass an explicit maxElements
+     * budget so application-level policy is visible at every call site. A
+     * count exceeding maxElements, or one that cannot fit in the remaining
+     * buffer at the per-element minimum size, is rejected before any
+     * allocation happens.
+     *
+     * @param elementMinBytes smallest on-wire size of one element (e.g. 4
+     *   for int32, 1 for bool / variable-length). Pass 0 to skip the buffer
+     *   bound (only safe for fully trusted input).
+     * @param maxElements caller's hard cap on how many elements this call
+     *   site is willing to allocate. MUST be &gt;= 0.
+     */
+    public int readArrayCount(int elementMinBytes, int maxElements) {
+        if (maxElements < 0) {
+            throw new IllegalArgumentException("xpb: maxElements must be >= 0");
+        }
+        int n = readInt32();
+        if (n < 0) {
+            throw new RuntimeException("xpb: negative array count: " + n);
+        }
+        if (n > maxElements) {
+            throw new RuntimeException("xpb: array count " + n
+                + " exceeds caller-supplied max " + maxElements);
+        }
+        if (elementMinBytes > 0) {
+            int max = (length - pos) / elementMinBytes;
+            if (n > max) {
+                throw new RuntimeException("xpb: array count " + n
+                    + " exceeds buffer-bounded max " + max);
+            }
+        }
+        return n;
+    }
+
+    /** Read array of int32. Caller MUST provide maxElements. */
+    public int[] readArrayInt32(int maxElements) {
+        int count = readArrayCount(4, maxElements);
         int[] arr = new int[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readInt32();
@@ -144,9 +185,9 @@ public class Decoder {
         return arr;
     }
 
-    /** Read array of int64 - format: count (int32) + elements */
-    public long[] readArrayInt64() {
-        int count = readInt32();
+    /** Read array of int64. Caller MUST provide maxElements. */
+    public long[] readArrayInt64(int maxElements) {
+        int count = readArrayCount(8, maxElements);
         long[] arr = new long[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readInt64();
@@ -154,19 +195,19 @@ public class Decoder {
         return arr;
     }
 
-    /** Read array of uint32 - format: count (int32) + elements */
-    public int[] readArrayUint32() {
-        return readArrayInt32();
+    /** Read array of uint32. Caller MUST provide maxElements. */
+    public int[] readArrayUint32(int maxElements) {
+        return readArrayInt32(maxElements);
     }
 
-    /** Read array of uint64 - format: count (int32) + elements */
-    public long[] readArrayUint64() {
-        return readArrayInt64();
+    /** Read array of uint64. Caller MUST provide maxElements. */
+    public long[] readArrayUint64(int maxElements) {
+        return readArrayInt64(maxElements);
     }
 
-    /** Read array of float32 - format: count (int32) + elements */
-    public float[] readArrayFloat32() {
-        int count = readInt32();
+    /** Read array of float32. Caller MUST provide maxElements. */
+    public float[] readArrayFloat32(int maxElements) {
+        int count = readArrayCount(4, maxElements);
         float[] arr = new float[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readFloat32();
@@ -174,9 +215,9 @@ public class Decoder {
         return arr;
     }
 
-    /** Read array of float64 - format: count (int32) + elements */
-    public double[] readArrayFloat64() {
-        int count = readInt32();
+    /** Read array of float64. Caller MUST provide maxElements. */
+    public double[] readArrayFloat64(int maxElements) {
+        int count = readArrayCount(8, maxElements);
         double[] arr = new double[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readFloat64();
@@ -184,9 +225,9 @@ public class Decoder {
         return arr;
     }
 
-    /** Read array of bool - format: count (int32) + elements */
-    public boolean[] readArrayBool() {
-        int count = readInt32();
+    /** Read array of bool. Caller MUST provide maxElements. */
+    public boolean[] readArrayBool(int maxElements) {
+        int count = readArrayCount(1, maxElements);
         boolean[] arr = new boolean[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readBool();
@@ -194,9 +235,11 @@ public class Decoder {
         return arr;
     }
 
-    /** Read array of String - format: count (int32) + elements */
-    public String[] readArrayString() {
-        int count = readInt32();
+    /** Read array of String. Caller MUST provide maxElements (each element
+     *  has a 1-byte minimum on the wire — the compact-length prefix for an
+     *  empty string). */
+    public String[] readArrayString(int maxElements) {
+        int count = readArrayCount(1, maxElements);
         String[] arr = new String[count];
         for (int i = 0; i < count; i++) {
             arr[i] = readString();
@@ -206,4 +249,12 @@ public class Decoder {
 
     public static final int COMPACT_LENGTH_THRESHOLD = 254;
     public static final int COMPACT_LENGTH_MARKER = 0xFF;
+
+    /**
+     * Cap on nested-message decode recursion. Matches the Go/TS runtimes
+     * (xpb.MaxDecodeDepth / MaxDecodeDepth) so a hand-crafted recursive
+     * payload can't blow the JVM stack — the generated unmarshalAt(depth)
+     * shim trips on this constant.
+     */
+    public static final int MAX_DECODE_DEPTH = 64;
 }
