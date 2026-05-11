@@ -296,6 +296,139 @@ message Node {
 	t.Logf("XPB-106 OK: Lua codegen threads depth and trips on MAX_DECODE_DEPTH")
 }
 
+// SecurityFinding: XPB-122 (Codex review)
+// Severity: P1
+// Original symptom: @xpb/runtime exports three entry points — `.`,
+// `./node`, `./browser`. The audit landed the two-arg readArrayCount
+// in index.ts but left browser.ts:479 and node.ts:235 at the old
+// one-arg signature. worker-pool.ts imports Decoder from `./browser`
+// and passes maxElements as a second arg; JavaScript silently drops the
+// extra arg under the old signature, so the main-thread fast path was
+// still unbounded by caller policy.
+//
+// Fix: both alternate entry points now mirror the index.ts signature
+// (elementMinBytes, maxElements). This test asserts the parity.
+func TestSecurityAudit_XPB122_TSEntrypointParity(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"runtime/ts/src/browser.ts",
+		"runtime/ts/src/node.ts",
+	} {
+		src, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		body := string(src)
+		if !strings.Contains(body, "readArrayCount(elementMinBytes: number, maxElements: number)") {
+			t.Fatalf("REGRESSION: %s readArrayCount lost the maxElements parameter", path)
+		}
+		if !strings.Contains(body, "exceeds caller-supplied max") {
+			t.Fatalf("REGRESSION: %s lost the caller-supplied-max rejection", path)
+		}
+	}
+	t.Log("XPB-122 OK: browser.ts and node.ts mirror index.ts's two-arg signature")
+}
+
+// SecurityFinding: XPB-123 (Codex review)
+// Severity: P1
+// Original symptom: TS codegen's repeated/map paths emit
+// `Status.encode(v)` / `Status.decodeAt(...)` for enum-typed elements
+// (the parser reports enum references as TypeMessage). Since `Status`
+// is a TS enum, those methods don't exist — the generated module
+// fails to typecheck. The enum-set lookup added in XPB-121 covered the
+// non-repeated path; the repeated/map paths went through helpers that
+// never consulted it.
+//
+// Fix: generateScalarEncodeTS / tsReadCall / tsMinWireBytes now check
+// the enum set first and short-circuit to readInt32 / writeInt32. This
+// test feeds a `[]Status` + `map<string, Status>` schema and asserts the
+// generated source uses int reads/writes, not message methods.
+func TestSecurityAudit_XPB123_TSCodegenEnumInRepeatedAndMap(t *testing.T) {
+	schema := `package test
+
+enum Status {
+    ACTIVE = 1
+    INACTIVE = 2
+}
+
+message Item {
+    1: []Status statuses
+    2: map<string, Status> by_name
+}
+`
+	file, err := parser.ParseFile(schema)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	out, err := typescript.Generate(file)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	src := string(out)
+
+	// Must NOT call Status.encode / Status.decodeAt — Status is an enum.
+	for _, bad := range []string{
+		"Status.encode(",
+		"Status.decodeAt(",
+	} {
+		if strings.Contains(src, bad) {
+			t.Fatalf("REGRESSION: generated TS calls %s on an enum:\n%s", bad, src)
+		}
+	}
+	// Must encode/decode enum values as int32.
+	if !strings.Contains(src, "enc.writeInt32(v);") {
+		t.Fatalf("REGRESSION: repeated/map enum encode no longer uses writeInt32")
+	}
+	if !strings.Contains(src, "dec.readInt32()") {
+		t.Fatalf("REGRESSION: repeated/map enum decode no longer uses readInt32")
+	}
+	t.Log("XPB-123 OK: TS codegen treats enum-as-message correctly in repeated and map fields")
+}
+
+// SecurityFinding: XPB-124 (Codex review)
+// Severity: P2
+// Original symptom: jit.ts compileDecoder reads repeated counts as
+// `(buf[pos] | (buf[pos+1] << 8) | ...) >>> 0`, then
+// `new Array(count)` — no negative, max, or buffer-bound check. A wire
+// value of -1 becomes 4 294 967 295 after `>>> 0`, and the per-element
+// loop OOMs the JS heap. The rest of the runtime was hardened in
+// XPB-005 but the JIT compiler bypassed the gate.
+//
+// Fix: compileDecoder now takes a required `maxElements` argument that
+// is baked into the JITed function. Every repeated branch validates
+// negative / caller-max / buffer-bound before allocating.
+func TestSecurityAudit_XPB124_TSJITRequiresMaxElements(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "runtime/ts/src/jit.ts"))
+	if err != nil {
+		t.Fatalf("read jit.ts: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "compileDecoder<T>(\n  schema: SchemaDef,\n  maxElements: number,\n)") {
+		t.Fatalf("REGRESSION: compileDecoder lost the maxElements parameter")
+	}
+	// Repeated path must validate before allocation.
+	if !strings.Contains(body, "if (count < 0)") {
+		t.Fatalf("REGRESSION: JIT repeated decode no longer rejects negative count")
+	}
+	if !strings.Contains(body, "exceeds caller-supplied max") {
+		t.Fatalf("REGRESSION: JIT repeated decode no longer enforces caller-supplied max")
+	}
+	if !strings.Contains(body, "exceeds buffer-bounded max") {
+		t.Fatalf("REGRESSION: JIT repeated decode no longer enforces buffer bound")
+	}
+	// The pre-fix bug was `var count = (... << 24)) >>> 0`. After the
+	// fix the count is read SIGNED so `count < 0` catches the wire's
+	// negative range. (Per-element uint32 reads legitimately keep
+	// `>>> 0`; that's a different pattern.)
+	if strings.Contains(body, "var count = (buf[pos]") &&
+		strings.Contains(body, "<< 24)) >>> 0;\n          pos += 4;\n          obj.${field.name} = new Array(count)") {
+		t.Fatalf("REGRESSION: JIT repeated count read still uses unsigned shift " +
+			"(should read signed so `< 0` catches the wire's negative range)")
+	}
+	t.Log("XPB-124 OK: JIT compileDecoder requires explicit maxElements and bounds-checks before allocation")
+}
+
 // SecurityFinding: XPB-119 (post-review uniformity)
 // Severity: High
 // Description: After the audit, every runtime decoder's array-count gate

@@ -12,12 +12,13 @@ import (
 
 // Generator generates TypeScript code from an AST.
 type Generator struct {
-	buf bytes.Buffer
+	buf   bytes.Buffer
+	enums ast.EnumSet
 }
 
 // Generate generates TypeScript code for the given file AST.
 func Generate(file *ast.File) ([]byte, error) {
-	g := &Generator{}
+	g := &Generator{enums: ast.NewEnumSet(file)}
 	return g.generate(file)
 }
 
@@ -174,25 +175,17 @@ func (g *Generator) generateFieldEncodeTS(field *ast.Field) {
 		return
 	}
 
-	// Regular (V2 treats optional/required same in struct mode usually,
-	// but for optional we might need a presence bit or just assume defaults.
-	// For now, mirroring Go: write the value directly.
-	// Note: If msg.field is undefined, we need defaults to match Go zero-values)
-
-	// Safety check for undefined
-	//nolint:staticcheck
-	if field.Optional {
-		// TODO: V2 optional field handling not yet implemented
-		// V2 treats optional/required same in struct mode
-		// For now, write zero-value to maintain struct alignment
-	}
-
 	g.generateScalarEncodeTS("msg."+fieldName, field.Type, "    ")
 }
 
 func (g *Generator) generateScalarEncodeTS(varName string, t ast.FieldType, indent string) {
-	// Handle undefined for required fields by assuming valid input or letting it fail/default
-	// Ideally we'd use ?? defaults here if needed.
+	// Enums parse as TypeMessage when referenced by name; resolve them
+	// here before hitting the message branch (which would emit
+	// `Enum.encode(v)` — a method that doesn't exist on a TS enum).
+	if g.enums.IsEnum(t) {
+		g.printf("%senc.writeInt32(%s);\n", indent, varName)
+		return
+	}
 
 	switch t.Kind {
 	case ast.TypeBool:
@@ -224,7 +217,7 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 
 	// Repeated
 	if field.Repeated {
-		elemMin := tsMinWireBytes(field.Type)
+		elemMin := g.tsMinWireBytes(field.Type)
 		g.printf("    {\n")
 		g.printf("      const count = dec.readArrayCount(%d, %d);\n", elemMin, common.DefaultMaxElements)
 		g.printf("      msg.%s = new Array(count);\n", fieldName)
@@ -237,8 +230,8 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 
 	// Map
 	if field.Type.Kind == ast.TypeMap {
-		keyMin := tsMinWireBytes(*field.Type.KeyType)
-		valMin := tsMinWireBytes(*field.Type.ValType)
+		keyMin := g.tsMinWireBytes(*field.Type.KeyType)
+		valMin := g.tsMinWireBytes(*field.Type.ValType)
 		g.printf("    {\n")
 		g.printf("      const count = dec.readArrayCount(%d, %d);\n", keyMin+valMin, common.DefaultMaxElements)
 		g.printf("      msg.%s = new Map();\n", fieldName)
@@ -262,7 +255,7 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 }
 
 func (g *Generator) generateScalarDecodeTS(target string, t ast.FieldType, indent string, isRepeated bool, isLocalVar bool) {
-	readExpr := tsReadCall(t)
+	readExpr := g.tsReadCall(t)
 
 	lhs := ""
 	if isLocalVar {
@@ -276,7 +269,13 @@ func (g *Generator) generateScalarDecodeTS(target string, t ast.FieldType, inden
 	g.printf("%s%s = %s;\n", indent, lhs, readExpr)
 }
 
-func tsReadCall(t ast.FieldType) string {
+func (g *Generator) tsReadCall(t ast.FieldType) string {
+	// Resolve enum-as-message before falling through to the message
+	// branch (which would emit `Enum.decodeAt(...)` — a method that
+	// doesn't exist on a TS enum).
+	if g.enums.IsEnum(t) {
+		return "dec.readInt32()"
+	}
 	switch t.Kind {
 	case ast.TypeBool:
 		return "dec.readBool()"
@@ -337,8 +336,12 @@ func tsBaseTypeName(t ast.FieldType) string {
 
 // tsMinWireBytes returns the smallest possible on-wire size for one element
 // of the given type. Used to bound the count of a repeated/map field against
-// the remaining buffer in readArrayCount.
-func tsMinWireBytes(t ast.FieldType) int {
+// the remaining buffer in readArrayCount. Enum-references-as-TypeMessage
+// resolve to 4 bytes (the int32 the wire actually carries).
+func (g *Generator) tsMinWireBytes(t ast.FieldType) int {
+	if g.enums.IsEnum(t) {
+		return 4
+	}
 	switch t.Kind {
 	case ast.TypeBool:
 		return 1

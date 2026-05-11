@@ -218,9 +218,29 @@ function generateFieldWrite(field: FieldDef, valVar: string): string {
 
 // ============= JIT V2 DECODER =============
 
-export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
+/**
+ * compileDecoder JITs a decoder for `schema`. The caller MUST supply
+ * `maxElements`: it is baked into the compiled function at JIT time, so
+ * every repeated-field decode runs through the same caller-supplied-max
+ * / negative / buffer-bound checks the runtime `Decoder.readArrayCount`
+ * applies. Without this, a wire count of -1 cast through `>>> 0` reads
+ * as 4 294 967 295 and `new Array(count)` either pre-allocates a sparse
+ * 4 GB slot or — once the loop runs — OOMs the JS heap.
+ *
+ * `maxElements` is a function-level budget (every repeated field on the
+ * schema shares it). Pick the smallest budget that fits your worst-case
+ * legitimate payload.
+ */
+export function compileDecoder<T>(
+  schema: SchemaDef,
+  maxElements: number,
+): (buf: Uint8Array, end: number) => T {
+  if (!Number.isInteger(maxElements) || maxElements < 0) {
+    throw new RangeError('xpb: compileDecoder requires non-negative integer maxElements');
+  }
+
   const lines: string[] = [];
-  
+
   // Check if we need a DataView (for floats)
   const hasFloats = schema.fields.some(f => f.type === FieldType.Float32 || f.type === FieldType.Float64);
 
@@ -231,14 +251,31 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
     ${hasFloats ? 'var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);' : ''}
   `);
 
+  // The budget is baked into the function body so the bounds check is a
+  // constant compare. JSON.stringify guards against any unintentional
+  // escapes if maxElements ever comes from less-trusted code paths.
+  const maxLit = JSON.stringify(maxElements);
+
   for (const field of schema.fields) {
     if (field.repeated) {
-      // V2: Read count then elements
+      // V2 repeated layout: int32 count + elements. Read the count as
+      // SIGNED so `< 0` catches the wire's negative range, then the
+      // caller-max check fires before any allocation, then the
+      // remaining-buffer check guarantees the per-element reads can
+      // actually be satisfied.
       lines.push(`
         {
-          // Read fixed int32 count (ensure unsigned)
-          var count = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          var count = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           pos += 4;
+          if (count < 0) {
+            throw new Error('xpb: negative array count: ' + count);
+          }
+          if (count > ${maxLit}) {
+            throw new Error('xpb: array count ' + count + ' exceeds caller-supplied max ' + ${maxLit});
+          }
+          if (count > (end - pos)) {
+            throw new Error('xpb: array count ' + count + ' exceeds buffer-bounded max ' + (end - pos));
+          }
           obj.${field.name} = new Array(count);
           for (var i = 0; i < count; i++) {
             ${generateFieldRead(field)}

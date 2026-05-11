@@ -228,14 +228,21 @@ export class Decoder {
   }
 
   /**
-   * Read a 4-byte signed array length and bound it against the remaining
-   * buffer (each element occupies at least elementMinBytes on the wire).
-   * Mirrors index.ts so callers in worker-pool.ts can use either variant.
+   * Read and validate a 4-byte signed array length. Mirrors
+   * Decoder.readArrayCount in index.ts: the caller MUST supply
+   * maxElements so allocation policy is visible at every call site.
+   * See index.ts for the validation order and rationale.
    */
-  readArrayCount(elementMinBytes: number): number {
+  readArrayCount(elementMinBytes: number, maxElements: number): number {
+    if (!Number.isInteger(maxElements) || maxElements < 0) {
+      throw new RangeError('xpb: readArrayCount requires non-negative integer maxElements');
+    }
     const n = this.readInt32();
     if (n < 0) {
       throw new Error(`xpb: negative array count: ${n}`);
+    }
+    if (n > maxElements) {
+      throw new Error(`xpb: array count ${n} exceeds caller-supplied max ${maxElements}`);
     }
     if (elementMinBytes > 0) {
       const max = Math.floor((this.data.length - this.pos) / elementMinBytes);
