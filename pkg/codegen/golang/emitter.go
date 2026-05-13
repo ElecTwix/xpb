@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ElecTwix/xpb/pkg/ast"
+	"github.com/ElecTwix/xpb/pkg/codegen/common"
 	"github.com/ElecTwix/xpb/pkg/wire"
 )
 
@@ -93,6 +94,20 @@ func (g *Generator) generateEnum(enum *ast.Enum) {
 
 func (g *Generator) generateMessage(msg *ast.Message) error {
 	name := msg.Name
+
+	hasOptional := false
+	for _, f := range msg.Fields {
+		if f.Optional {
+			hasOptional = true
+			break
+		}
+	}
+	if hasOptional {
+		g.printf("// NOTE: schema contains `optional` fields. The XPB V2 wire format has no\n")
+		g.printf("// presence bit, so this codegen emits them as required on the wire.\n")
+		g.printf("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
+		g.printf("// relying on optional semantics.\n")
+	}
 
 	// Struct
 	g.printf("// %s is a generated XPB message.\n", name)
@@ -220,7 +235,7 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	if field.Repeated {
 		elemMin := minWireBytes(field.Type, isEnum)
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadArrayCount(%d)\n", elemMin)
+		g.printf("\t\tcount, err := dec.ReadArrayCount(%d, %d)\n", elemMin, common.DefaultMaxElements)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s, count)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
@@ -241,7 +256,7 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 		keyMin := minWireBytes(*field.Type.KeyType, false)
 		valMin := minWireBytes(*field.Type.ValType, g.isEnumType(*field.Type.ValType))
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadArrayCount(%d)\n", keyMin+valMin)
+		g.printf("\t\tcount, err := dec.ReadArrayCount(%d, %d)\n", keyMin+valMin, common.DefaultMaxElements)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")

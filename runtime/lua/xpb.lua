@@ -7,6 +7,13 @@ local xpb = {}
 xpb.COMPACT_LENGTH_THRESHOLD = 254
 xpb.COMPACT_LENGTH_MARKER = 0xFF
 
+-- Cap on nested-message decode recursion. Mirrors xpb.MaxDecodeDepth in
+-- the Go runtime and MaxDecodeDepth in the TS runtime; the generated
+-- UnmarshalAt(data, depth) shim compares against it before doing any
+-- work. Without this cap, an adversarial deeply-nested payload drives
+-- the Lua C stack into a fatal overflow.
+xpb.MAX_DECODE_DEPTH = 64
+
 -- Fast bit operations
 local function le32_to_num(b1, b2, b3, b4)
     local n = b1 + (b2 << 8) + (b3 << 16) + (b4 << 24)
@@ -217,6 +224,11 @@ function xpb.Encoder(initial_size)
 end
 
 -- Decoder (optimized)
+--
+-- Every read funnels through ensure_bytes() so a single malformed length
+-- can't run off the end of the buffer. Array reads require the caller to
+-- pass an explicit max_elements budget: the runtime does NOT pick a default
+-- because policy is a per-call-site decision.
 function xpb.Decoder(data)
     local self = {
         data = data,
@@ -227,19 +239,30 @@ function xpb.Decoder(data)
     function self:eof() return self.pos > self.len end
     function self:remaining() return self.len - self.pos + 1 end
 
+    -- Ensure n more bytes are readable; error otherwise.
+    function self:ensure_bytes(n, what)
+        if self.pos + n - 1 > self.len then
+            error(string.format("xpb: unexpected EOF reading %s (need %d bytes, have %d)",
+                what, n, self.len - self.pos + 1), 2)
+        end
+    end
+
     function self:read_bool()
+        self:ensure_bytes(1, "bool")
         local v = self.data:byte(self.pos) ~= 0
         self.pos = self.pos + 1
         return v
     end
 
     function self:read_int32()
+        self:ensure_bytes(4, "int32")
         local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
         return le32_to_num(b1, b2, b3, b4)
     end
 
     function self:read_int64()
+        self:ensure_bytes(8, "int64")
         local b1, b2, b3, b4, b5, b6, b7, b8 = self.data:byte(self.pos, self.pos + 7)
         self.pos = self.pos + 8
         return le64_to_num(b1, b2, b3, b4, b5, b6, b7, b8)
@@ -249,31 +272,40 @@ function xpb.Decoder(data)
     function self:read_uint64() return self:read_int64() end
 
     function self:read_float32()
+        self:ensure_bytes(4, "float32")
         local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
         return string.unpack("f", string.char(b1, b2, b3, b4))
     end
 
     function self:read_float64()
+        self:ensure_bytes(8, "float64")
         local b1, b2, b3, b4, b5, b6, b7, b8 = self.data:byte(self.pos, self.pos + 7)
         self.pos = self.pos + 8
         return string.unpack("d", string.char(b1, b2, b3, b4, b5, b6, b7, b8))
     end
 
     function self:read_compact_length()
+        self:ensure_bytes(1, "compact length")
         local first = self.data:byte(self.pos)
         self.pos = self.pos + 1
         if first ~= xpb.COMPACT_LENGTH_MARKER then
             return first
         end
+        self:ensure_bytes(4, "extended length")
         local b1, b2, b3, b4 = self.data:byte(self.pos, self.pos + 3)
         self.pos = self.pos + 4
-        return le32_to_num(b1, b2, b3, b4)
+        local v = le32_to_num(b1, b2, b3, b4)
+        if v < 0 then
+            error("xpb: negative or oversized compact length", 2)
+        end
+        return v
     end
 
     function self:read_string()
         local len = self:read_compact_length()
         if len == 0 then return "" end
+        self:ensure_bytes(len, "string")
         local v = self.data:sub(self.pos, self.pos + len - 1)
         self.pos = self.pos + len
         return v
@@ -282,17 +314,52 @@ function xpb.Decoder(data)
     function self:read_bytes()
         local len = self:read_compact_length()
         if len == 0 then return "" end
+        self:ensure_bytes(len, "bytes")
         local v = self.data:sub(self.pos, self.pos + len - 1)
         self.pos = self.pos + len
         return v
     end
 
     function self:read_message_bytes() return self:read_bytes() end
-    function self:skip(n) self.pos = self.pos + n end
 
-    -- Array helpers
-    function self:read_array_int32()
-        local count = self:read_int32()
+    function self:skip(n)
+        self:ensure_bytes(n, "skip")
+        self.pos = self.pos + n
+    end
+
+    -- Validate and return an array length read from the wire.
+    -- The caller MUST pass max_elements — the runtime does not pick a
+    -- default budget. element_min_bytes is the smallest possible on-wire
+    -- size of one element (4 for int32, 1 for bool / variable-length).
+    -- Pass 0 for element_min_bytes to skip the buffer-bound check.
+    function self:read_array_count(element_min_bytes, max_elements)
+        if max_elements == nil or max_elements < 0 then
+            error("xpb: read_array_count requires non-negative max_elements", 2)
+        end
+        local n = self:read_int32()
+        if n < 0 then
+            error("xpb: negative array count: " .. n, 2)
+        end
+        if n > max_elements then
+            error(string.format("xpb: array count %d exceeds caller-supplied max %d",
+                n, max_elements), 2)
+        end
+        if element_min_bytes > 0 then
+            local remaining = self.len - self.pos + 1
+            local maxBuf = remaining // element_min_bytes
+            if n > maxBuf then
+                error(string.format("xpb: array count %d exceeds buffer-bounded max %d",
+                    n, maxBuf), 2)
+            end
+        end
+        return n
+    end
+
+    -- Array helpers. Every call REQUIRES the caller to pass max_elements;
+    -- it caps the wire-supplied count before any per-element work runs.
+
+    function self:read_array_int32(max_elements)
+        local count = self:read_array_count(4, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_int32()
@@ -300,8 +367,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_int64()
-        local count = self:read_int32()
+    function self:read_array_int64(max_elements)
+        local count = self:read_array_count(8, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_int64()
@@ -309,8 +376,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_uint32()
-        local count = self:read_int32()
+    function self:read_array_uint32(max_elements)
+        local count = self:read_array_count(4, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_uint32()
@@ -318,8 +385,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_uint64()
-        local count = self:read_int32()
+    function self:read_array_uint64(max_elements)
+        local count = self:read_array_count(8, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_uint64()
@@ -327,8 +394,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_float32()
-        local count = self:read_int32()
+    function self:read_array_float32(max_elements)
+        local count = self:read_array_count(4, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_float32()
@@ -336,8 +403,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_float64()
-        local count = self:read_int32()
+    function self:read_array_float64(max_elements)
+        local count = self:read_array_count(8, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_float64()
@@ -345,8 +412,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_bool()
-        local count = self:read_int32()
+    function self:read_array_bool(max_elements)
+        local count = self:read_array_count(1, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_bool()
@@ -354,8 +421,8 @@ function xpb.Decoder(data)
         return arr
     end
 
-    function self:read_array_string()
-        local count = self:read_int32()
+    function self:read_array_string(max_elements)
+        local count = self:read_array_count(1, max_elements)
         local arr = {}
         for i = 1, count do
             arr[i] = self:read_string()

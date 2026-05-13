@@ -128,12 +128,60 @@ static void test_xpb010_negative_array_count() {
     struct xpb_decoder* dec = xpb_decoder_create(neg, 4);
 
     size_t count = 999;
-    int32_t* arr = xpb_decoder_read_array_int32(dec, &count);
+    int32_t* arr = xpb_decoder_read_array_int32(dec, 64, &count);
     ASSERT("read_array_int32 with negative count returns NULL", arr == NULL);
     ASSERT("out_count zeroed (not SIZE_MAX)", count == 0);
     ASSERT("decoder marked error", !xpb_decoder_ok(dec));
 
     xpb_decoder_destroy(dec);
+}
+
+/*
+ * SecurityFinding: XPB-114/XPB-115
+ * Severity: Medium
+ * Description: xpb_encoder_create previously dereferenced malloc with no
+ *   NULL check, and ensure_capacity assigned realloc back to enc->buf
+ *   without checking — failure modes were SIGSEGV and silent leak. The
+ *   hardened encoder uses a sticky `error` flag mirroring the decoder:
+ *   any internal allocation failure latches it, and xpb_encoder_ok() /
+ *   xpb_encoder_finish() report the failure to the caller.
+ *
+ * Forcing a real malloc failure is awkward without LD_PRELOAD; we
+ * exercise the observable contract instead: (a) an encoder that wrote no
+ * data returns NULL and len=0 from finish(); (b) xpb_encoder_ok() returns
+ * true for a freshly created encoder and false once an error is latched.
+ */
+static void test_xpb114_encoder_sticky_error_model() {
+    printf("\n=== XPB-114/115: encoder sticky-error contract ===\n");
+
+    struct xpb_encoder* enc = xpb_encoder_create(64);
+    ASSERT("freshly-created encoder reports ok", xpb_encoder_ok(enc));
+
+    /* Write enough to make pos > 0 so we can tell finish() works on real data. */
+    xpb_encoder_write_int32(enc, 0x12345678);
+    ASSERT("encoder still ok after legitimate write", xpb_encoder_ok(enc));
+
+    size_t out_len = 0;
+    uint8_t* data = xpb_encoder_finish(enc, &out_len);
+    ASSERT("finish returns non-NULL on successful encode", data != NULL);
+    ASSERT("finish populates out_len", out_len == 4);
+    free(data);
+    xpb_encoder_destroy(enc);
+
+    /* Empty encoder: finish() must return NULL with len=0, never malloc(0). */
+    struct xpb_encoder* empty = xpb_encoder_create(64);
+    out_len = 999;
+    data = xpb_encoder_finish(empty, &out_len);
+    ASSERT("empty encoder finish() returns NULL", data == NULL);
+    ASSERT("empty encoder finish() reports len=0", out_len == 0);
+    xpb_encoder_destroy(empty);
+
+    /* NULL encoder is a no-op (defensive). */
+    out_len = 999;
+    data = xpb_encoder_finish(NULL, &out_len);
+    ASSERT("NULL encoder finish() returns NULL", data == NULL);
+    ASSERT("NULL encoder finish() leaves out_len=0", out_len == 0);
+    ASSERT("xpb_encoder_ok(NULL) is false", !xpb_encoder_ok(NULL));
 }
 
 /* Regression: legitimate array round-trip still works after hardening. */
@@ -149,7 +197,7 @@ static void test_array_roundtrip_still_works() {
 
     struct xpb_decoder* dec = xpb_decoder_create(encoded, encoded_len);
     size_t out_count = 0;
-    int32_t* out = xpb_decoder_read_array_int32(dec, &out_count);
+    int32_t* out = xpb_decoder_read_array_int32(dec, 64, &out_count);
 
     ASSERT("decoded count matches", out_count == 5);
     ASSERT("decoder still ok after legitimate read", xpb_decoder_ok(dec));
@@ -174,6 +222,7 @@ int main() {
     test_xpb008_string_length_bomb();
     test_xpb009_buffer_over_read();
     test_xpb010_negative_array_count();
+    test_xpb114_encoder_sticky_error_model();
     test_array_roundtrip_still_works();
 
     printf("\n===========================================\n");

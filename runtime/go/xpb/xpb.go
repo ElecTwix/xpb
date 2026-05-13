@@ -340,18 +340,29 @@ func (d *Decoder) Skip(n int) error {
 }
 
 // ReadArrayCount reads a 4-byte signed array length used by repeated and map
-// fields, validating it before the caller allocates a backing slice. It rejects
-// negative counts and counts that cannot possibly fit in the remaining buffer
-// (each element must occupy at least elementMinBytes on the wire). Pass 1 when
-// elements are variable-length (string, bytes, message). Pass 0 to skip the
-// upper-bound check (not recommended for untrusted input).
-func (d *Decoder) ReadArrayCount(elementMinBytes int) (int32, error) {
+// fields, validating it before the caller allocates a backing slice. The
+// caller MUST supply maxElements — the runtime does not pick a default,
+// so application-level allocation policy is visible at every call site.
+//
+// Validation order, fail-closed: negative counts rejected first, then
+// counts above the caller's maxElements, then counts that cannot fit in
+// the remaining buffer (each element occupies at least elementMinBytes
+// on the wire). Pass elementMinBytes=1 for variable-length elements
+// (string, bytes, message). Pass elementMinBytes=0 to skip the buffer
+// bound (only safe for fully trusted input).
+func (d *Decoder) ReadArrayCount(elementMinBytes, maxElements int) (int32, error) {
+	if maxElements < 0 {
+		return 0, fmt.Errorf("xpb: ReadArrayCount maxElements must be >= 0, got %d", maxElements)
+	}
 	n, err := d.ReadInt32()
 	if err != nil {
 		return 0, err
 	}
 	if n < 0 {
 		return 0, fmt.Errorf("xpb: negative array count: %d", n)
+	}
+	if int(n) > maxElements {
+		return 0, fmt.Errorf("xpb: array count %d exceeds caller-supplied max %d", n, maxElements)
 	}
 	if elementMinBytes > 0 {
 		max := d.Remaining() / elementMinBytes

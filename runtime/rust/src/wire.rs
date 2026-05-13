@@ -11,3 +11,10 @@ pub const SIZE_UINT32: usize = 4;
 pub const SIZE_UINT64: usize = 8;
 pub const SIZE_FLOAT32: usize = 4;
 pub const SIZE_FLOAT64: usize = 8;
+
+/// Cap on nested-message decode recursion. Mirrors xpb.MaxDecodeDepth in
+/// the Go runtime / MaxDecodeDepth in TS / XPB_MAX_DECODE_DEPTH in C.
+/// Generated `unmarshal_at(depth)` shims compare against this before doing
+/// any work, refusing adversarial deeply-nested payloads that would blow
+/// the Rust thread stack.
+pub const MAX_DECODE_DEPTH: u32 = 64;

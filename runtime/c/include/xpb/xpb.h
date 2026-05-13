@@ -21,15 +21,29 @@ extern "C" {
 #define XPB_SIZE_FLOAT32 4
 #define XPB_SIZE_FLOAT64 8
 
+/* Cap on nested-message decode recursion. Mirrors xpb.MaxDecodeDepth in
+ * the Go runtime / MaxDecodeDepth in TS. Generated T_unmarshal_at(depth)
+ * shims compare against this before doing any work. */
+#define XPB_MAX_DECODE_DEPTH 64
+
 /* Forward declarations */
 struct xpb_encoder;
 struct xpb_decoder;
 
-/* Encoder API */
+/* Encoder API.
+ *
+ * `xpb_encoder_create` returns NULL on allocation failure; callers MUST
+ * check before using the returned encoder. Every `write_*` and `finish`
+ * function additionally sets a sticky error flag on internal realloc
+ * failure (mirrors the decoder's sticky-error pattern). After a sticky
+ * error, every subsequent write becomes a no-op; finish() returns NULL
+ * and zeroes *out_len. Use `xpb_encoder_ok()` to test before trusting
+ * the encoded output. */
 struct xpb_encoder* xpb_encoder_create(size_t initial_capacity);
 void xpb_encoder_destroy(struct xpb_encoder* enc);
 
 void xpb_encoder_reset(struct xpb_encoder* enc);
+bool xpb_encoder_ok(const struct xpb_encoder* enc);
 uint8_t* xpb_encoder_finish(struct xpb_encoder* enc, size_t* out_len);
 
 void xpb_encoder_write_bool(struct xpb_encoder* enc, bool v);
@@ -72,6 +86,20 @@ uint8_t* xpb_decoder_read_bytes(struct xpb_decoder* dec, size_t* out_len);
 uint8_t* xpb_decoder_read_message_bytes(struct xpb_decoder* dec, size_t* out_len);
 void xpb_decoder_skip(struct xpb_decoder* dec, size_t n);
 
+/* Validate and return an array length read from the wire. The caller MUST
+ * pass `max_elements`; the runtime does NOT pick a default. A count that
+ * is negative, exceeds `max_elements`, or cannot fit in the remaining
+ * buffer at `element_min_bytes` per element is rejected before any
+ * allocation. Pass element_min_bytes=0 to skip the buffer bound (only safe
+ * for fully trusted input). Returns true on success with *out_count set;
+ * false on failure (decoder sticky-error latched, *out_count zeroed). */
+bool xpb_decoder_validate_array_count(
+    struct xpb_decoder* dec,
+    size_t element_min_bytes,
+    size_t max_elements,
+    size_t* out_count
+);
+
 /* Array API - Arrays are encoded as: count (int32) + elements */
 void xpb_encoder_write_array_int32(struct xpb_encoder* enc, const int32_t* arr, size_t count);
 void xpb_encoder_write_array_int64(struct xpb_encoder* enc, const int64_t* arr, size_t count);
@@ -82,14 +110,18 @@ void xpb_encoder_write_array_float64(struct xpb_encoder* enc, const double* arr,
 void xpb_encoder_write_array_bool(struct xpb_encoder* enc, const bool* arr, size_t count);
 void xpb_encoder_write_array_string(struct xpb_encoder* enc, const char** arr, size_t count);
 
-int32_t* xpb_decoder_read_array_int32(struct xpb_decoder* dec, size_t* out_count);
-int64_t* xpb_decoder_read_array_int64(struct xpb_decoder* dec, size_t* out_count);
-uint32_t* xpb_decoder_read_array_uint32(struct xpb_decoder* dec, size_t* out_count);
-uint64_t* xpb_decoder_read_array_uint64(struct xpb_decoder* dec, size_t* out_count);
-float* xpb_decoder_read_array_float32(struct xpb_decoder* dec, size_t* out_count);
-double* xpb_decoder_read_array_float64(struct xpb_decoder* dec, size_t* out_count);
-bool* xpb_decoder_read_array_bool(struct xpb_decoder* dec, size_t* out_count);
-char** xpb_decoder_read_array_string(struct xpb_decoder* dec, size_t* out_count);
+/* Each xpb_decoder_read_array_* requires the caller to pass `max_elements`
+ * explicitly. The runtime does not pick a default budget — every call
+ * site declares its policy. See xpb_decoder_validate_array_count for the
+ * full semantics. */
+int32_t* xpb_decoder_read_array_int32(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+int64_t* xpb_decoder_read_array_int64(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+uint32_t* xpb_decoder_read_array_uint32(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+uint64_t* xpb_decoder_read_array_uint64(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+float* xpb_decoder_read_array_float32(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+double* xpb_decoder_read_array_float64(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+bool* xpb_decoder_read_array_bool(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
+char** xpb_decoder_read_array_string(struct xpb_decoder* dec, size_t max_elements, size_t* out_count);
 
 /* Utility - free string/bytes allocated by decoder */
 void xpb_free(void* ptr);

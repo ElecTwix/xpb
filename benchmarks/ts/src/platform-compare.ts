@@ -44,7 +44,7 @@ async function main() {
   
   // XPB JIT
   const jitEncode = compileEncoder<typeof smallUser>(userSchema);
-  const jitDecode = compileDecoder<typeof smallUser>(userSchema);
+  const jitDecode = compileDecoder<typeof smallUser>(userSchema, 1 << 24);
   const slab = new SlabAllocator(65536);
   
   slab.pos = 0;

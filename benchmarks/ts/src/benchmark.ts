@@ -124,7 +124,7 @@ const ProtoLargeUser = protoRoot.lookupType("benchmark.LargeUser");
 
 function benchXPB_V2_Small(): BenchResult {
   const jitEncode = compileEncoder<typeof smallUser>(smallUserSchema);
-  const jitDecode = compileDecoder<typeof smallUser>(smallUserSchema);
+  const jitDecode = compileDecoder<typeof smallUser>(smallUserSchema, 1 << 24);
   const slab = new SlabAllocator(65536);
   
   // Warmup and get size
@@ -177,7 +177,7 @@ function benchXPB_V2_Manual_Small(): BenchResult {
 
 function benchXPB_V2_Large(): BenchResult {
   const jitEncode = compileEncoder<typeof largeUser>(largeUserSchema);
-  const jitDecode = compileDecoder<typeof largeUser>(largeUserSchema);
+  const jitDecode = compileDecoder<typeof largeUser>(largeUserSchema, 1 << 24);
   const slab = new SlabAllocator(65536);
   
   // Warmup and get size

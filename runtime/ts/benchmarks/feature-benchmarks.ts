@@ -224,7 +224,7 @@ class BenchmarkRunner {
     
     // Lazy view benchmark
     const lazyResult = await this.runBenchmark('String[] Lazy', 'lazy-view', dataSize, () => {
-      const view = new StringArrayView(encoded);
+      const view = new StringArrayView(encoded, 1 << 24);
       // Access first, middle, last
       const first = view.get(0);
       const middle = view.get(Math.floor(view.length / 2));
@@ -234,7 +234,7 @@ class BenchmarkRunner {
     
     // Full iteration lazy
     const lazyFullResult = await this.runBenchmark('String[] Lazy (Full)', 'lazy-view-full', dataSize, () => {
-      const view = new StringArrayView(encoded);
+      const view = new StringArrayView(encoded, 1 << 24);
       for (let i = 0; i < view.length; i++) {
         view.get(i);
       }

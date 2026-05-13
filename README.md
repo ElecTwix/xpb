@@ -204,5 +204,6 @@ xpb/
 
 - [Wire Format Spec](docs/WIRE_FORMAT.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [Security Model & Breaking Changes](docs/SECURITY.md) — the `readArrayCount(elementMinBytes, maxElements)` contract every decoder honors
 - [Benchmark Results](docs/BENCHMARKS.md)
 - [Agent Guidelines](AGENTS.md)

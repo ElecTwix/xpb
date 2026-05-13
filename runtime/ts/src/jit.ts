@@ -218,9 +218,29 @@ function generateFieldWrite(field: FieldDef, valVar: string): string {
 
 // ============= JIT V2 DECODER =============
 
-export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: number) => T {
+/**
+ * compileDecoder JITs a decoder for `schema`. The caller MUST supply
+ * `maxElements`: it is baked into the compiled function at JIT time, so
+ * every repeated-field decode runs through the same caller-supplied-max
+ * / negative / buffer-bound checks the runtime `Decoder.readArrayCount`
+ * applies. Without this, a wire count of -1 cast through `>>> 0` reads
+ * as 4 294 967 295 and `new Array(count)` either pre-allocates a sparse
+ * 4 GB slot or — once the loop runs — OOMs the JS heap.
+ *
+ * `maxElements` is a function-level budget (every repeated field on the
+ * schema shares it). Pick the smallest budget that fits your worst-case
+ * legitimate payload.
+ */
+export function compileDecoder<T>(
+  schema: SchemaDef,
+  maxElements: number,
+): (buf: Uint8Array, end: number) => T {
+  if (!Number.isInteger(maxElements) || maxElements < 0) {
+    throw new RangeError('xpb: compileDecoder requires non-negative integer maxElements');
+  }
+
   const lines: string[] = [];
-  
+
   // Check if we need a DataView (for floats)
   const hasFloats = schema.fields.some(f => f.type === FieldType.Float32 || f.type === FieldType.Float64);
 
@@ -231,14 +251,38 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
     ${hasFloats ? 'var view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);' : ''}
   `);
 
+  // The budget is baked into the function body so the bounds check is a
+  // constant compare. JSON.stringify guards against any unintentional
+  // escapes if maxElements ever comes from less-trusted code paths.
+  const maxLit = JSON.stringify(maxElements);
+
   for (const field of schema.fields) {
     if (field.repeated) {
-      // V2: Read count then elements
+      // V2 repeated layout: int32 count + elements. Read the count as
+      // SIGNED so `< 0` catches the wire's negative range, then the
+      // caller-max check fires before any allocation, then the
+      // remaining-buffer check guarantees the per-element reads can
+      // actually be satisfied — bounded by the field's minimum on-wire
+      // size, not 1 byte (an int32 array of N elements needs 4N bytes;
+      // a flat `count > (end - pos)` check would let through a payload
+      // with too few bytes for the actual element type and synthesize
+      // garbage values past the buffer).
+      const elemMin = jitMinWireBytes(field.type);
+      const elemMinLit = JSON.stringify(elemMin);
       lines.push(`
         {
-          // Read fixed int32 count (ensure unsigned)
-          var count = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          var count = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
           pos += 4;
+          if (count < 0) {
+            throw new Error('xpb: negative array count: ' + count);
+          }
+          if (count > ${maxLit}) {
+            throw new Error('xpb: array count ' + count + ' exceeds caller-supplied max ' + ${maxLit});
+          }
+          var __maxFromBuf = Math.floor((end - pos) / ${elemMinLit});
+          if (count > __maxFromBuf) {
+            throw new Error('xpb: array count ' + count + ' exceeds buffer-bounded max ' + __maxFromBuf);
+          }
           obj.${field.name} = new Array(count);
           for (var i = 0; i < count; i++) {
             ${generateFieldRead(field)}
@@ -258,6 +302,35 @@ export function compileDecoder<T>(schema: SchemaDef): (buf: Uint8Array, end: num
 
   return new Function('textDecoder', 'isNode', 'buf', 'end', lines.join('\n'))
     .bind(null, textDecoder, isNode) as any;
+}
+
+/**
+ * Smallest possible on-wire size for one element of `t`. The JIT
+ * uses this to bound a repeated-field count: a count of N elements
+ * cannot be honest if the remaining buffer is smaller than N * minBytes.
+ * Variable-length elements (string, bytes, message) occupy at least
+ * 1 byte on the wire — the compact-length prefix even for an empty
+ * value. Mirrors tsMinWireBytes in pkg/codegen/typescript/emitter.go.
+ */
+function jitMinWireBytes(t: FieldType): number {
+  switch (t) {
+    case FieldType.Bool:
+      return 1;
+    case FieldType.Int32:
+    case FieldType.Uint32:
+    case FieldType.Float32:
+      return 4;
+    case FieldType.Int64:
+    case FieldType.Uint64:
+    case FieldType.Float64:
+      return 8;
+    case FieldType.String:
+    case FieldType.Bytes:
+    case FieldType.Message:
+      return 1;
+    default:
+      return 1;
+  }
 }
 
 function generateFieldRead(field: FieldDef): string {
@@ -300,16 +373,24 @@ function generateFieldRead(field: FieldDef): string {
       `;
 
     case FieldType.String:
-      // V2: Compact length + string bytes
+      // V2: Compact length + string bytes. Handles both forms:
+      //   short form: 1 byte length when len <= 254
+      //   long form:  0xFF marker + 4-byte little-endian uint32 length
+      // Missing the long-form branch silently mis-parses every string
+      // >= 255 bytes (the JIT decoder reads the 0xFF marker as len=255
+      // and consumes 255 bytes starting inside the 4-byte length field).
       return `
-        // Read compact length (1 byte for short strings)
-        len = buf[pos++];
-        
-        // Fast path: Buffer.toString for Node
+        first = buf[pos++];
+        if (first === 255) {
+          len = (buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24)) >>> 0;
+          pos += 4;
+        } else {
+          len = first;
+        }
+
         if (isNode) {
           val = buf.toString('utf8', pos, pos + len);
         } else {
-          // Browser optimization: Manual decode for short strings (< 20 chars)
           if (len < 20) {
             var isAscii = true;
             for (var i = 0; i < len; i++) {
