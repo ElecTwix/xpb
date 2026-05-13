@@ -547,6 +547,70 @@ func TestSecurityAudit_XPB127_BenchmarkCallersPassMaxElements(t *testing.T) {
 	t.Log("XPB-127 OK: every StringArrayView caller in the benchmarks passes maxElements")
 }
 
+// SecurityFinding: XPB-128 (final self-review)
+// Severity: P2
+// Original symptom: same class of bug as XPB-127. compileDecoder in
+// jit.ts gained a required `maxElements` parameter in XPB-124, but the
+// in-repo TS benchmark callers that import from `../../../runtime/ts/src/jit.js`
+// still called the one-arg form. JS would have accepted the call at
+// runtime (extra-arg defaults to undefined → `Number.isInteger(undefined)`
+// is false → throws RangeError) but the TypeScript compile would have
+// failed first.
+//
+// Affected: benchmarks/ts/src/{platform-compare,verify_unsafe,benchmark}.ts.
+// (benchmarks/browser/src/xpb-browser.ts imports compileDecoder from
+// runtime/ts/src/browser, NOT jit.js — that compileDecoder is the
+// flat-schema variant that does not allocate Array(count) and was
+// intentionally kept one-arg.)
+//
+// Fix: pass the same 1 << 24 budget the codegen uses.
+func TestSecurityAudit_XPB128_BenchmarkCompileDecoderCallers(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"benchmarks/ts/src/platform-compare.ts",
+		"benchmarks/ts/src/verify_unsafe.ts",
+		"benchmarks/ts/src/benchmark.ts",
+	} {
+		src, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		body := string(src)
+		// These files all import from runtime/ts/src/jit.js — the
+		// hardened compileDecoder. Every call to it must pass
+		// maxElements. The bug shape would be `compileDecoder<...>(x)`
+		// with a single argument; the fixed shape has a comma.
+		idx := 0
+		for {
+			i := strings.Index(body[idx:], "compileDecoder<")
+			if i < 0 {
+				break
+			}
+			callStart := idx + i + len("compileDecoder<")
+			closeAngle := strings.Index(body[callStart:], ">")
+			if closeAngle < 0 {
+				t.Fatalf("%s: unparseable compileDecoder generic", path)
+			}
+			openParen := strings.Index(body[callStart+closeAngle:], "(")
+			if openParen < 0 {
+				t.Fatalf("%s: compileDecoder call without parens", path)
+			}
+			argStart := callStart + closeAngle + openParen + 1
+			closeParen := strings.Index(body[argStart:], ")")
+			if closeParen < 0 {
+				t.Fatalf("%s: unbalanced parens in compileDecoder call", path)
+			}
+			args := body[argStart : argStart+closeParen]
+			if !strings.Contains(args, ",") {
+				t.Fatalf("REGRESSION: %s has a single-arg compileDecoder call: `compileDecoder<...>(%s)`",
+					path, args)
+			}
+			idx = argStart + closeParen
+		}
+	}
+	t.Log("XPB-128 OK: every compileDecoder caller in benchmarks/ts passes maxElements")
+}
+
 // SecurityFinding: XPB-119 (post-review uniformity)
 // Severity: High
 // Description: After the audit, every runtime decoder's array-count gate

@@ -104,7 +104,7 @@ function verify() {
   };
 
   const jitEncode = compileEncoder<typeof testData>(schema);
-  const jitDecode = compileDecoder<typeof testData>(schema);
+  const jitDecode = compileDecoder<typeof testData>(schema, 1 << 24);
   const slab = new SlabAllocator();
   
   jitEncode(slab, testData);
