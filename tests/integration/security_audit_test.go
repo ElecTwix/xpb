@@ -493,6 +493,60 @@ func TestSecurityAudit_XPB126_TSJITUsesElementMinBytes(t *testing.T) {
 	t.Log("XPB-126 OK: JIT bound check uses per-field minimum wire size")
 }
 
+// SecurityFinding: XPB-127 (Codex re-review pass 2)
+// Severity: P2
+// Original symptom: StringArrayView's constructor gained a required
+// `maxElements` parameter in XPB-112, but the in-repo TypeScript
+// benchmark/demo files still constructed it the old way:
+//   new StringArrayView(encoded)
+// Each call threw `RangeError: xpb: StringArrayView requires
+// non-negative integer maxElements` because the constructor now
+// validates with Number.isInteger. `npm test` failed before the lazy
+// string benchmarks could run. Six call sites across three files
+// (feature-benchmarks.ts × 2, browser-benchmarks.spec.ts × 2,
+// test-page.html × 2).
+//
+// Fix: pass the same default cap (1 << 24) the codegen uses. This
+// test scans every known StringArrayView call site for the now-
+// required second argument.
+func TestSecurityAudit_XPB127_BenchmarkCallersPassMaxElements(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"runtime/ts/benchmarks/feature-benchmarks.ts",
+		"runtime/ts/benchmarks/browser-benchmarks.spec.ts",
+		"runtime/ts/benchmarks/test-page.html",
+	} {
+		src, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		body := string(src)
+		// The bug shape: `new StringArrayView(<single-ident>)` with no
+		// comma before the closing paren. Reject the regression by
+		// looking for that pattern; allow the fixed form
+		// `new StringArrayView(buf, max[, start])`.
+		idx := 0
+		for {
+			i := strings.Index(body[idx:], "new StringArrayView(")
+			if i < 0 {
+				break
+			}
+			start := idx + i + len("new StringArrayView(")
+			closeParen := strings.Index(body[start:], ")")
+			if closeParen < 0 {
+				t.Fatalf("%s: unbalanced parens in StringArrayView call", path)
+			}
+			args := body[start : start+closeParen]
+			if !strings.Contains(args, ",") {
+				t.Fatalf("REGRESSION: %s has a single-arg StringArrayView call: `new StringArrayView(%s)`",
+					path, args)
+			}
+			idx = start + closeParen
+		}
+	}
+	t.Log("XPB-127 OK: every StringArrayView caller in the benchmarks passes maxElements")
+}
+
 // SecurityFinding: XPB-119 (post-review uniformity)
 // Severity: High
 // Description: After the audit, every runtime decoder's array-count gate

@@ -402,7 +402,7 @@ test.describe('XPB Browser Benchmarks - Chrome vs Firefox', () => {
           const lazyInitTimes: number[] = [];
           for (let i = 0; i < 10; i++) {
             const start = performance.now();
-            const view = new StringArrayView(encoded);
+            const view = new StringArrayView(encoded, 1 << 24);
             const first = view.get(0);
             const middle = view.get(Math.floor(view.length / 2));
             const last = view.get(view.length - 1);
@@ -415,7 +415,7 @@ test.describe('XPB Browser Benchmarks - Chrome vs Firefox', () => {
           const lazyFullTimes: number[] = [];
           for (let i = 0; i < 10; i++) {
             const start = performance.now();
-            const view = new StringArrayView(encoded);
+            const view = new StringArrayView(encoded, 1 << 24);
             for (let j = 0; j < view.length; j++) {
               view.get(j);
             }

@@ -329,7 +329,7 @@
             
             // Lazy init only
             const lazyInitResult = await runBenchmark('String[] Lazy Init', 'lazy-view', size, () => {
-                const view = new StringArrayView(encoded);
+                const view = new StringArrayView(encoded, 1 << 24);
                 const first = view.get(0);
                 const middle = view.get(Math.floor(view.length / 2));
                 const last = view.get(view.length - 1);
@@ -341,7 +341,7 @@
             
             // Lazy full iteration
             const lazyFullResult = await runBenchmark('String[] Lazy Full', 'lazy-view-full', size, () => {
-                const view = new StringArrayView(encoded);
+                const view = new StringArrayView(encoded, 1 << 24);
                 for (let i = 0; i < view.length; i++) {
                     view.get(i);
                 }
