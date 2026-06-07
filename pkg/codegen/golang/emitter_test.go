@@ -288,6 +288,14 @@ func TestGenerate_NestedMessage(t *testing.T) {
 	if !contains(output, "Addr *Address") {
 		t.Error("Output should contain 'Addr *Address' field type")
 	}
+
+	// Nested-message decode must guard the recursive unmarshalAt on
+	// `len(data) > 0`. Without the guard, a 0-length envelope (which a
+	// caller of the encode side produces when the field is nil) triggers
+	// `unexpected EOF` at the nested type's first ReadString / ReadBytes.
+	if !contains(output, "if len(data) > 0 {") {
+		t.Error("Output should guard nested unmarshalAt on len(data) > 0 to round-trip nil pointers")
+	}
 }
 
 func TestGenerator_DefaultPackage(t *testing.T) {

@@ -332,10 +332,20 @@ func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, in
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = v\n", indent, varName)
 	case ast.TypeMessage:
+		// A nil/absent nested message encoded as a 0-length envelope must
+		// decode back to a nil pointer rather than crashing. Skip the
+		// allocation + recursive unmarshalAt when the length prefix is
+		// empty — calling unmarshalAt on empty bytes errors at the
+		// nested type's first ReadString/ReadBytes inside an empty
+		// buffer. Leaves the destination nil, which is symmetric with
+		// what a caller of the encode side would produce when the field
+		// is nil.
 		g.printf("%sdata, err := dec.ReadMessageBytes()\n", indent)
 		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = &%s{}\n", indent, varName, t.Message)
-		g.printf("%sif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
+		g.printf("%sif len(data) > 0 {\n", indent)
+		g.printf("%s\t%s = &%s{}\n", indent, varName, t.Message)
+		g.printf("%s\tif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
+		g.printf("%s}\n", indent)
 	}
 }
 
