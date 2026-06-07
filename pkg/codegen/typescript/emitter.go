@@ -255,8 +255,6 @@ func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 }
 
 func (g *Generator) generateScalarDecodeTS(target string, t ast.FieldType, indent string, isRepeated bool, isLocalVar bool) {
-	readExpr := g.tsReadCall(t)
-
 	lhs := ""
 	if isLocalVar {
 		lhs = target
@@ -266,6 +264,23 @@ func (g *Generator) generateScalarDecodeTS(target string, t ast.FieldType, inden
 		lhs = fmt.Sprintf("msg.%s", target)
 	}
 
+	// Nested-message fields need special handling so a 0-length envelope
+	// (an absent/null nested message) doesn't trigger a throw inside
+	// the nested type's decodeAt at its first scalar read. Read the
+	// bytes into a local var and skip the recursive decodeAt when
+	// empty — the target stays unassigned, which is symmetric with
+	// what a caller of the encode side would produce when the field
+	// is null/undefined. We must resolve enums-as-messages first since
+	// they share the TypeMessage tag at this layer.
+	if t.Kind == ast.TypeMessage && !g.enums.IsEnum(t) {
+		g.printf("%s{\n", indent)
+		g.printf("%s  const _data = dec.readMessageBytes();\n", indent)
+		g.printf("%s  if (_data.length > 0) %s = %s.decodeAt(_data, depth+1);\n", indent, lhs, t.Message)
+		g.printf("%s}\n", indent)
+		return
+	}
+
+	readExpr := g.tsReadCall(t)
 	g.printf("%s%s = %s;\n", indent, lhs, readExpr)
 }
 
