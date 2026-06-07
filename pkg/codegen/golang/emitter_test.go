@@ -296,6 +296,16 @@ func TestGenerate_NestedMessage(t *testing.T) {
 	if !contains(output, "if len(data) > 0 {") {
 		t.Error("Output should guard nested unmarshalAt on len(data) > 0 to round-trip nil pointers")
 	}
+
+	// Nested-message encode must nil-guard MarshalTo. Without the guard,
+	// a caller passing a nil pointer (an absent optional field, or a nil
+	// entry inside a repeated/map slice) would panic at `nil.MarshalTo`.
+	// With the guard, a nil pointer emits a 0-length envelope, which the
+	// decode side maps back to nil. (Check the prefix only; gofmt may
+	// re-break the single-line `if X { Y }` into a multi-line block.)
+	if !contains(output, "if m.Addr != nil") || !contains(output, "m.Addr.MarshalTo(nestedEnc)") {
+		t.Error("Output should guard nested MarshalTo on `m.Field != nil` to handle nil pointers without panicking")
+	}
 }
 
 func TestGenerator_DefaultPackage(t *testing.T) {

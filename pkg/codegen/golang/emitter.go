@@ -218,9 +218,15 @@ func (g *Generator) generateScalarEncode(varName string, t ast.FieldType, indent
 	case ast.TypeBytes:
 		g.printf("%senc.WriteBytes(%s)\n", indent, varName)
 	case ast.TypeMessage:
+		// Nested message fields are represented as Go pointers, so the
+		// value can be nil — either an absent optional field or a
+		// nil entry inside a repeated/map slice. Calling MarshalTo on
+		// a nil pointer would panic; instead, write a 0-length envelope.
+		// This is the symmetric counterpart of the decode-side guard
+		// that skips unmarshalAt on `len(data) > 0`.
 		g.printf("%s{\n", indent)
 		g.printf("%s\tnestedEnc := xpb.GetEncoder()\n", indent)
-		g.printf("%s\t%s.MarshalTo(nestedEnc)\n", indent, varName)
+		g.printf("%s\tif %s != nil { %s.MarshalTo(nestedEnc) }\n", indent, varName, varName)
 		g.printf("%s\tenc.WriteMessage(nestedEnc.Bytes())\n", indent)
 		g.printf("%s\txpb.PutEncoder(nestedEnc)\n", indent)
 		g.printf("%s}\n", indent)
