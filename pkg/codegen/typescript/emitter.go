@@ -207,8 +207,13 @@ func (g *Generator) generateScalarEncodeTS(varName string, t ast.FieldType, inde
 	case ast.TypeBytes:
 		g.printf("%senc.writeBytes(%s ?? new Uint8Array(0));\n", indent, varName)
 	case ast.TypeMessage:
-		// V2 Message: length prefix + encoded bytes
-		g.printf("%senc.writeMessage(%s.encode(%s));\n", indent, t.Message, varName)
+		// V2 Message: length prefix + encoded bytes. A null/undefined
+		// value (an absent optional field or a nullish entry inside a
+		// repeated/map array) would throw inside Klass.encode at the
+		// nested type's first writeBytes/writeString. Emit a 0-length
+		// envelope instead — symmetric with the decode-side guard that
+		// skips decodeAt on `_data.length > 0`.
+		g.printf("%senc.writeMessage(%s != null ? %s.encode(%s) : new Uint8Array(0));\n", indent, varName, t.Message, varName)
 	}
 }
 
