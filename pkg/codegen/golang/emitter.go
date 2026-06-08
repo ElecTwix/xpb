@@ -218,9 +218,15 @@ func (g *Generator) generateScalarEncode(varName string, t ast.FieldType, indent
 	case ast.TypeBytes:
 		g.printf("%senc.WriteBytes(%s)\n", indent, varName)
 	case ast.TypeMessage:
+		// Nested message fields are represented as Go pointers, so the
+		// value can be nil — either an absent optional field or a
+		// nil entry inside a repeated/map slice. Calling MarshalTo on
+		// a nil pointer would panic; instead, write a 0-length envelope.
+		// This is the symmetric counterpart of the decode-side guard
+		// that skips unmarshalAt on `len(data) > 0`.
 		g.printf("%s{\n", indent)
 		g.printf("%s\tnestedEnc := xpb.GetEncoder()\n", indent)
-		g.printf("%s\t%s.MarshalTo(nestedEnc)\n", indent, varName)
+		g.printf("%s\tif %s != nil { %s.MarshalTo(nestedEnc) }\n", indent, varName, varName)
 		g.printf("%s\tenc.WriteMessage(nestedEnc.Bytes())\n", indent)
 		g.printf("%s\txpb.PutEncoder(nestedEnc)\n", indent)
 		g.printf("%s}\n", indent)
@@ -332,10 +338,20 @@ func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, in
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = v\n", indent, varName)
 	case ast.TypeMessage:
+		// A nil/absent nested message encoded as a 0-length envelope must
+		// decode back to a nil pointer rather than crashing. Skip the
+		// allocation + recursive unmarshalAt when the length prefix is
+		// empty — calling unmarshalAt on empty bytes errors at the
+		// nested type's first ReadString/ReadBytes inside an empty
+		// buffer. Leaves the destination nil, which is symmetric with
+		// what a caller of the encode side would produce when the field
+		// is nil.
 		g.printf("%sdata, err := dec.ReadMessageBytes()\n", indent)
 		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = &%s{}\n", indent, varName, t.Message)
-		g.printf("%sif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
+		g.printf("%sif len(data) > 0 {\n", indent)
+		g.printf("%s\t%s = &%s{}\n", indent, varName, t.Message)
+		g.printf("%s\tif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
+		g.printf("%s}\n", indent)
 	}
 }
 

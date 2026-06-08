@@ -284,6 +284,24 @@ func TestGenerate_NestedMessage(t *testing.T) {
 	if !contains(output, "addr: Address") {
 		t.Error("Output should contain 'addr: Address' field type")
 	}
+
+	// Nested-message decode must guard the recursive decodeAt on
+	// `_data.length > 0`. Without the guard, a 0-length envelope (which
+	// a caller of the encode side produces when the field is
+	// null/undefined) triggers a throw at the nested type's first
+	// readString / readBytes.
+	if !contains(output, "if (_data.length > 0)") {
+		t.Error("Output should guard nested decodeAt on _data.length > 0 to round-trip null/undefined pointers")
+	}
+
+	// Nested-message encode must null-guard Klass.encode. Without the
+	// guard, a caller passing null/undefined (an absent optional field
+	// or a nullish entry inside a repeated/map array) throws inside
+	// Klass.encode. With the guard, a null value emits a 0-length
+	// envelope, which the decode side maps back to undefined.
+	if !contains(output, "msg.addr != null ? Address.encode(msg.addr) : new Uint8Array(0)") {
+		t.Error("Output should null-guard nested Klass.encode to handle null/undefined without throwing")
+	}
 }
 
 func TestGenerate_MapField(t *testing.T) {
