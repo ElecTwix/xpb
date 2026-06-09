@@ -1,0 +1,79 @@
+tests/conformance/manifest.go
+  s_165453c95b4380::t_58f559cf01f334 62-64
+  s_165453c95b4380::t_7b062a14f98519 1-61,65-92
+pkg/codegen/golang/emitter.go
+  s_165453c95b4380::t_f007d1767946e8 236-243
+runtime/go/xpb/float_test.go
+  s_165453c95b4380::t_01a6cfa7797e89 1-108,110-132,134-145
+  s_165453c95b4380::t_6c9487f3e1f5d8 109,133
+tests/conformance/codec.go
+  s_165453c95b4380::t_58f559cf01f334 38
+  s_165453c95b4380::t_914658499f49cd 1-37,39-318
+runtime/go/xpb/malformed_test.go
+  s_165453c95b4380::t_94527fe23df865 1-224
+testdata/conformance/string_ascii.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+tests/integration/go_codegen_test.go
+  s_165453c95b4380::t_a9c2a0fae3f587 2-9,16,24-30,32-33,35,37-58,60-64,67-73,75-76,79-92,94-106,109-115,117-120,123,127,129,132-134,138-141,144-146,149,151,153-155,157-161,163-169,172-173,190,192-211,213,215-228,230-236,238-248,250-260,262-264,267-270,282,284,286-289,291-295,297-303,305-306,309-312,318-320,323-325,328-339,341-348,350-358,360-383,385-389,391-412,414,416-428,430-432,434-435,438-441,443-447,449-455,457,459,461-477,480,501
+runtime/go/xpb/property_test.go
+  s_165453c95b4380::t_8fead1ef039d21 1-195
+tests/conformance/vectors.go
+  s_165453c95b4380::t_a8511591c12337 1-120
+testdata/conformance/string_utf8.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+pkg/codegen/typescript/emitter.go
+  s_165453c95b4380::t_d9a7e77fc524ed 14-15,20-22,29-34
+  s_165453c95b4380::t_7249dcb34e0599 170-179,184-188
+  s_165453c95b4380::t_7e38c7bbe25731 256-259
+docs/WIRE_FORMAT.md
+  s_165453c95b4380::t_7a884480a1b8f7 63-66
+runtime/rust/Cargo.toml
+  s_165453c95b4380::t_fa62fd08cc3e61 9
+  s_165453c95b4380::t_9fc18f92658ee6 10
+runtime/rust/tests/property.rs
+  s_165453c95b4380::t_fa44a68bc3653d 1-147
+runtime/go/xpb/aliasing_test.go
+  s_165453c95b4380::t_709f763eef302b 1-105
+testdata/conformance/message_nested.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+runtime/rust/tests/malformed.rs
+  s_165453c95b4380::t_4d4c0f431dbeac 1-113
+runtime/go/xpb/pool_test.go
+  s_165453c95b4380::t_1bca2deeaa2cdd 1-74
+runtime/ts/src/conformance.test.ts
+  s_165453c95b4380::t_fd30881f320049 1-245
+runtime/rust/tests/float_bits.rs
+  s_165453c95b4380::t_44b9772fa2630f 1-75
+runtime/go/xpb/fuzz_test.go
+  s_165453c95b4380::t_88e042be409754 1-52,54-77
+  s_165453c95b4380::t_6c9487f3e1f5d8 53
+runtime/go/xpb/xpb.go
+  s_165453c95b4380::t_a967fbc8415dbd 327-331,333
+testdata/conformance/vectors.json
+  s_165453c95b4380::t_3d9207e9ff7ba0 1-683
+runtime/rust/tests/conformance.rs
+  s_165453c95b4380::t_8f16bbe25449e9 1-245
+tests/integration/ts_codegen_test.go
+  s_165453c95b4380::t_81825d83589d88 2-10,14-16,24-28,30-35,37-38,40-41,43-47,49-50,52,55-60,62,64,66-67,69-109,111,114-116,118-128,130-131,133,135-142,145-148,151-157,160-162,165-170,172-176,178-179,181,183,185-187,189-211,214-254,256-284,286-288,290-312,315-317,319-343,345-350,352-354,357-380,382-384,386-409,411-413,415-433,436,438-439,441-443,445-447,451
+  s_165453c95b4380::t_6c9487f3e1f5d8 21
+testdata/conformance/bool_true.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+tests/conformance/conformance_test.go
+  s_165453c95b4380::t_3a085f1582c8fa 1-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e87b97437d9cbbc49ce5b1827ab9cbba07026840",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
