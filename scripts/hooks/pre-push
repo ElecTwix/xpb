@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Local CI gate: runs the Go CI runner before every push and blocks on failure.
+# Activate with:  go run ./cmd/ci --install-hook   (sets core.hooksPath=scripts/hooks)
+# Bypass once with: git push --no-verify
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec go run ./cmd/ci

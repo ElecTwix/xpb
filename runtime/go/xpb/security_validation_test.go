@@ -19,16 +19,19 @@ import (
 // SecurityFinding: XPB-001
 // Severity: High
 // Description: Generated decoder code reads a repeated/map field's length
-//   via dec.ReadInt32() and immediately calls make([]Type, count). A signed
-//   int32 read from the wire can be negative, and `make([]T, -1)` panics
-//   with "makeslice: len out of range" — turning any malicious payload
-//   into an unrecovered runtime panic from the decoder goroutine.
 //
-//   Fix: ReadArrayCount validates the count is non-negative before
-//   returning it, so generated code can fail fast with an error instead of
-//   panicking.
+//	via dec.ReadInt32() and immediately calls make([]Type, count). A signed
+//	int32 read from the wire can be negative, and `make([]T, -1)` panics
+//	with "makeslice: len out of range" — turning any malicious payload
+//	into an unrecovered runtime panic from the decoder goroutine.
+//
+//	Fix: ReadArrayCount validates the count is non-negative before
+//	returning it, so generated code can fail fast with an error instead of
+//	panicking.
+//
 // Expected: After fix — ReadArrayCount returns a non-nil error containing
-//   "negative array count" when the wire bytes encode -1.
+//
+//	"negative array count" when the wire bytes encode -1.
 func TestSecurity_XPB001_NegativeArrayCountRejected(t *testing.T) {
 	var negative int32 = -1
 	var buf [4]byte
@@ -48,17 +51,20 @@ func TestSecurity_XPB001_NegativeArrayCountRejected(t *testing.T) {
 // SecurityFinding: XPB-002
 // Severity: High
 // Description: Generated decoder code reads a repeated-field count and
-//   passes it directly to make([]T, count). A 4-byte int32 can encode up
-//   to 2^31-1 elements; for an int32 element type that's an 8 GB
-//   allocation triggered by a 4-byte attacker payload — a single message
-//   OOMs the receiving process. The generated code never bounds the count
-//   against the bytes actually available in the buffer.
 //
-//   Fix: ReadArrayCount(elementMinBytes) rejects any count that exceeds
-//   `Remaining()/elementMinBytes`, so a count of 2^31-1 in a small buffer
-//   is refused before any allocation happens.
+//	passes it directly to make([]T, count). A 4-byte int32 can encode up
+//	to 2^31-1 elements; for an int32 element type that's an 8 GB
+//	allocation triggered by a 4-byte attacker payload — a single message
+//	OOMs the receiving process. The generated code never bounds the count
+//	against the bytes actually available in the buffer.
+//
+//	Fix: ReadArrayCount(elementMinBytes) rejects any count that exceeds
+//	`Remaining()/elementMinBytes`, so a count of 2^31-1 in a small buffer
+//	is refused before any allocation happens.
+//
 // Expected: After fix — a count of 2^31-1 with only a few trailing bytes
-//   in the buffer returns an "exceeds buffer-bounded max" error.
+//
+//	in the buffer returns an "exceeds buffer-bounded max" error.
 func TestSecurity_XPB002_OversizedArrayCountRejected(t *testing.T) {
 	const bogus int32 = 1 << 30 // a bit over 1 billion entries
 
@@ -119,9 +125,10 @@ func TestSecurity_XPB002_DisabledUpperBound(t *testing.T) {
 // SecurityFinding: XPB-002b (post-review)
 // Severity: High
 // Description: After the audit, ReadArrayCount gained an explicit
-//   `maxElements` parameter so every call site declares its allocation
-//   policy. The runtime checks the caller's max BEFORE the buffer bound
-//   so a tight per-call-site cap can refuse even buffer-fitting payloads.
+//
+//	`maxElements` parameter so every call site declares its allocation
+//	policy. The runtime checks the caller's max BEFORE the buffer bound
+//	so a tight per-call-site cap can refuse even buffer-fitting payloads.
 func TestSecurity_XPB002b_CallerMaxEnforced(t *testing.T) {
 	const want int32 = 100
 	buf := make([]byte, 4+int(want)*4)
@@ -159,20 +166,21 @@ func TestSecurity_XPB002b_NegativeMaxRejected(t *testing.T) {
 // SecurityFinding: XPB-003
 // Severity: Medium
 // Description: Generated Unmarshal previously called itself directly for
-//   nested messages with no depth limit. A self-referential message type
-//   (`message Node { 1: ?Node child }`) accepts a 16 MB payload of nested
-//   1-byte length prefixes — that's ~16 M Unmarshal frames on the stack.
-//   Go grows goroutine stacks up to 1 GB before crashing with "stack
-//   overflow" (process-wide signal — uteka's recover() can't catch it).
 //
-//   Fix: the codegen now wraps the public Unmarshal as a thin shim that
-//   delegates to unmarshalAt(data, 0). unmarshalAt checks
-//   `depth > MaxDecodeDepth` on entry and returns ErrMaxDepthExceeded.
-//   Each nested decode passes depth+1.
+//	nested messages with no depth limit. A self-referential message type
+//	(`message Node { 1: ?Node child }`) accepts a 16 MB payload of nested
+//	1-byte length prefixes — that's ~16 M Unmarshal frames on the stack.
+//	Go grows goroutine stacks up to 1 GB before crashing with "stack
+//	overflow" (process-wide signal — uteka's recover() can't catch it).
 //
-//   This test simulates the generated pattern (the lib doesn't ship a
-//   recursive type itself) and asserts an attacker payload that nests
-//   deeper than MaxDecodeDepth is rejected before exhausting the stack.
+//	Fix: the codegen now wraps the public Unmarshal as a thin shim that
+//	delegates to unmarshalAt(data, 0). unmarshalAt checks
+//	`depth > MaxDecodeDepth` on entry and returns ErrMaxDepthExceeded.
+//	Each nested decode passes depth+1.
+//
+//	This test simulates the generated pattern (the lib doesn't ship a
+//	recursive type itself) and asserts an attacker payload that nests
+//	deeper than MaxDecodeDepth is rejected before exhausting the stack.
 type recNode struct {
 	Child *recNode
 }

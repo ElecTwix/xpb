@@ -150,6 +150,16 @@ message User {
 ## Commands
 
 ```bash
+# Local CI: runs the full multi-language suite (gofmt, go vet/build/test,
+# TypeScript tsc+vitest, Rust cargo, C ASan/UBSan+fuzz+conformance, Lua, Java).
+# Missing toolchains are SKIPped, not failed. Exits non-zero on any failure.
+go run ./cmd/ci
+
+# Make it run automatically on every `git push` (sets core.hooksPath):
+go run ./cmd/ci --install-hook
+
+# --- or run a single language's tests directly ---
+
 # Run Go tests
 go test ./...
 

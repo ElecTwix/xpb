@@ -33,10 +33,10 @@ func runGoBenchmarks() ([]Result, error) {
 	sizes := parseGoSizes(sizeOutput)
 
 	// Parse Performance and map sizes
-	// Regex for standard go bench line: Benchmark<Name>-<Procs> <Iter> <Ns/op> 
-	// Example: BenchmarkXPB_Encode_Small-20 
+	// Regex for standard go bench line: Benchmark<Name>-<Procs> <Iter> <Ns/op>
+	// Example: BenchmarkXPB_Encode_Small-20
 	re := regexp.MustCompile(`Benchmark([A-Za-z0-9_]+)-(\d+)\s+(\d+)\s+([0-9\.]+)\s+ns/op`)
-	
+
 	lines := strings.Split(perfOutput, "\n")
 	for _, line := range lines {
 		matches := re.FindStringSubmatch(line)
@@ -77,13 +77,15 @@ func runGoBenchmarks() ([]Result, error) {
 			// We construct a key: Format + "_" + CleanCat
 			sizeKey := cleanFmt + "_" + cleanCat
 			// Special handling for legacy names in Go tests
-			if cleanCat == "Simple" { sizeKey = cleanFmt + "_Small" }
-			
+			if cleanCat == "Simple" {
+				sizeKey = cleanFmt + "_Small"
+			}
+
 			// Try to match specific sizes
 			// sizes map has keys like "XPB V2_Small", "JSON_Large", "Msgpack_StringArray"
-			
+
 			sizeVal := sizes[sizeKey]
-			
+
 			results = append(results, Result{
 				Platform:  "Go",
 				Category:  cleanCat,
@@ -100,14 +102,14 @@ func runGoBenchmarks() ([]Result, error) {
 func parseGoSizes(output string) map[string]int64 {
 	sizes := make(map[string]int64)
 	lines := strings.Split(output, "\n")
-	
+
 	var currentCat string
-	
+
 	// Helper to map test context to category
 	// TestEncodedSizes -> Small
 	// TestLargeEncodedSizes -> Large
 	// TestCollectionEncodedSizes -> (reads header lines)
-	
+
 	reHeader := regexp.MustCompile(`=== (.*) ===`)
 	reSize := regexp.MustCompile(`(XPB V2|JSON|Msgpack|Protobuf)[^:]*:\s+(\d+)\s+bytes`)
 
@@ -162,7 +164,7 @@ func runNodeBenchmarks() ([]Result, error) {
 		return nil, fmt.Errorf("no json found in node output")
 	}
 	jsonStr := outputStr[idx:]
-	
+
 	var data NodeOutput
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return nil, fmt.Errorf("failed to parse node json: %w", err)
@@ -173,7 +175,7 @@ func runNodeBenchmarks() ([]Result, error) {
 
 func runBrowserBenchmarks() ([]Result, error) {
 	fmt.Println("🔴 Running Browser benchmarks...")
-	
+
 	// Must build first? npm run bench does it.
 	// We call `npm run bench -- --json`
 	cmd := exec.Command("npm", "run", "bench", "--", "--json")
@@ -182,14 +184,14 @@ func runBrowserBenchmarks() ([]Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("browser bench failed: %w", err)
 	}
-	
+
 	outputStr := string(out)
 	idx := strings.Index(outputStr, "{")
 	if idx == -1 {
 		return nil, fmt.Errorf("no json found in browser output")
 	}
 	jsonStr := outputStr[idx:]
-	
+
 	var data NodeOutput
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return nil, fmt.Errorf("failed to parse browser json: %w", err)
