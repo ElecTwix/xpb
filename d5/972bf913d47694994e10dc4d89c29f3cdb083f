@@ -1,0 +1,75 @@
+runtime/go/xpb/aliasing_test.go
+  s_165453c95b4380::t_709f763eef302b 1-105
+runtime/go/xpb/malformed_test.go
+  s_165453c95b4380::t_94527fe23df865 1-224
+runtime/rust/Cargo.toml
+  s_165453c95b4380::t_fa62fd08cc3e61 9
+  s_165453c95b4380::t_9fc18f92658ee6 10
+docs/WIRE_FORMAT.md
+  s_165453c95b4380::t_7a884480a1b8f7 63-66
+runtime/rust/tests/float_bits.rs
+  s_165453c95b4380::t_44b9772fa2630f 1-75
+runtime/rust/tests/malformed.rs
+  s_165453c95b4380::t_4d4c0f431dbeac 1-113
+testdata/conformance/vectors.json
+  s_165453c95b4380::t_3d9207e9ff7ba0 1-683
+runtime/go/xpb/fuzz_test.go
+  s_165453c95b4380::t_88e042be409754 1-52,54-77
+  s_165453c95b4380::t_6c9487f3e1f5d8 53
+pkg/codegen/golang/emitter.go
+  s_165453c95b4380::t_f007d1767946e8 271-278
+testdata/conformance/bool_true.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+testdata/conformance/string_utf8.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+runtime/go/xpb/property_test.go
+  s_165453c95b4380::t_8fead1ef039d21 1-195
+tests/conformance/conformance_test.go
+  s_165453c95b4380::t_3a085f1582c8fa 1-125
+tests/integration/ts_codegen_test.go
+  s_165453c95b4380::t_81825d83589d88 2-10,14-16,24-28,30-35,37-38,40-41,43-47,49-50,52,55-60,62,64,66-67,69-109,111,114-116,118-128,130-131,133,135-142,145-148,151-157,160-162,165-170,172-176,178-179,181,183,185-187,189-211,214-254,256-284,286-288,290-299,306-318,321-323,325-349,351-356,358-360,363-386,388-390,392-415,417-419,421-439,442,444-445,447-449,451-453,457
+  s_165453c95b4380::t_6c9487f3e1f5d8 21
+runtime/rust/tests/property.rs
+  s_165453c95b4380::t_fa44a68bc3653d 1-147
+runtime/go/xpb/float_test.go
+  s_165453c95b4380::t_01a6cfa7797e89 1-108,110-132,134-145
+  s_165453c95b4380::t_6c9487f3e1f5d8 109,133
+runtime/go/xpb/pool_test.go
+  s_165453c95b4380::t_1bca2deeaa2cdd 1-74
+runtime/go/xpb/xpb.go
+  s_165453c95b4380::t_a967fbc8415dbd 334-338,340
+runtime/ts/src/conformance.test.ts
+  s_165453c95b4380::t_fd30881f320049 1-245
+testdata/conformance/message_nested.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+testdata/conformance/string_ascii.bin
+  s_165453c95b4380::t_3d9207e9ff7ba0 1
+tests/conformance/codec.go
+  s_165453c95b4380::t_914658499f49cd 1-37,39-318
+  s_165453c95b4380::t_58f559cf01f334 38
+tests/conformance/manifest.go
+  s_165453c95b4380::t_7b062a14f98519 1-61,65-92
+  s_165453c95b4380::t_58f559cf01f334 62-64
+tests/conformance/vectors.go
+  s_165453c95b4380::t_a8511591c12337 1-120
+tests/integration/go_codegen_test.go
+  s_165453c95b4380::t_a9c2a0fae3f587 2-9,16,24-30,32-33,35,37-58,60-64,67-73,75-76,79-92,94-106,109-115,117-120,123,127,129,132-134,138-141,144-146,149,151,153-155,157-161,163-169,172-173,190,192-211,213,215-228,230-236,238-248,250-260,262-264,267-270,282,291,293-296,298-302,304-310,312-313,316-319,325-327,330-332,335-346,348-355,357-365,367-390,392-396,398-419,421,423-435,437-439,441-442,445-448,450-454,456-462,464,466,468-484,487,508
+runtime/rust/tests/conformance.rs
+  s_165453c95b4380::t_8f16bbe25449e9 1-245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "d5972bf913d47694994e10dc4d89c29f3cdb083f",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
