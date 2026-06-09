@@ -95,20 +95,6 @@ func (g *Generator) generateEnum(enum *ast.Enum) {
 func (g *Generator) generateMessage(msg *ast.Message) error {
 	name := msg.Name
 
-	hasOptional := false
-	for _, f := range msg.Fields {
-		if f.Optional {
-			hasOptional = true
-			break
-		}
-	}
-	if hasOptional {
-		g.printf("// NOTE: schema contains `optional` fields. The XPB V2 wire format has no\n")
-		g.printf("// presence bit, so this codegen emits them as required on the wire.\n")
-		g.printf("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		g.printf("// relying on optional semantics.\n")
-	}
-
 	// Struct
 	g.printf("// %s is a generated XPB message.\n", name)
 	g.printf("type %s struct {\n", name)
@@ -168,6 +154,30 @@ func (g *Generator) isEnumType(t ast.FieldType) bool {
 func (g *Generator) generateFieldEncode(field *ast.Field) {
 	fieldName := toCamelCase(field.Name)
 	isEnum := g.isEnumType(field.Type)
+
+	// Optional fields carry a 1-byte presence flag (see docs/WIRE_FORMAT.md):
+	// 0x01 + value when present, 0x00 (and nothing more) when absent. Optional
+	// is only valid on scalar/string/bytes/enum/message fields — never on
+	// repeated/map, which already carry counts — so the repeated/map branches
+	// below are unreachable when field.Optional is set.
+	if field.Optional {
+		if field.Type.Kind == ast.TypeMessage && !isEnum {
+			// Nested message optionals are *T already. Emit the presence
+			// byte, then the message body only when non-nil.
+			g.printf("\tenc.WriteBool(m.%s != nil)\n", fieldName)
+			g.printf("\tif m.%s != nil {\n", fieldName)
+			g.generateScalarEncode("m."+fieldName, field.Type, "\t\t", isEnum)
+			g.printf("\t}\n")
+			return
+		}
+		// Scalar/string/bytes/enum optionals are *T pointers; deref the value
+		// after the presence byte.
+		g.printf("\tenc.WriteBool(m.%s != nil)\n", fieldName)
+		g.printf("\tif m.%s != nil {\n", fieldName)
+		g.generateScalarEncode("*m."+fieldName, field.Type, "\t\t", isEnum)
+		g.printf("\t}\n")
+		return
+	}
 
 	// Handle repeated fields - V2: write count then elements
 	if field.Repeated {
@@ -237,6 +247,38 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	fieldName := toCamelCase(field.Name)
 	isEnum := g.isEnumType(field.Type)
 
+	// Optional fields: read the 1-byte presence flag first. On false, leave
+	// the (nil) pointer as-is and consume nothing more, so the next field
+	// decodes correctly. On true, read the value and store its address.
+	if field.Optional {
+		g.printf("\t{\n")
+		g.printf("\t\tpresent, err := dec.ReadBool()\n")
+		g.printf("\t\tif err != nil { return err }\n")
+		g.printf("\t\tif present {\n")
+		if field.Type.Kind == ast.TypeMessage && !isEnum {
+			// Nested message optional: *T. A present message is always a
+			// non-empty envelope (it carries at least its own fields, or a
+			// 0-length envelope which we still materialize since presence
+			// said so).
+			g.printf("\t\t\tdata, err := dec.ReadMessageBytes()\n")
+			g.printf("\t\t\tif err != nil { return err }\n")
+			g.printf("\t\t\tm.%s = &%s{}\n", fieldName, field.Type.Message)
+			g.printf("\t\t\tif err := m.%s.unmarshalAt(data, depth+1); err != nil { return err }\n", fieldName)
+		} else if isEnum {
+			g.printf("\t\t\tv, err := dec.ReadInt32()\n")
+			g.printf("\t\t\tif err != nil { return err }\n")
+			g.printf("\t\t\tev := %s(v)\n", field.Type.Message)
+			g.printf("\t\t\tm.%s = &ev\n", fieldName)
+		} else {
+			g.printf("\t\t\tv, err := %s\n", g.scalarReadCall(field.Type))
+			g.printf("\t\t\tif err != nil { return err }\n")
+			g.printf("\t\t\tm.%s = &v\n", fieldName)
+		}
+		g.printf("\t\t}\n")
+		g.printf("\t}\n")
+		return
+	}
+
 	// Handle repeated fields - V2: read count then elements
 	if field.Repeated {
 		elemMin := minWireBytes(field.Type, isEnum)
@@ -296,6 +338,34 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	g.printf("\t{\n")
 	g.generateScalarDecodeInto("m."+fieldName, field.Type, "\t\t", isEnum)
 	g.printf("\t}\n")
+}
+
+// scalarReadCall returns the decoder read expression (which yields `(value,
+// error)`) for a scalar/string/bytes type. Used by the optional decode path,
+// which reads into a fresh local before taking its address. Not valid for
+// message/map/enum types.
+func (g *Generator) scalarReadCall(t ast.FieldType) string {
+	switch t.Kind {
+	case ast.TypeBool:
+		return "dec.ReadBool()"
+	case ast.TypeInt32:
+		return "dec.ReadInt32()"
+	case ast.TypeInt64:
+		return "dec.ReadInt64()"
+	case ast.TypeUint32:
+		return "dec.ReadUint32()"
+	case ast.TypeUint64:
+		return "dec.ReadUint64()"
+	case ast.TypeFloat32:
+		return "dec.ReadFloat32()"
+	case ast.TypeFloat64:
+		return "dec.ReadFloat64()"
+	case ast.TypeString:
+		return "dec.ReadString()"
+	case ast.TypeBytes:
+		return "dec.ReadBytes()"
+	}
+	return "dec.ReadBytes()"
 }
 
 func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, indent string, isEnum bool) {
@@ -370,6 +440,11 @@ func (g *Generator) goTypeName(field *ast.Field) string {
 	}
 	if t.Kind == ast.TypeMap {
 		return fmt.Sprintf("map[%s]%s", g.goBaseTypeName(*t.KeyType), g.goBaseTypeName(*t.ValType))
+	}
+	// Optional fields are pointers so absence (nil) is distinguishable from a
+	// zero value. Message fields are already pointers, so they stay as-is.
+	if field.Optional && t.Kind != ast.TypeMessage {
+		return "*" + base
 	}
 	return base
 }

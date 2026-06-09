@@ -20,8 +20,10 @@ import (
 	"testing"
 
 	"github.com/ElecTwix/xpb/pkg/codegen/c"
+	"github.com/ElecTwix/xpb/pkg/codegen/golang"
 	"github.com/ElecTwix/xpb/pkg/codegen/java"
 	"github.com/ElecTwix/xpb/pkg/codegen/lua"
+	"github.com/ElecTwix/xpb/pkg/codegen/rust"
 	"github.com/ElecTwix/xpb/pkg/codegen/typescript"
 	"github.com/ElecTwix/xpb/pkg/parser"
 )
@@ -29,10 +31,13 @@ import (
 // SecurityFinding: XPB-100
 // Severity (original): Critical
 // Original symptom: C codegen silently dropped `repeated` flag.
-//   `1: []string tags` rendered `char* tags;` with single-string
-//   marshal/unmarshal, breaking cross-language wire compatibility.
+//
+//	`1: []string tags` rendered `char* tags;` with single-string
+//	marshal/unmarshal, breaking cross-language wire compatibility.
+//
 // Hardening: codegen now emits `char** tags;` + `size_t tags_count;`
-//   plus an explicit-max bounded array decode.
+//
+//	plus an explicit-max bounded array decode.
 func TestSecurityAudit_XPB100_CCodegenRepeatedFieldsHandled(t *testing.T) {
 	schema := `package test
 
@@ -66,9 +71,12 @@ message Item {
 // SecurityFinding: XPB-101
 // Severity (original): Critical
 // Original symptom: C codegen had no case for TypeMap; map fields fell
-//   through to `int32_t` and no marshal/unmarshal was emitted.
+//
+//	through to `int32_t` and no marshal/unmarshal was emitted.
+//
 // Hardening: codegen now emits paired *_keys / *_values / *_count fields
-//   and uses xpb_decoder_validate_array_count with an explicit max.
+//
+//	and uses xpb_decoder_validate_array_count with an explicit max.
 func TestSecurityAudit_XPB101_CCodegenMapFieldsHandled(t *testing.T) {
 	schema := `package test
 
@@ -101,11 +109,14 @@ message Item {
 // SecurityFinding: XPB-102
 // Severity (original): Critical
 // Original symptom: Java codegen dropped both `repeated` and `map`.
-//   `[]string tags` → `public String tags;`; `map<...> attrs` → `public
-//   int attrs;` with no marshal/unmarshal handling.
+//
+//	`[]string tags` → `public String tags;`; `map<...> attrs` → `public
+//	int attrs;` with no marshal/unmarshal handling.
+//
 // Hardening: codegen now emits `String[] tags;` + array (de)serialization
-//   with readArrayCount + an explicit max, and `java.util.Map<K,V> attrs;`
-//   with a HashMap-based decode.
+//
+//	with readArrayCount + an explicit max, and `java.util.Map<K,V> attrs;`
+//	with a HashMap-based decode.
 func TestSecurityAudit_XPB102_JavaCodegenRepeatedAndMapHandled(t *testing.T) {
 	schema := `package test
 
@@ -139,8 +150,9 @@ message Item {
 // Severity (original): Critical
 // Original symptom: Lua codegen dropped both `repeated` and `map`.
 // Hardening: codegen now emits ipairs-based array (de)serialization and
-//   pairs-based map (de)serialization. Decode uses dec:read_array_count
-//   with an explicit max.
+//
+//	pairs-based map (de)serialization. Decode uses dec:read_array_count
+//	with an explicit max.
 func TestSecurityAudit_XPB103_LuaCodegenRepeatedAndMapHandled(t *testing.T) {
 	schema := `package test
 
@@ -173,10 +185,13 @@ message Item {
 // SecurityFinding: XPB-104
 // Severity (original): Critical
 // Original symptom: C codegen emitted uncompilable C for self-referential
-//   types — `typedef struct { Node next; } Node;` is an infinite-size
-//   struct because the inner Node is incomplete at point of use.
+//
+//	types — `typedef struct { Node next; } Node;` is an infinite-size
+//	struct because the inner Node is incomplete at point of use.
+//
 // Hardening: codegen now emits a forward-declared typedef + named
-//   `struct Node { ... };` with `Node* next;` (pointer indirection).
+//
+//	`struct Node { ... };` with `Node* next;` (pointer indirection).
 func TestSecurityAudit_XPB104_CCodegenRecursiveTypeCompiles(t *testing.T) {
 	if _, err := exec.LookPath("gcc"); err != nil {
 		t.Skip("gcc not installed; cannot validate recursive-type compilation")
@@ -234,10 +249,13 @@ int main(void) {
 // SecurityFinding: XPB-105
 // Severity (original): High
 // Original symptom: Java codegen recurses on nested messages with no
-//   depth gate → StackOverflowError on adversarial payloads.
+//
+//	depth gate → StackOverflowError on adversarial payloads.
+//
 // Hardening: codegen now emits unmarshalAt(data, depth) and the public
-//   unmarshal delegates to it; the helper checks
-//   Decoder.MAX_DECODE_DEPTH on entry.
+//
+//	unmarshal delegates to it; the helper checks
+//	Decoder.MAX_DECODE_DEPTH on entry.
 func TestSecurityAudit_XPB105_JavaCodegenDepthCapped(t *testing.T) {
 	schema := `package test
 
@@ -267,9 +285,12 @@ message Node {
 // SecurityFinding: XPB-106
 // Severity (original): High
 // Original symptom: Lua codegen recurses on nested messages with no
-//   depth gate → Lua stack overflow on adversarial payloads.
+//
+//	depth gate → Lua stack overflow on adversarial payloads.
+//
 // Hardening: codegen now emits UnmarshalAt(data, depth); the public
-//   Unmarshal delegates to it; the helper checks xpb.MAX_DECODE_DEPTH.
+//
+//	Unmarshal delegates to it; the helper checks xpb.MAX_DECODE_DEPTH.
 func TestSecurityAudit_XPB106_LuaCodegenDepthCapped(t *testing.T) {
 	schema := `package test
 
@@ -498,7 +519,9 @@ func TestSecurityAudit_XPB126_TSJITUsesElementMinBytes(t *testing.T) {
 // Original symptom: StringArrayView's constructor gained a required
 // `maxElements` parameter in XPB-112, but the in-repo TypeScript
 // benchmark/demo files still constructed it the old way:
-//   new StringArrayView(encoded)
+//
+//	new StringArrayView(encoded)
+//
 // Each call threw `RangeError: xpb: StringArrayView requires
 // non-negative integer maxElements` because the constructor now
 // validates with Number.isInteger. `npm test` failed before the lazy
@@ -776,10 +799,13 @@ func TestSecurityAudit_XPB121_SharedEnumSet(t *testing.T) {
 // SecurityFinding: XPB-107
 // Severity (original): High
 // Original symptom: Java decoder readArray* called `new int[count]` with
-//   no bound check — adversarial count of INT_MAX → 8 GB allocation.
+//
+//	no bound check — adversarial count of INT_MAX → 8 GB allocation.
+//
 // Hardening: Decoder.readArrayCount(elementMinBytes, maxElements) REQUIRES
-//   the caller to pass an explicit max. All public readArray* methods
-//   now take a max parameter and funnel through it.
+//
+//	the caller to pass an explicit max. All public readArray* methods
+//	now take a max parameter and funnel through it.
 func TestSecurityAudit_XPB107_JavaDecoderRequiresExplicitMax(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/java/src/main/java/xpb/Decoder.java"))
@@ -803,10 +829,13 @@ func TestSecurityAudit_XPB107_JavaDecoderRequiresExplicitMax(t *testing.T) {
 // SecurityFinding: XPB-108
 // Severity (original): High
 // Original symptom: Lua decoder read_array_* looped on a wire-supplied
-//   count with no bound — count = 2^31 ran for hours / OOM'd Lua.
+//
+//	count with no bound — count = 2^31 ran for hours / OOM'd Lua.
+//
 // Hardening: dec:read_array_count(element_min_bytes, max_elements)
-//   REQUIRES the caller to pass max_elements. Read helpers funnel
-//   through it.
+//
+//	REQUIRES the caller to pass max_elements. Read helpers funnel
+//	through it.
 func TestSecurityAudit_XPB108_LuaDecoderRequiresExplicitMax(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/lua/xpb.lua"))
@@ -830,11 +859,14 @@ func TestSecurityAudit_XPB108_LuaDecoderRequiresExplicitMax(t *testing.T) {
 // SecurityFinding: XPB-109
 // Severity (original): Medium-High
 // Original symptom: Lua decoder primitives didn't bounds-check.
-//   read_bool over 0 bytes returned `true` silently; skip(n) advanced
-//   past EOF; read_string/bytes used Lua's forgiving sub() and returned
-//   short data with no error.
+//
+//	read_bool over 0 bytes returned `true` silently; skip(n) advanced
+//	past EOF; read_string/bytes used Lua's forgiving sub() and returned
+//	short data with no error.
+//
 // Hardening: every primitive now calls self:ensure_bytes() which errors
-//   on EOF; skip(n) is gated the same way.
+//
+//	on EOF; skip(n) is gated the same way.
 func TestSecurityAudit_XPB109_LuaDecoderBoundsChecked(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/lua/xpb.lua"))
@@ -892,10 +924,13 @@ func TestSecurityAudit_XPB109Dynamic_LuaRuntimeBoundsExercise(t *testing.T) {
 // SecurityFinding: XPB-111
 // Severity (original): Medium
 // Original symptom: TS JIT (jit.ts) read string compact length as a
-//   single byte; long-form (0xFF + 4-byte length) was never branched on,
-//   so strings ≥ 255 bytes silently misparsed.
+//
+//	single byte; long-form (0xFF + 4-byte length) was never branched on,
+//	so strings ≥ 255 bytes silently misparsed.
+//
 // Hardening: the string-read template now branches on `first === 255`
-//   and reads the trailing 4-byte length.
+//
+//	and reads the trailing 4-byte length.
 func TestSecurityAudit_XPB111_TSJITHandlesLongString(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/ts/src/jit.ts"))
@@ -920,10 +955,13 @@ func TestSecurityAudit_XPB111_TSJITHandlesLongString(t *testing.T) {
 // SecurityFinding: XPB-112
 // Severity (original): Medium
 // Original symptom: TS view.ts StringArrayView allocated `new
-//   Int32Array(length)` from a wire-supplied int32 with no bound — same
-//   class of issue as XPB-005/107/108, in a different module.
+//
+//	Int32Array(length)` from a wire-supplied int32 with no bound — same
+//	class of issue as XPB-005/107/108, in a different module.
+//
 // Hardening: constructor now takes a required maxElements parameter and
-//   rejects negative / over-max / over-buffer counts before allocating.
+//
+//	rejects negative / over-max / over-buffer counts before allocating.
 func TestSecurityAudit_XPB112_TSStringArrayViewRequiresMax(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/ts/src/view.ts"))
@@ -943,11 +981,14 @@ func TestSecurityAudit_XPB112_TSStringArrayViewRequiresMax(t *testing.T) {
 // SecurityFinding: XPB-113
 // Severity (original): Medium
 // Original symptom: Generated TS class constructor did
-//   `Object.assign(this, data)`, which copies an own `__proto__` and
-//   pollutes the prototype chain.
+//
+//	`Object.assign(this, data)`, which copies an own `__proto__` and
+//	pollutes the prototype chain.
+//
 // Hardening: codegen now emits per-field `if (data.x !== undefined)
-//   this.x = data.x;` assignments — only declared fields land on the
-//   instance.
+//
+//	this.x = data.x;` assignments — only declared fields land on the
+//	instance.
 func TestSecurityAudit_XPB113_TSCodegenNoPrototypeSink(t *testing.T) {
 	schema := `package test
 
@@ -977,9 +1018,12 @@ message Login {
 // SecurityFinding: XPB-114
 // Severity (original): Medium
 // Original symptom: xpb_encoder_create dereferenced malloc result with
-//   no NULL check — first-malloc failure → SIGSEGV.
+//
+//	no NULL check — first-malloc failure → SIGSEGV.
+//
 // Hardening: factory now NULL-checks both mallocs, frees the partial
-//   allocation, and returns NULL to the caller.
+//
+//	allocation, and returns NULL to the caller.
 func TestSecurityAudit_XPB114_CEncoderCreateHandlesOOM(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/c/xpb.c"))
@@ -1002,11 +1046,14 @@ func TestSecurityAudit_XPB114_CEncoderCreateHandlesOOM(t *testing.T) {
 // SecurityFinding: XPB-115
 // Severity (original): Medium
 // Original symptom: xpb_encoder_ensure_capacity assigned `realloc(...)`
-//   back to enc->buf with no check; on failure the original allocation
-//   leaked and enc->buf was NULL.
+//
+//	back to enc->buf with no check; on failure the original allocation
+//	leaked and enc->buf was NULL.
+//
 // Hardening: realloc result is stored in a temporary, NULL-checked, and
-//   only then committed. On failure, the original buffer survives and a
-//   sticky-error flag latches the encoder so subsequent writes no-op.
+//
+//	only then committed. On failure, the original buffer survives and a
+//	sticky-error flag latches the encoder so subsequent writes no-op.
 func TestSecurityAudit_XPB115_CEncoderRealloc(t *testing.T) {
 	root := repoRoot(t)
 	src, err := os.ReadFile(filepath.Join(root, "runtime/c/xpb.c"))
@@ -1031,11 +1078,19 @@ func TestSecurityAudit_XPB115_CEncoderRealloc(t *testing.T) {
 
 // SecurityFinding: XPB-116
 // Severity (original): Low
-// Original symptom: codegens silently ignored the Optional flag.
-// Hardening: codegen now emits a NOTE comment for any message containing
-//   an optional field so the user knows the wire format treats it as
-//   required (V3 will add presence semantics).
-func TestSecurityAudit_XPB116_OptionalFieldsWarned(t *testing.T) {
+// Original symptom: codegens silently ignored the Optional flag and encoded
+//
+//	optional fields unconditionally (no presence indicator), so an absent
+//	optional was indistinguishable from a zero value and could desync the
+//	decode of every following field.
+//
+// Hardening: optional fields now carry a 1-byte presence flag on the wire
+//
+//	(0x01 present + value, 0x00 absent; see docs/WIRE_FORMAT.md). Each codegen
+//	must emit a presence-flag write on encode and a conditional value read on
+//	decode. This test asserts that contract per language so the fix can't
+//	silently regress to the old unconditional encoding.
+func TestSecurityAudit_XPB116_OptionalPresenceFlag(t *testing.T) {
 	schema := `package test
 
 message User {
@@ -1051,24 +1106,69 @@ message User {
 	cases := []struct {
 		name string
 		gen  func() ([]byte, error)
-		mark string
+		// marks are substrings that MUST appear: a presence write and a
+		// guarded (conditional) value read on the optional field.
+		marks []string
+		// banned are substrings that MUST NOT appear: the obsolete "treated
+		// as required / no presence bit" warning.
+		banned []string
 	}{
-		{"TS", func() ([]byte, error) { return typescript.Generate(file) }, "schema contains `optional` fields"},
-		{"Java", func() ([]byte, error) { return java.Generate(file) }, "schema contains `optional` fields"},
-		{"Lua", func() ([]byte, error) { return lua.Generate(file) }, "schema contains `optional` fields"},
-		{"C", func() ([]byte, error) { return c.Generate(file) }, "schema contains `optional` fields"},
+		{
+			"Go",
+			func() ([]byte, error) { return golang.Generate(file) },
+			[]string{"enc.WriteBool(m.Nickname != nil)", "present, err := dec.ReadBool()", "if present {"},
+			[]string{"no presence bit", "emits them as required"},
+		},
+		{
+			"TS",
+			func() ([]byte, error) { return typescript.Generate(file) },
+			[]string{"enc.writeBool(msg.nickname !== undefined", "if (dec.readBool()) {"},
+			[]string{"no presence bit", "emits them as required"},
+		},
+		{
+			"Rust",
+			func() ([]byte, error) { return rust.Generate(file) },
+			[]string{"enc.write_bool(self.nickname.is_some())", "if dec.read_bool()? {"},
+			[]string{"no presence bit", "emits them as required"},
+		},
+		{
+			"Java",
+			func() ([]byte, error) { return java.Generate(file) },
+			[]string{"enc.writeBool(nickname != null)", "if (dec.readBool()) {"},
+			[]string{"no presence bit", "emits them as required"},
+		},
+		{
+			"Lua",
+			func() ([]byte, error) { return lua.Generate(file) },
+			[]string{"enc:write_bool(self.nickname ~= nil)", "if dec:read_bool() then"},
+			[]string{"no presence bit", "emits them as required"},
+		},
+		{
+			"C",
+			func() ([]byte, error) { return c.Generate(file) },
+			[]string{"xpb_encoder_write_bool(enc, (m->nickname != NULL))", "if (xpb_decoder_read_bool(dec)) {"},
+			[]string{"no presence bit", "emits them as required"},
+		},
 	}
 	for _, tc := range cases {
 		out, err := tc.gen()
 		if err != nil {
 			t.Fatalf("%s generate: %v", tc.name, err)
 		}
-		if !bytes.Contains(out, []byte(tc.mark)) {
-			t.Fatalf("REGRESSION: %s codegen no longer warns about optional fields:\n%s",
-				tc.name, out)
+		for _, m := range tc.marks {
+			if !bytes.Contains(out, []byte(m)) {
+				t.Fatalf("REGRESSION: %s codegen missing optional presence-flag handling %q:\n%s",
+					tc.name, m, out)
+			}
+		}
+		for _, b := range tc.banned {
+			if bytes.Contains(out, []byte(b)) {
+				t.Fatalf("REGRESSION: %s codegen still emits the obsolete %q warning:\n%s",
+					tc.name, b, out)
+			}
 		}
 	}
-	t.Logf("XPB-116 OK: every codegen surfaces the V2 optional-field limitation")
+	t.Logf("XPB-116 OK: every codegen emits the 1-byte optional presence flag")
 }
 
 // SecurityFinding: XPB-R001/R002/R003 (Rust runtime)

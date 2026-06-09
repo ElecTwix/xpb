@@ -204,6 +204,63 @@ enum Status {
 
 `Status.ACTIVE` encodes as `01 00 00 00` (int32 1)
 
+## Optional Fields
+
+A field declared with the `?` marker (e.g. `2: ?string avatar_url`) carries an
+explicit **1-byte presence flag** on the wire, immediately followed by the
+field's value only when present:
+
+```
+Absent / null:   0x00                       // 1 byte, NO value bytes follow
+Present:         0x01 [value_encoded_normally]
+```
+
+The presence flag uses the exact same single-byte encoding as a boolean, so it
+is unambiguous for every value type — including zero-valued integers, empty
+strings, and `false` booleans. A decoder reads the presence byte first; on
+`0x00` it leaves the field absent (null / None / nil) and reads nothing more;
+on `0x01` it reads the value using the field's normal encoding.
+
+Optional applies to scalar, string, bytes, enum, and message fields. It does
+**not** apply to `repeated` or `map` fields — those already carry an explicit
+count prefix that distinguishes empty from populated.
+
+### Example
+
+```xpb
+message Profile {
+    1: ?string avatar_url
+    2: int32 followers
+}
+```
+
+For `avatar_url` **present** = `"hi"`, `followers = 9`:
+
+```
+01 02 68 69  09 00 00 00
+|  |  |____|  |________|
+|  |    |        |
+|  |    |        +-- followers = int32(9)
+|  |    +-- "hi" (UTF-8)
+|  +-- string length = 2
++-- presence = 0x01 (avatar_url present)
+```
+
+For `avatar_url` **absent**, `followers = 9`:
+
+```
+00  09 00 00 00
+|   |________|
+|       |
+|       +-- followers = int32(9)
++-- presence = 0x00 (avatar_url absent; no value bytes follow)
+```
+
+The single presence byte is the entirety of the absent optional's wire
+footprint: the decoder consumes exactly 1 byte and proceeds directly to the
+next field (`followers`), so an absent optional never corrupts the fields that
+follow it.
+
 ## Error Conditions
 
 ### Truncated Data

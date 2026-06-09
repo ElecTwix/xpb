@@ -60,10 +60,11 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File, c
 		}
 	}
 	if hasOptional {
-		sb.WriteString("/* NOTE: schema contains `optional` fields. The XPB V2 wire format\n")
-		sb.WriteString(" * has no presence bit, so this codegen emits them as required.\n")
-		sb.WriteString(" * Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		sb.WriteString(" * relying on optional semantics. */\n")
+		sb.WriteString("/* NOTE: schema contains `optional` fields. On the wire each optional\n")
+		sb.WriteString(" * field is preceded by a 1-byte presence flag (0x01 present + value,\n")
+		sb.WriteString(" * 0x00 absent). Pointer-typed optionals (string/bytes/message) use\n")
+		sb.WriteString(" * NULL for absence; value-typed optionals carry a companion\n")
+		sb.WriteString(" * `<field>_present` bool. */\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("struct %s {\n", typeName))
@@ -85,7 +86,28 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File, c
 // `_count` member. Map fields are pointer-arrays of paired key/value
 // arrays since C has no generic map type — the receiving application can
 // build whatever container it likes from the parsed elements.
+// cOptionalUsesPointer reports whether an optional field of this type already
+// signals absence via a NULL pointer (string/bytes/message), so it needs no
+// companion presence bool. Value-typed optionals (numbers, bool, enum) get a
+// `<field>_present` bool instead.
+func cOptionalUsesPointer(field *xpbast.Field, ctx xpbast.EnumSet) bool {
+	if ctx.IsEnum(field.Type) {
+		return false
+	}
+	switch field.Type.Kind {
+	case xpbast.TypeString, xpbast.TypeBytes, xpbast.TypeMessage:
+		return true
+	default:
+		return false
+	}
+}
+
 func writeFieldDecl(sb *strings.Builder, field *xpbast.Field, fieldName string, file *xpbast.File, ctx xpbast.EnumSet) {
+	// Optional value-typed fields gain a companion presence bool. Pointer-typed
+	// optionals (string/bytes/message) use NULL for absence and need no flag.
+	if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap && !cOptionalUsesPointer(field, ctx) {
+		sb.WriteString(fmt.Sprintf("    bool %s_present;\n", fieldName))
+	}
 	// Enum-typed fields are reported as TypeMessage by the parser; collapse
 	// them to int32_t (matches Go and the generated C enum which is also
 	// int32-compatible).
@@ -145,6 +167,10 @@ func writeMarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName str
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeCOptionalEncode(sb, field, fieldName, ctx)
+			continue
+		}
 		if ctx.IsEnum(field.Type) && !field.Repeated {
 			sb.WriteString(fmt.Sprintf("    xpb_encoder_write_int32(enc, (int32_t)m->%s);\n", fieldName))
 			continue
@@ -203,6 +229,28 @@ func writeCScalarEncode(sb *strings.Builder, field *xpbast.Field, ref string) {
 		sb.WriteString(fmt.Sprintf("        }\n"))
 		sb.WriteString("    }\n")
 	}
+}
+
+// writeCOptionalEncode emits the 1-byte presence flag (see docs/WIRE_FORMAT.md)
+// followed by the value only when present. Pointer-typed fields use NULL for
+// absence; value-typed fields use their companion `<field>_present` bool.
+func writeCOptionalEncode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
+	var presentExpr string
+	if cOptionalUsesPointer(field, ctx) {
+		presentExpr = fmt.Sprintf("(m->%s != NULL)", fieldName)
+	} else {
+		presentExpr = fmt.Sprintf("m->%s_present", fieldName)
+	}
+	sb.WriteString(fmt.Sprintf("    xpb_encoder_write_bool(enc, %s);\n", presentExpr))
+	sb.WriteString(fmt.Sprintf("    if (%s) {\n", presentExpr))
+	if ctx.IsEnum(field.Type) {
+		sb.WriteString(fmt.Sprintf("        xpb_encoder_write_int32(enc, (int32_t)m->%s);\n", fieldName))
+	} else {
+		// Reuse the scalar encoder for the value (handles string/bytes/message
+		// and all numeric kinds).
+		writeCScalarEncode(sb, field, "m->"+fieldName)
+	}
+	sb.WriteString("    }\n")
 }
 
 func writeCRepeatedEncode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
@@ -338,6 +386,10 @@ func writeUnmarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName s
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeCOptionalDecode(sb, field, fieldName, ctx)
+			continue
+		}
 		if ctx.IsEnum(field.Type) && !field.Repeated {
 			sb.WriteString(fmt.Sprintf("    out->%s = xpb_decoder_read_int32(dec);\n", fieldName))
 			continue
@@ -398,6 +450,50 @@ func writeUnmarshalFunction(sb *strings.Builder, msg *xpbast.Message, typeName s
 	sb.WriteString("    xpb_decoder_destroy(dec);\n")
 	sb.WriteString("    return ok;\n")
 	sb.WriteString("}\n\n")
+}
+
+// writeCOptionalDecode reads the 1-byte presence flag (see docs/WIRE_FORMAT.md)
+// and only reads the value when present. On absence value-typed fields keep
+// `_present = false` (struct is zero-initialized) and pointer-typed fields keep
+// NULL; either way exactly 1 byte is consumed so the next field decodes fine.
+func writeCOptionalDecode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
+	sb.WriteString("    if (xpb_decoder_read_bool(dec)) {\n")
+	if ctx.IsEnum(field.Type) {
+		sb.WriteString(fmt.Sprintf("        out->%s = xpb_decoder_read_int32(dec);\n", fieldName))
+		sb.WriteString(fmt.Sprintf("        out->%s_present = true;\n", fieldName))
+		sb.WriteString("    }\n")
+		return
+	}
+	switch field.Type.Kind {
+	case xpbast.TypeString:
+		sb.WriteString(fmt.Sprintf("        out->%s = xpb_decoder_read_string(dec);\n", fieldName))
+	case xpbast.TypeBytes:
+		sb.WriteString(fmt.Sprintf("        out->%s = xpb_decoder_read_bytes(dec, &out->%s_len);\n",
+			fieldName, fieldName))
+	case xpbast.TypeMessage:
+		sub := capitalize(field.Type.Message)
+		sb.WriteString(fmt.Sprintf("        size_t %s_blen = 0;\n", fieldName))
+		sb.WriteString(fmt.Sprintf("        uint8_t* %s_data = xpb_decoder_read_message_bytes(dec, &%s_blen);\n",
+			fieldName, fieldName))
+		sb.WriteString("        if (xpb_decoder_ok(dec)) {\n")
+		sb.WriteString(fmt.Sprintf("            out->%s = (%s*)malloc(sizeof(%s));\n", fieldName, sub, sub))
+		sb.WriteString(fmt.Sprintf("            if (out->%s == NULL) {\n", fieldName))
+		sb.WriteString("                nested_ok = false;\n")
+		sb.WriteString("            } else {\n")
+		sb.WriteString(fmt.Sprintf("                if (!%s_unmarshal_at(out->%s, %s_data, %s_blen, depth + 1)) nested_ok = false;\n",
+			sub, fieldName, fieldName, fieldName))
+		sb.WriteString("            }\n")
+		sb.WriteString("        }\n")
+		sb.WriteString(fmt.Sprintf("        free(%s_data);\n", fieldName))
+	case xpbast.TypeBool:
+		sb.WriteString(fmt.Sprintf("        out->%s = xpb_decoder_read_bool(dec);\n", fieldName))
+		sb.WriteString(fmt.Sprintf("        out->%s_present = true;\n", fieldName))
+	default:
+		// Numeric scalar.
+		sb.WriteString(fmt.Sprintf("        out->%s = %s;\n", fieldName, cReadCall(field.Type)))
+		sb.WriteString(fmt.Sprintf("        out->%s_present = true;\n", fieldName))
+	}
+	sb.WriteString("    }\n")
 }
 
 func writeCRepeatedDecode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {

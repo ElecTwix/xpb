@@ -118,10 +118,9 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File, c
 		}
 	}
 	if hasOptional {
-		sb.WriteString("-- NOTE: schema contains `optional` fields. The XPB V2 wire format\n")
-		sb.WriteString("-- has no presence bit, so this codegen emits them as required.\n")
-		sb.WriteString("-- Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		sb.WriteString("-- relying on optional semantics.\n")
+		sb.WriteString("-- NOTE: schema contains `optional` fields. Each optional field is\n")
+		sb.WriteString("-- preceded on the wire by a 1-byte presence flag (0x01 present + value,\n")
+		sb.WriteString("-- 0x00 absent). An absent optional decodes to nil.\n")
 	}
 	sb.WriteString(fmt.Sprintf("%s = {}\n", typeName))
 	sb.WriteString(fmt.Sprintf("%s.__index = %s\n\n", typeName, typeName))
@@ -158,6 +157,10 @@ func writeMarshalMethod(sb *strings.Builder, msg *xpbast.Message, typeName strin
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
 		ref := "self." + fieldName
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeLuaOptionalFieldEncode(sb, field, ref, ctx)
+			continue
+		}
 		// Enum fields hold their numeric value directly in the table.
 		if ctx.IsEnum(field.Type) && !field.Repeated {
 			sb.WriteString(fmt.Sprintf("    enc:write_int32(%s)\n", ref))
@@ -200,6 +203,10 @@ func writeUnmarshalMethod(sb *strings.Builder, msg *xpbast.Message, typeName str
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeLuaOptionalFieldDecode(sb, field, fieldName, ctx)
+			continue
+		}
 		if ctx.IsEnum(field.Type) && !field.Repeated {
 			sb.WriteString(fmt.Sprintf("    self.%s = dec:read_int32()\n", fieldName))
 			continue
@@ -286,6 +293,36 @@ func writeLuaMapFieldDecode(sb *strings.Builder, field *xpbast.Field, fieldName 
 	sb.WriteString(fmt.Sprintf("            local v = %s\n", luaReadCall(*field.Type.ValType)))
 	sb.WriteString(fmt.Sprintf("            self.%s[k] = v\n", fieldName))
 	sb.WriteString("        end\n")
+	sb.WriteString("    end\n")
+}
+
+// writeLuaOptionalFieldEncode emits the 1-byte presence flag (see
+// docs/WIRE_FORMAT.md) followed by the value only when the field is non-nil.
+func writeLuaOptionalFieldEncode(sb *strings.Builder, field *xpbast.Field, ref string, ctx xpbast.EnumSet) {
+	sb.WriteString(fmt.Sprintf("    enc:write_bool(%s ~= nil)\n", ref))
+	sb.WriteString(fmt.Sprintf("    if %s ~= nil then\n", ref))
+	if ctx.IsEnum(field.Type) {
+		sb.WriteString(fmt.Sprintf("        enc:write_int32(%s)\n", ref))
+	} else if field.Type.Kind == xpbast.TypeMessage {
+		sb.WriteString(fmt.Sprintf("        enc:write_message(%s:Marshal())\n", ref))
+	} else {
+		sb.WriteString(fmt.Sprintf("        %s\n", luaWriteCall(field.Type, ref)))
+	}
+	sb.WriteString("    end\n")
+}
+
+// writeLuaOptionalFieldDecode reads the presence flag and only reads the value
+// when present; otherwise the field stays nil and exactly 1 byte is consumed.
+func writeLuaOptionalFieldDecode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
+	sb.WriteString("    if dec:read_bool() then\n")
+	if ctx.IsEnum(field.Type) {
+		sb.WriteString(fmt.Sprintf("        self.%s = dec:read_int32()\n", fieldName))
+	} else if field.Type.Kind == xpbast.TypeMessage {
+		sb.WriteString(fmt.Sprintf("        self.%s = %s.UnmarshalAt(dec:read_message_bytes(), depth + 1)\n",
+			fieldName, capitalize(field.Type.Message)))
+	} else {
+		sb.WriteString(fmt.Sprintf("        self.%s = %s\n", fieldName, luaReadCall(field.Type)))
+	}
 	sb.WriteString("    end\n")
 }
 

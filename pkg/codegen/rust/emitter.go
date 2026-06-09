@@ -85,20 +85,6 @@ func (g *generator) generateEnum(e *ast.Enum) {
 }
 
 func (g *generator) generateMessage(m *ast.Message) {
-	hasOptional := false
-	for _, f := range m.Fields {
-		if f.Optional {
-			hasOptional = true
-			break
-		}
-	}
-	if hasOptional {
-		g.printf("// NOTE: schema contains `optional` fields. The XPB V2 wire format has no\n")
-		g.printf("// presence bit, so this codegen emits them as required on the wire.\n")
-		g.printf("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		g.printf("// relying on optional semantics.\n")
-	}
-
 	g.printf("#[derive(Debug, Clone, Default)]\n")
 	g.printf("pub struct %s {\n", m.Name)
 	for _, f := range m.Fields {

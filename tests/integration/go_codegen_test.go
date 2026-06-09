@@ -448,7 +448,14 @@ func TestRoundTrip(t *testing.T) {
 }
 
 // TestGoCodegen_OptionalField confirms a schema using the `?` optional marker
-// generates code that compiles and round-trips.
+// generates code that compiles and round-trips BOTH a present optional (value
+// preserved) and an absent optional (decodes to nil) -- and that the field
+// after an absent optional still decodes correctly, proving the 1-byte presence
+// flag is consumed and does not corrupt the following field.
+//
+// Wire format: an optional field is encoded as a 1-byte presence flag (0x01 +
+// value when present, 0x00 with no value bytes when absent). The Go codegen
+// represents non-message optionals as pointers; nil == absent.
 func TestGoCodegen_OptionalField(t *testing.T) {
 	schema := `
 package test
@@ -460,13 +467,21 @@ message Profile {
 }
 `
 	src := generateGo(t, schema)
+	// The optional scalar must be a pointer so absence is representable.
+	if !strings.Contains(string(src), "AvatarUrl *string") {
+		t.Errorf("optional scalar must be a *string pointer; got:\n%s", src)
+	}
 
 	driver := `package gen
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
-func TestRoundTrip(t *testing.T) {
-	in := &Profile{Bio: "hi", AvatarUrl: "http://x/y.png", Followers: 9}
+func TestPresentRoundTrip(t *testing.T) {
+	url := "http://x/y.png"
+	in := &Profile{Bio: "hi", AvatarUrl: &url, Followers: 9}
 	data, err := in.Marshal()
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -475,11 +490,71 @@ func TestRoundTrip(t *testing.T) {
 	if err := out.Unmarshal(data); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if out.Bio != in.Bio || out.AvatarUrl != in.AvatarUrl || out.Followers != in.Followers {
-		t.Fatalf("round-trip mismatch: got %+v want %+v", out, *in)
+	if out.Bio != in.Bio || out.AvatarUrl == nil || *out.AvatarUrl != url || out.Followers != in.Followers {
+		t.Fatalf("present round-trip mismatch: got %+v (avatar=%v) want %+v", out, out.AvatarUrl, *in)
+	}
+}
+
+func TestAbsentRoundTrip(t *testing.T) {
+	// AvatarUrl left nil (absent). The presence byte must be consumed so the
+	// FOLLOWING field (Followers) still decodes correctly.
+	in := &Profile{Bio: "hi", AvatarUrl: nil, Followers: 9}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.AvatarUrl != nil {
+		t.Fatalf("absent optional must decode to nil, got %q", *out.AvatarUrl)
+	}
+	if out.Bio != "hi" {
+		t.Fatalf("field before optional corrupted: bio=%q", out.Bio)
+	}
+	if out.Followers != 9 {
+		t.Fatalf("field after absent optional corrupted (presence byte not consumed): followers=%d, want 9", out.Followers)
+	}
+}
+
+// TestAbsentOptionalConsumesExactlyOneByte builds {?string a, int32 b} with a
+// absent, and asserts the absent optional adds exactly one byte over a bare
+// int32 -- i.e. the presence flag and nothing else.
+func TestAbsentOptionalConsumesExactlyOneByte(t *testing.T) {
+	in := &Pair{B: 1234}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// b alone is a 4-byte int32; the absent optional contributes 1 presence byte.
+	if len(data) != 5 {
+		t.Fatalf("absent-optional encoding = %d bytes (% x), want 5 (1 presence + 4 int32)", len(data), data)
+	}
+	if data[0] != 0x00 {
+		t.Fatalf("absent presence byte = 0x%02x, want 0x00", data[0])
+	}
+	// b = 1234 = 0x04D2, little-endian after the presence byte.
+	if !bytes.Equal(data[1:], []byte{0xD2, 0x04, 0x00, 0x00}) {
+		t.Fatalf("int32 after absent optional mis-encoded: % x", data[1:])
+	}
+	var out Pair
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.A != nil || out.B != 1234 {
+		t.Fatalf("Pair round-trip: a=%v b=%d, want a=nil b=1234", out.A, out.B)
 	}
 }
 `
+	// Add a second message {?string a, int32 b} for the exact-byte test.
+	schema2 := schema + `
+message Pair {
+    1: ?string a
+    2: int32 b
+}
+`
+	src = generateGo(t, schema2)
 	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
 	goTestModule(t, dir)
 }

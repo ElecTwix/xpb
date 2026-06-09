@@ -57,20 +57,6 @@ func (g *Generator) generateEnum(enum *ast.Enum) {
 func (g *Generator) generateMessage(msg *ast.Message) {
 	name := msg.Name
 
-	hasOptional := false
-	for _, f := range msg.Fields {
-		if f.Optional {
-			hasOptional = true
-			break
-		}
-	}
-	if hasOptional {
-		g.printf("// NOTE: schema contains `optional` fields. The XPB V2 wire format has no\n")
-		g.printf("// presence bit, so this codegen emits them as required on the wire.\n")
-		g.printf("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		g.printf("// relying on optional semantics.\n")
-	}
-
 	// Interface
 	g.printf("export interface %sData {\n", name)
 	for _, field := range msg.Fields {
@@ -156,6 +142,19 @@ func (g *Generator) generateMessage(msg *ast.Message) {
 func (g *Generator) generateFieldEncodeTS(field *ast.Field) {
 	fieldName := toCamelCaseTS(field.Name)
 
+	// Optional fields carry a 1-byte presence flag (see docs/WIRE_FORMAT.md):
+	// 0x01 + value when present, 0x00 (and nothing more) when absent. Optional
+	// only applies to scalar/string/bytes/enum/message fields, never to
+	// repeated/map (which carry counts).
+	if field.Optional {
+		ref := "msg." + fieldName
+		g.printf("    enc.writeBool(%s !== undefined && %s !== null);\n", ref, ref)
+		g.printf("    if (%s !== undefined && %s !== null) {\n", ref, ref)
+		g.generateScalarEncodeTS(ref, field.Type, "      ")
+		g.printf("    }\n")
+		return
+	}
+
 	// Repeated
 	if field.Repeated {
 		g.printf("    enc.writeInt32(msg.%s?.length ?? 0);\n", fieldName)
@@ -219,6 +218,21 @@ func (g *Generator) generateScalarEncodeTS(varName string, t ast.FieldType, inde
 
 func (g *Generator) generateFieldDecodeTS(field *ast.Field) {
 	fieldName := toCamelCaseTS(field.Name)
+
+	// Optional: read the 1-byte presence flag first. On false, leave the field
+	// undefined and consume nothing more so the next field decodes correctly.
+	if field.Optional {
+		g.printf("    if (dec.readBool()) {\n")
+		// For nested-message optionals the presence byte replaces the
+		// 0-length-envelope guard, so we always materialize on present.
+		if field.Type.Kind == ast.TypeMessage && !g.enums.IsEnum(field.Type) {
+			g.printf("      msg.%s = %s.decodeAt(dec.readMessageBytes(), depth+1);\n", fieldName, field.Type.Message)
+		} else {
+			g.printf("      msg.%s = %s;\n", fieldName, g.tsReadCall(field.Type))
+		}
+		g.printf("    }\n")
+		return
+	}
 
 	// Repeated
 	if field.Repeated {

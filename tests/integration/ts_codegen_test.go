@@ -385,6 +385,13 @@ console.log("OK");
 	runTSRoundTrip(t, dir, genFile, driver)
 }
 
+// TestTSCodegen_OptionalField round-trips BOTH a present optional (value
+// preserved) and an absent optional (decodes to undefined) and proves that the
+// field after an absent optional still decodes correctly -- i.e. the 1-byte
+// presence flag is consumed and doesn't corrupt the following field.
+//
+// Wire format: an optional field is encoded as a 1-byte presence flag (0x01 +
+// value when present, 0x00 with no value bytes when absent).
 func TestTSCodegen_OptionalField(t *testing.T) {
 	schema := `
 package test
@@ -394,6 +401,11 @@ message Profile {
     2: ?string avatar_url
     3: int32 followers
 }
+
+message Pair {
+    1: ?string a
+    2: int32 b
+}
 `
 	src := generateTS(t, schema)
 	if !strings.Contains(string(src), "avatarUrl?: string") {
@@ -402,13 +414,38 @@ message Profile {
 	dir, genFile := writeTSProject(t, src)
 	typeCheckTS(t, dir)
 
-	driver := `import { Profile } from './gen_exec.ts';
-const input = new Profile({ bio: "hi", avatarUrl: "http://x/y.png", followers: 9 });
-const out = Profile.decode(input.encode());
-if (out.bio !== "hi" || out.avatarUrl !== "http://x/y.png" || out.followers !== 9) {
-  console.error("FAIL", JSON.stringify(out));
-  process.exit(1);
+	driver := `import { Profile, Pair } from './gen_exec.ts';
+function fail(m: string): never { console.error("FAIL: " + m); process.exit(1); }
+
+// Present optional round-trips its value.
+{
+  const input = new Profile({ bio: "hi", avatarUrl: "http://x/y.png", followers: 9 });
+  const out = Profile.decode(input.encode());
+  if (out.bio !== "hi" || out.avatarUrl !== "http://x/y.png" || out.followers !== 9) {
+    fail("present " + JSON.stringify(out));
+  }
 }
+
+// Absent optional decodes to undefined AND the following field still decodes.
+{
+  const input = new Profile({ bio: "hi", followers: 9 }); // avatarUrl omitted
+  const out = Profile.decode(input.encode());
+  if (out.avatarUrl !== undefined) fail("absent optional should be undefined, got " + out.avatarUrl);
+  if (out.bio !== "hi") fail("field before optional corrupted: " + out.bio);
+  if (out.followers !== 9) fail("field after absent optional corrupted (presence byte not consumed): " + out.followers);
+}
+
+// Exact-byte check on {?string a, int32 b} with a absent: 1 presence byte + 4 int32 bytes.
+{
+  const input = new Pair({ b: 1234 });
+  const bytes = input.encode();
+  if (bytes.length !== 5) fail("absent-optional Pair = " + bytes.length + " bytes, want 5");
+  if (bytes[0] !== 0x00) fail("presence byte = " + bytes[0] + ", want 0");
+  if (bytes[1] !== 0xD2 || bytes[2] !== 0x04 || bytes[3] !== 0 || bytes[4] !== 0) fail("int32 mis-encoded: " + Array.from(bytes).join(","));
+  const out = Pair.decode(bytes);
+  if (out.a !== undefined || out.b !== 1234) fail("Pair round-trip a=" + out.a + " b=" + out.b);
+}
+
 console.log("OK");
 `
 	runTSRoundTrip(t, dir, genFile, driver)

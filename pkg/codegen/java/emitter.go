@@ -52,10 +52,10 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File, p
 	}
 
 	if hasOptional {
-		sb.WriteString("// NOTE: schema contains `optional` fields. The XPB V2 wire format\n")
-		sb.WriteString("// has no presence bit, so this codegen emits them as required.\n")
-		sb.WriteString("// Callers must agree on a sentinel value (or upgrade to V3) before\n")
-		sb.WriteString("// relying on optional semantics.\n")
+		sb.WriteString("// NOTE: schema contains `optional` fields. Each optional field is\n")
+		sb.WriteString("// preceded on the wire by a 1-byte presence flag (0x01 present + value,\n")
+		sb.WriteString("// 0x00 absent). Optional fields use boxed/reference types; null means\n")
+		sb.WriteString("// absent.\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("public class %s {\n", typeName))
@@ -65,6 +65,9 @@ func writeMessage(sb *strings.Builder, msg *xpbast.Message, file *xpbast.File, p
 		fieldName := lowercaseFirst(field.Name)
 		if field.Repeated {
 			fieldType = javaBaseType(field.Type, file) + "[]"
+		} else if field.Optional {
+			// Optional fields use a boxed/reference type so null = absent.
+			fieldType = javaBoxedType(field.Type, file)
 		}
 		sb.WriteString(fmt.Sprintf("    public %s %s;\n", fieldType, fieldName))
 	}
@@ -83,6 +86,10 @@ func writeMarshalMethod(sb *strings.Builder, msg *xpbast.Message, typeName strin
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeJavaOptionalFieldEncode(sb, field, fieldName, ctx)
+			continue
+		}
 		// Enums (which parse as TypeMessage with an enum name) write
 		// their int value, not a sub-message.
 		if ctx.IsEnum(field.Type) && !field.Repeated {
@@ -146,6 +153,10 @@ func writeUnmarshalMethod(sb *strings.Builder, msg *xpbast.Message, typeName str
 
 	for _, field := range msg.Fields {
 		fieldName := lowercaseFirst(field.Name)
+		if field.Optional && !field.Repeated && field.Type.Kind != xpbast.TypeMap {
+			writeJavaOptionalFieldDecode(sb, field, fieldName, ctx)
+			continue
+		}
 		if ctx.IsEnum(field.Type) && !field.Repeated {
 			enumName := field.Type.Message
 			if field.Type.Kind == xpbast.TypeEnum {
@@ -406,6 +417,49 @@ func writeJavaMapFieldEncode(sb *strings.Builder, field *xpbast.Field, fieldName
 	sb.WriteString(fmt.Sprintf("                %s;\n", javaWriteCall(*field.Type.KeyType, "e.getKey()")))
 	sb.WriteString(fmt.Sprintf("                %s;\n", javaWriteCall(*field.Type.ValType, "e.getValue()")))
 	sb.WriteString("            }\n")
+	sb.WriteString("        }\n")
+}
+
+// writeJavaOptionalFieldEncode emits the 1-byte presence flag (see
+// docs/WIRE_FORMAT.md) followed by the value only when non-null. Optional
+// fields use boxed/reference types so null = absent.
+func writeJavaOptionalFieldEncode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
+	sb.WriteString(fmt.Sprintf("        enc.writeBool(%s != null);\n", fieldName))
+	sb.WriteString(fmt.Sprintf("        if (%s != null) {\n", fieldName))
+	if ctx.IsEnum(field.Type) {
+		sb.WriteString(fmt.Sprintf("            enc.writeInt32(%s.getValue());\n", fieldName))
+	} else {
+		switch field.Type.Kind {
+		case xpbast.TypeMessage:
+			sb.WriteString(fmt.Sprintf("            enc.writeMessage(%s.marshal());\n", fieldName))
+		default:
+			sb.WriteString(fmt.Sprintf("            %s;\n", javaWriteCall(field.Type, fieldName)))
+		}
+	}
+	sb.WriteString("        }\n")
+}
+
+// writeJavaOptionalFieldDecode reads the presence flag and assigns the value
+// only when present; otherwise the field stays null (its default), and exactly
+// 1 byte was consumed so the next field decodes correctly.
+func writeJavaOptionalFieldDecode(sb *strings.Builder, field *xpbast.Field, fieldName string, ctx xpbast.EnumSet) {
+	sb.WriteString("        if (dec.readBool()) {\n")
+	if ctx.IsEnum(field.Type) {
+		enumName := field.Type.Message
+		if field.Type.Kind == xpbast.TypeEnum {
+			enumName = field.Type.Enum
+		}
+		sb.WriteString(fmt.Sprintf("            m.%s = %s.fromValue(dec.readInt32());\n",
+			fieldName, capitalize(enumName)))
+	} else {
+		switch field.Type.Kind {
+		case xpbast.TypeMessage:
+			sb.WriteString(fmt.Sprintf("            m.%s = %s.unmarshalAt(dec.readMessageBytes(), depth + 1);\n",
+				fieldName, capitalize(field.Type.Message)))
+		default:
+			sb.WriteString(fmt.Sprintf("            m.%s = %s;\n", fieldName, javaReadCall(field.Type)))
+		}
+	}
 	sb.WriteString("        }\n")
 }
 
