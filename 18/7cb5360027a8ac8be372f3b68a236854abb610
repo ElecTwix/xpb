@@ -1,0 +1,56 @@
+tests/integration/ts_codegen_test.go
+  s_165453c95b4380::t_9fe2210161fc42 388-394,404-408,417-435,437-448
+pkg/codegen/c/emitter.go
+  s_165453c95b4380::t_187f6b4e33f3a8 170-173
+  s_165453c95b4380::t_8d0376e324720c 63-67
+  s_165453c95b4380::t_96629c6485f56a 89-104,106-110
+  s_165453c95b4380::t_b647ccbb04626f 389-392
+  s_165453c95b4380::t_ff96f62612644a 234-255
+  s_165453c95b4380::t_58affc1d8f098d 455-498
+pkg/codegen/lua/emitter.go
+  s_165453c95b4380::t_c6bb7fd516fc07 160-163
+  s_165453c95b4380::t_ef70b4c57a1244 206-209
+  s_165453c95b4380::t_07cc6931c2c881 299-328
+  s_165453c95b4380::t_362d747f898992 121-123
+pkg/codegen/java/emitter.go
+  s_165453c95b4380::t_08d03ef7acd0a9 423-465
+  s_165453c95b4380::t_50f0b28aa134bd 156-159
+  s_165453c95b4380::t_becc4740517919 89-92
+  s_165453c95b4380::t_0987cfe3fd9ad2 55-58
+  s_165453c95b4380::t_40a850198c2e0c 68-70
+pkg/codegen/typescript/emitter.go
+  s_165453c95b4380::t_832084c8e44af9 145-157
+  s_165453c95b4380::t_f02b453f4dd077 222-236
+runtime/rust/tests/optional.rs
+  s_165453c95b4380::t_7a7d8ac7ced7f6 15
+  s_165453c95b4380::t_08bf993e915a54 1-14,16-136
+tests/integration/security_audit_test.go
+  s_165453c95b4380::t_6df021209291ca 23,26
+  s_165453c95b4380::t_4e8f9ef71f23ba 1081-1082,1084-1088,1090,1093,1109-1114,1116-1151,1158-1168,1171
+pkg/codegen/golang/emitter.go
+  s_165453c95b4380::t_d893b961eb01ec 250-272,275-281
+  s_165453c95b4380::t_0291e91820f64a 343-370
+  s_165453c95b4380::t_a49414dccc1514 444-448
+  s_165453c95b4380::t_6cb616a91ba30d 158-181
+  s_165453c95b4380::t_d487c4dfa0d214 273-274
+docs/WIRE_FORMAT.md
+  s_165453c95b4380::t_92f99e345d14ec 207-263
+tests/integration/go_codegen_test.go
+  s_165453c95b4380::t_b3756c53f2eaf9 451-458,470-473,477-480,482-484,493-508,510-554,557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "187cb5360027a8ac8be372f3b68a236854abb610",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
