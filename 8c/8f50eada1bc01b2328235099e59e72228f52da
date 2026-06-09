@@ -1,0 +1,36 @@
+cmd/xpbench/runners.go
+  s_165453c95b4380::t_b215eaecc96c96 36-37,39,80-83,86,88,105,107,112,167,178,187,194
+runtime/go/xpb/security_validation_test.go
+  s_165453c95b4380::t_b215eaecc96c96 23-31,33-34,55-64,66-67,128-131,170-179,181-183
+runtime/go/xpb/xpb.go
+  s_165453c95b4380::t_b215eaecc96c96 19-21
+README.md
+  s_165453c95b4380::t_70572746d11134 153-162
+scripts/hooks/pre-push
+  s_165453c95b4380::t_dc5d0035954d42 2-3,5-6
+  s_165453c95b4380::t_51979d353c2787 1,4
+cmd/xpbench/main.go
+  s_165453c95b4380::t_b215eaecc96c96 66,68,75,85,87-89,91,94-99,108,113,123,125-127,132,139-141,144-149,170-172
+cmd/ci/main.go
+  s_165453c95b4380::t_018dc3e0ea1229 1-47,56-116,118-154,156-177,182-365
+  s_165453c95b4380::t_f8572efcc8e9e5 48-55
+  s_165453c95b4380::t_df5cbb5d70e5bb 155
+  s_165453c95b4380::t_c08c1b5fb41cfe 117
+  s_165453c95b4380::t_32f5300d3e5e49 178-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8c8f50eada1bc01b2328235099e59e72228f52da",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
