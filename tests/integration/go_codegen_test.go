@@ -1,17 +1,135 @@
 // Package integration contains end-to-end tests for the Go codegen.
+//
+// These tests do REAL work: they parse a schema, generate Go source, write it
+// into a throwaway module that imports the actual xpb runtime from this
+// checkout (via a `replace` directive), then `go test` that module. The driver
+// constructs the generated struct, Marshals it, Unmarshals into a fresh struct,
+// and asserts round-trip equality. A failure to compile or a round-trip
+// mismatch fails the test for real -- substring checks alone cannot catch a
+// broken generator.
 package integration
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/ElecTwix/xpb/pkg/codegen/golang"
 	"github.com/ElecTwix/xpb/pkg/parser"
 )
+
+// repoRoot returns the absolute path to the repository root, computed from this
+// test file's own location so it is independent of the working directory.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed; cannot locate repo root")
+	}
+	// This file lives at <root>/tests/integration/go_codegen_test.go.
+	root, err := filepath.Abs(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("computed repo root %q has no go.mod: %v", root, err)
+	}
+	return root
+}
+
+// buildGenModule writes a self-contained module under a temp dir:
+//   - generated.go: the generated package (rewritten to `package gen`)
+//   - <driverName>: a driver in the same package that exercises Marshal/Unmarshal
+//   - go.mod with a replace directive pointing the xpb import at this checkout
+//
+// It returns the module directory.
+func buildGenModule(t *testing.T, genSrc []byte, driverName, driverSrc string) string {
+	t.Helper()
+
+	root := repoRoot(t)
+	dir := t.TempDir()
+
+	// Force the generated code into package `gen` regardless of the schema's
+	// declared package, so the driver can live in the same package.
+	src := string(genSrc)
+	src = rewritePackageClause(t, src, "gen")
+
+	if err := os.WriteFile(filepath.Join(dir, "generated.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write generated.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, driverName), []byte(driverSrc), 0o644); err != nil {
+		t.Fatalf("write %s: %v", driverName, err)
+	}
+
+	// A minimal module that resolves the xpb runtime import to THIS checkout.
+	goMod := "module xpbgentest\n\n" +
+		"go 1.23\n\n" +
+		"require github.com/ElecTwix/xpb v0.0.0\n\n" +
+		"replace github.com/ElecTwix/xpb => " + root + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	return dir
+}
+
+// rewritePackageClause replaces the `package X` line in generated Go source with
+// the desired package name.
+func rewritePackageClause(t *testing.T, src, pkg string) string {
+	t.Helper()
+	lines := strings.Split(src, "\n")
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "package ") {
+			lines[i] = "package " + pkg
+			return strings.Join(lines, "\n")
+		}
+	}
+	t.Fatalf("generated source has no package clause:\n%s", src)
+	return ""
+}
+
+// goTestModule runs `go test` in the given module directory and fails the test
+// (with full output) if it does not pass. `go test` builds the package, so this
+// is the authoritative compile + run check.
+func goTestModule(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("go", "test", "-count=1", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated module failed `go test`: %v\n--- output ---\n%s\n--- generated.go ---\n%s",
+			err, out, readFile(t, filepath.Join(dir, "generated.go")))
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "<unreadable: " + err.Error() + ">"
+	}
+	return string(b)
+}
+
+// generateGo parses a schema and returns the generated Go source, failing on error.
+func generateGo(t *testing.T, schema string) []byte {
+	t.Helper()
+	file, err := parser.ParseFile(schema)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	src, err := golang.Generate(file)
+	if err != nil {
+		t.Fatalf("generate failed: %v\n%s", err, src)
+	}
+	return src
+}
+
+// --- Lightweight syntax pre-checks (kept; the authoritative check is the real build) ---
 
 func TestGoCodegen_SimpleSchema(t *testing.T) {
 	schema := `
@@ -23,25 +141,227 @@ message User {
     3: bool active
 }
 `
-	file, err := parser.ParseFile(schema)
+	src := generateGo(t, schema)
+	if !strings.Contains(string(src), "type User struct") {
+		t.Fatalf("missing User struct in generated output:\n%s", src)
+	}
+
+	driver := `package gen
+
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	in := &User{Name: "alice", Age: 30, Active: true}
+	data, err := in.Marshal()
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf("Marshal: %v", err)
 	}
+	var out User
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Name != in.Name || out.Age != in.Age || out.Active != in.Active {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", out, *in)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
 
-	src, err := golang.Generate(file)
+// TestGoCodegen_AllTypes covers every scalar type and asserts a full round-trip,
+// including values where wrong field ordering would corrupt the decode.
+func TestGoCodegen_AllTypes(t *testing.T) {
+	schema := `
+package test
+
+message AllTypes {
+    1: bool b
+    2: int32 i32
+    3: int64 i64
+    4: uint32 u32
+    5: uint64 u64
+    6: float32 f32
+    7: float64 f64
+    8: string s
+    9: bytes data
+}
+`
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestRoundTrip(t *testing.T) {
+	in := &AllTypes{
+		B:    true,
+		I32:  -123456,
+		I64:  -9000000000,
+		U32:  4000000000,
+		U64:  18000000000000000000,
+		F32:  3.5,
+		F64:  2.718281828,
+		S:    "hello world",
+		Data: []byte{0xde, 0xad, 0xbe, 0xef},
+	}
+	data, err := in.Marshal()
 	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out AllTypes
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.B != in.B || out.I32 != in.I32 || out.I64 != in.I64 ||
+		out.U32 != in.U32 || out.U64 != in.U64 || out.F32 != in.F32 ||
+		out.F64 != in.F64 || out.S != in.S || !bytes.Equal(out.Data, in.Data) {
+		t.Fatalf("round-trip mismatch:\n got  %+v\n want %+v", out, *in)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
+
+// TestGoCodegen_FieldOrder uses two adjacent same-width fields with distinct
+// values. The XPB V2 format is tagless and positional, so a generator that
+// emitted fields in the wrong order would silently swap these values; the
+// round-trip assertion catches it.
+func TestGoCodegen_FieldOrder(t *testing.T) {
+	schema := `
+package test
+
+message Ordered {
+    1: int32 first
+    2: int32 second
+    3: int32 third
+    4: string label
+    5: int32 fourth
+}
+`
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	in := &Ordered{First: 1, Second: 2, Third: 3, Label: "x", Fourth: 4}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Ordered
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	// Distinct values per field: any ordering bug corrupts these.
+	if out.First != 1 || out.Second != 2 || out.Third != 3 || out.Label != "x" || out.Fourth != 4 {
+		t.Fatalf("field-order round-trip mismatch: got %+v", out)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
+
+func TestGoCodegen_RepeatedFields(t *testing.T) {
+	schema := `
+package test
+
+message Container {
+    1: string name
+    2: []string tags
+    3: []int32 scores
+}
+`
+	src := generateGo(t, schema)
+
+	// Security regression (XPB-001/002): repeated-field counts must go through
+	// dec.ReadArrayCount (which bounds the count against the remaining buffer),
+	// not a raw ReadInt32 + unchecked make([]T, count).
+	if !strings.Contains(string(src), "dec.ReadArrayCount(") {
+		t.Error("repeated-field decode must use dec.ReadArrayCount; got raw ReadInt32")
 	}
 
-	output := string(src)
-	if output == "" {
-		t.Fatal("Generate returned empty output")
-	}
+	driver := `package gen
 
-	// Verify generated code compiles
-	if err := compileGoCode(t, output); err != nil {
-		t.Fatalf("Generated code does not compile: %v", err)
+import (
+	"reflect"
+	"testing"
+)
+
+func TestRoundTrip(t *testing.T) {
+	in := &Container{
+		Name:   "box",
+		Tags:   []string{"a", "bb", "ccc"},
+		Scores: []int32{-1, 0, 7, 1000000},
 	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Container
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Name != in.Name || !reflect.DeepEqual(out.Tags, in.Tags) || !reflect.DeepEqual(out.Scores, in.Scores) {
+		t.Fatalf("round-trip mismatch:\n got  %+v\n want %+v", out, *in)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
+
+func TestGoCodegen_NestedMessages(t *testing.T) {
+	schema := `
+package test
+
+message Point {
+    1: int32 x
+    2: int32 y
+}
+
+message Rectangle {
+    1: Point top_left
+    2: Point bottom_right
+}
+`
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	in := &Rectangle{
+		TopLeft:     &Point{X: 1, Y: 2},
+		BottomRight: &Point{X: 30, Y: 40},
+	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Rectangle
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.TopLeft == nil || out.BottomRight == nil {
+		t.Fatalf("nested messages not decoded: %+v", out)
+	}
+	if *out.TopLeft != *in.TopLeft || *out.BottomRight != *in.BottomRight {
+		t.Fatalf("round-trip mismatch: got {%+v %+v} want {%+v %+v}",
+			*out.TopLeft, *out.BottomRight, *in.TopLeft, *in.BottomRight)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
 }
 
 func TestGoCodegen_WithEnum(t *testing.T) {
@@ -59,234 +379,112 @@ message User {
     3: int32 age
 }
 `
-	file, err := parser.ParseFile(schema)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
+	src := generateGo(t, schema)
 
-	src, err := golang.Generate(file)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
+	driver := `package gen
 
-	// Verify generated code compiles
-	if err := compileGoCode(t, string(src)); err != nil {
-		t.Fatalf("Generated code does not compile: %v", err)
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	in := &User{Name: "bob", Status: Status_INACTIVE, Age: 42}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out User
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Name != in.Name || out.Status != in.Status || out.Age != in.Age {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", out, *in)
+	}
+	if out.Status.String() != "INACTIVE" {
+		t.Fatalf("enum String() = %q, want INACTIVE", out.Status.String())
 	}
 }
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
 
-func TestGoCodegen_RoundTrip(t *testing.T) {
+func TestGoCodegen_MapField(t *testing.T) {
 	schema := `
 package test
 
-message Point {
-    1: int32 x
-    2: int32 y
-}
-
-message Rectangle {
-    1: Point top_left
-    2: Point bottom_right
-}
-`
-	file, err := parser.ParseFile(schema)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-
-	src, err := golang.Generate(file)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	// Create temp directory for generated code
-	tmpDir := t.TempDir()
-	genFile := filepath.Join(tmpDir, "generated.go")
-	if err := os.WriteFile(genFile, src, 0644); err != nil {
-		t.Fatalf("Write file failed: %v", err)
-	}
-
-	// Write runtime import
-	runtimeFile := filepath.Join(tmpDir, "runtime.go")
-	runtimeContent := `//go:build ignore
-package main
-`
-	if err := os.WriteFile(runtimeFile, []byte(runtimeContent), 0644); err != nil {
-		t.Fatalf("Write runtime file failed: %v", err)
-	}
-
-	// Try to compile with xpb import
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", os.DevNull, genFile)
-	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output: %s", output)
-		// This will likely fail because we can't import xpb without module setup
-		// But we can verify the generated code structure is valid
-		t.Log("Build failed (expected without proper module setup)")
-	}
-}
-
-func TestGoCodegen_AllTypes(t *testing.T) {
-	schema := `
-package test
-
-message AllTypes {
-    1: bool b
-    2: int32 i32
-    3: int64 i64
-    4: uint32 u32
-    5: uint64 u64
-    6: float32 f32
-    7: float64 f64
-    8: string s
-    9: bytes data
-}
-`
-	file, err := parser.ParseFile(schema)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-
-	src, err := golang.Generate(file)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
-
-	// Verify generated code structure
-	output := string(src)
-
-	// Field names are converted to camelCase with first letter capitalized
-	fieldNames := []string{"B", "I32", "I64", "U32", "U64", "F32", "F64", "S", "Data"}
-	for _, fieldName := range fieldNames {
-		if !strings.Contains(output, fieldName+" ") {
-			t.Errorf("Missing field '%s' in struct", fieldName)
-		}
-	}
-
-	// Verify Marshal/Unmarshal methods exist
-	if !strings.Contains(output, "func (m *AllTypes) Marshal()") {
-		t.Error("Missing Marshal method")
-	}
-	if !strings.Contains(output, "func (m *AllTypes) Unmarshal") {
-		t.Error("Missing Unmarshal method")
-	}
-}
-
-func TestGoCodegen_RepeatedFields(t *testing.T) {
-	schema := `
-package test
-
-message Container {
+message Config {
     1: string name
-    2: []string tags
-    3: []int32 scores
+    2: map<string, int32> counts
 }
 `
-	file, err := parser.ParseFile(schema)
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestRoundTrip(t *testing.T) {
+	in := &Config{
+		Name:   "cfg",
+		Counts: map[string]int32{"a": 1, "b": 2, "c": 3},
+	}
+	data, err := in.Marshal()
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf("Marshal: %v", err)
 	}
-
-	src, err := golang.Generate(file)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+	var out Config
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
 	}
-
-	output := string(src)
-
-	// Normalize whitespace for comparison
-	normalized := strings.ReplaceAll(output, "\t", " ")
-	for strings.Contains(normalized, "  ") {
-		normalized = strings.ReplaceAll(normalized, "  ", " ")
-	}
-
-	// Verify repeated fields generate slice types
-	if !strings.Contains(normalized, "Tags []string") {
-		t.Error("Missing Tags []string field")
-	}
-	if !strings.Contains(normalized, "Scores []int32") {
-		t.Error("Missing Scores []int32 field")
-	}
-
-	// Security: repeated-field counts must go through ReadArrayCount
-	// (which bounds the count against the remaining buffer) instead of
-	// ReadInt32 followed by an unchecked make([]T, count). See XPB-001/002.
-	if !strings.Contains(output, "dec.ReadArrayCount(") {
-		t.Error("Repeated-field decode must use dec.ReadArrayCount; got raw ReadInt32")
+	if out.Name != in.Name || !reflect.DeepEqual(out.Counts, in.Counts) {
+		t.Fatalf("round-trip mismatch:\n got  %+v\n want %+v", out, *in)
 	}
 }
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
 
-func TestGoCodegen_NestedMessages(t *testing.T) {
+// TestGoCodegen_OptionalField confirms a schema using the `?` optional marker
+// generates code that compiles and round-trips.
+func TestGoCodegen_OptionalField(t *testing.T) {
 	schema := `
 package test
 
-message Address {
-    1: string city
-    2: string country
-}
-
-message Person {
-    1: string name
-    2: Address addr
+message Profile {
+    1: string bio
+    2: ?string avatar_url
+    3: int32 followers
 }
 `
-	file, err := parser.ParseFile(schema)
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	in := &Profile{Bio: "hi", AvatarUrl: "http://x/y.png", Followers: 9}
+	data, err := in.Marshal()
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf("Marshal: %v", err)
 	}
-
-	src, err := golang.Generate(file)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
 	}
-
-	output := string(src)
-
-	// Verify both messages are generated
-	if !strings.Contains(output, "type Address struct") {
-		t.Error("Missing Address struct")
-	}
-	if !strings.Contains(output, "type Person struct") {
-		t.Error("Missing Person struct")
-	}
-	if !strings.Contains(output, "Addr *Address") {
-		t.Error("Missing Addr *Address field in Person")
+	if out.Bio != in.Bio || out.AvatarUrl != in.AvatarUrl || out.Followers != in.Followers {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", out, *in)
 	}
 }
-
-// compileGoCode attempts to compile generated Go code
-// This is a basic syntax check - full compilation requires module setup
-func compileGoCode(t *testing.T, src string) error {
-	t.Helper()
-
-	// Basic syntax checks
-	if !strings.Contains(src, "package ") {
-		return fmt.Errorf("missing package declaration")
-	}
-
-	// Check for required elements
-	required := []struct {
-		name    string
-		pattern string
-	}{
-		{"package", "package "},
-		{"struct", "type User struct"},
-		{"marshal", "func (m *"},
-		{"encoder", "xpb.NewEncoder"},
-		{"write methods", "WriteString"},
-	}
-
-	for _, req := range required {
-		if !strings.Contains(src, req.pattern) {
-			return fmt.Errorf("missing %s: pattern '%s'", req.name, req.pattern)
-		}
-	}
-
-	return nil
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
 }
 
-// BenchmarkGoCodegen_Simple benchmarks simple message generation
+// BenchmarkGoCodegen_Simple benchmarks simple message generation.
 func BenchmarkGoCodegen_Simple(b *testing.B) {
 	schema := `
 package test
@@ -307,7 +505,7 @@ message User {
 	}
 }
 
-// BenchmarkGoCodegen_Medium benchmarks medium message generation
+// BenchmarkGoCodegen_Medium benchmarks medium message generation.
 func BenchmarkGoCodegen_Medium(b *testing.B) {
 	schema := `
 package test

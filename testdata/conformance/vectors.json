@@ -1,0 +1,683 @@
+{
+  "format": "int32/uint32=number; int64/uint64=decimal string; float32/float64=hex bit pattern string; bytes=hex string; array=count+elems; map=count+k/v; message=length-prefixed nested ops",
+  "vectors": [
+    {
+      "name": "bool_true",
+      "file": "bool_true.bin",
+      "hex": "01",
+      "ops": [
+        {
+          "type": "bool",
+          "bool": true
+        }
+      ]
+    },
+    {
+      "name": "bool_false",
+      "file": "bool_false.bin",
+      "hex": "00",
+      "ops": [
+        {
+          "type": "bool",
+          "bool": false
+        }
+      ]
+    },
+    {
+      "name": "int32_zero",
+      "file": "int32_zero.bin",
+      "hex": "00000000",
+      "ops": [
+        {
+          "type": "int32",
+          "int32": 0
+        }
+      ]
+    },
+    {
+      "name": "int32_neg1",
+      "file": "int32_neg1.bin",
+      "hex": "ffffffff",
+      "ops": [
+        {
+          "type": "int32",
+          "int32": -1
+        }
+      ]
+    },
+    {
+      "name": "int32_max",
+      "file": "int32_max.bin",
+      "hex": "ffffff7f",
+      "ops": [
+        {
+          "type": "int32",
+          "int32": 2147483647
+        }
+      ]
+    },
+    {
+      "name": "int32_min",
+      "file": "int32_min.bin",
+      "hex": "00000080",
+      "ops": [
+        {
+          "type": "int32",
+          "int32": -2147483648
+        }
+      ]
+    },
+    {
+      "name": "int32_sample",
+      "file": "int32_sample.bin",
+      "hex": "1e000000",
+      "ops": [
+        {
+          "type": "int32",
+          "int32": 30
+        }
+      ]
+    },
+    {
+      "name": "int64_zero",
+      "file": "int64_zero.bin",
+      "hex": "0000000000000000",
+      "ops": [
+        {
+          "type": "int64",
+          "int64": "0"
+        }
+      ]
+    },
+    {
+      "name": "int64_neg1",
+      "file": "int64_neg1.bin",
+      "hex": "ffffffffffffffff",
+      "ops": [
+        {
+          "type": "int64",
+          "int64": "-1"
+        }
+      ]
+    },
+    {
+      "name": "int64_max",
+      "file": "int64_max.bin",
+      "hex": "ffffffffffffff7f",
+      "ops": [
+        {
+          "type": "int64",
+          "int64": "9223372036854775807"
+        }
+      ]
+    },
+    {
+      "name": "int64_min",
+      "file": "int64_min.bin",
+      "hex": "0000000000000080",
+      "ops": [
+        {
+          "type": "int64",
+          "int64": "-9223372036854775808"
+        }
+      ]
+    },
+    {
+      "name": "uint32_zero",
+      "file": "uint32_zero.bin",
+      "hex": "00000000",
+      "ops": [
+        {
+          "type": "uint32",
+          "uint32": 0
+        }
+      ]
+    },
+    {
+      "name": "uint32_max",
+      "file": "uint32_max.bin",
+      "hex": "ffffffff",
+      "ops": [
+        {
+          "type": "uint32",
+          "uint32": 4294967295
+        }
+      ]
+    },
+    {
+      "name": "uint64_zero",
+      "file": "uint64_zero.bin",
+      "hex": "0000000000000000",
+      "ops": [
+        {
+          "type": "uint64",
+          "uint64": "0"
+        }
+      ]
+    },
+    {
+      "name": "uint64_max",
+      "file": "uint64_max.bin",
+      "hex": "ffffffffffffffff",
+      "ops": [
+        {
+          "type": "uint64",
+          "uint64": "18446744073709551615"
+        }
+      ]
+    },
+    {
+      "name": "float32_zero",
+      "file": "float32_zero.bin",
+      "hex": "00000000",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0x00000000"
+        }
+      ]
+    },
+    {
+      "name": "float32_neg_zero",
+      "file": "float32_neg_zero.bin",
+      "hex": "00000080",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0x80000000"
+        }
+      ]
+    },
+    {
+      "name": "float32_pi",
+      "file": "float32_pi.bin",
+      "hex": "c3f54840",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0x4048F5C3"
+        }
+      ]
+    },
+    {
+      "name": "float32_pos_inf",
+      "file": "float32_pos_inf.bin",
+      "hex": "0000807f",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0x7F800000"
+        }
+      ]
+    },
+    {
+      "name": "float32_neg_inf",
+      "file": "float32_neg_inf.bin",
+      "hex": "000080ff",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0xFF800000"
+        }
+      ]
+    },
+    {
+      "name": "float32_nan",
+      "file": "float32_nan.bin",
+      "hex": "0000c07f",
+      "ops": [
+        {
+          "type": "float32",
+          "floatBits": "0x7FC00000"
+        }
+      ]
+    },
+    {
+      "name": "float64_zero",
+      "file": "float64_zero.bin",
+      "hex": "0000000000000000",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0x0000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "float64_neg_zero",
+      "file": "float64_neg_zero.bin",
+      "hex": "0000000000000080",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0x8000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "float64_pi",
+      "file": "float64_pi.bin",
+      "hex": "182d4454fb210940",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0x400921FB54442D18"
+        }
+      ]
+    },
+    {
+      "name": "float64_pos_inf",
+      "file": "float64_pos_inf.bin",
+      "hex": "000000000000f07f",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0x7FF0000000000000"
+        }
+      ]
+    },
+    {
+      "name": "float64_neg_inf",
+      "file": "float64_neg_inf.bin",
+      "hex": "000000000000f0ff",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0xFFF0000000000000"
+        }
+      ]
+    },
+    {
+      "name": "float64_nan",
+      "file": "float64_nan.bin",
+      "hex": "000000000000f87f",
+      "ops": [
+        {
+          "type": "float64",
+          "floatBits": "0x7FF8000000000000"
+        }
+      ]
+    },
+    {
+      "name": "string_empty",
+      "file": "string_empty.bin",
+      "hex": "00",
+      "ops": [
+        {
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "string_ascii",
+      "file": "string_ascii.bin",
+      "hex": "05416c696365",
+      "ops": [
+        {
+          "type": "string",
+          "string": "Alice"
+        }
+      ]
+    },
+    {
+      "name": "string_utf8",
+      "file": "string_utf8.bin",
+      "hex": "1268c3a96c6c6f20e4b896e7958c20f09f9a80",
+      "ops": [
+        {
+          "type": "string",
+          "string": "héllo 世界 🚀"
+        }
+      ]
+    },
+    {
+      "name": "string_len254",
+      "file": "string_len254.bin",
+      "hex": "fe6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "ops": [
+        {
+          "type": "string",
+          "string": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "name": "string_len255",
+      "file": "string_len255.bin",
+      "hex": "ffff000000626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262",
+      "ops": [
+        {
+          "type": "string",
+          "string": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    },
+    {
+      "name": "string_len256",
+      "file": "string_len256.bin",
+      "hex": "ff0001000063636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363",
+      "ops": [
+        {
+          "type": "string",
+          "string": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    },
+    {
+      "name": "string_long",
+      "file": "string_long.bin",
+      "hex": "ffe80300005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "ops": [
+        {
+          "type": "string",
+          "string": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+        }
+      ]
+    },
+    {
+      "name": "bytes_empty",
+      "file": "bytes_empty.bin",
+      "hex": "00",
+      "ops": [
+        {
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "bytes_nonempty",
+      "file": "bytes_nonempty.bin",
+      "hex": "060001feff7f80",
+      "ops": [
+        {
+          "type": "bytes",
+          "bytes": "0001feff7f80"
+        }
+      ]
+    },
+    {
+      "name": "bytes_len255",
+      "file": "bytes_len255.bin",
+      "hex": "ffff000000ababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+      "ops": [
+        {
+          "type": "bytes",
+          "bytes": "ababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+        }
+      ]
+    },
+    {
+      "name": "array_int32_empty",
+      "file": "array_int32_empty.bin",
+      "hex": "00000000",
+      "ops": [
+        {
+          "type": "array",
+          "elemType": "int32"
+        }
+      ]
+    },
+    {
+      "name": "array_int32",
+      "file": "array_int32.bin",
+      "hex": "03000000010000000200000003000000",
+      "ops": [
+        {
+          "type": "array",
+          "elemType": "int32",
+          "elems": [
+            {
+              "type": "int32",
+              "int32": 1
+            },
+            {
+              "type": "int32",
+              "int32": 2
+            },
+            {
+              "type": "int32",
+              "int32": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "array_string",
+      "file": "array_string.bin",
+      "hex": "03000000016102626200",
+      "ops": [
+        {
+          "type": "array",
+          "elemType": "string",
+          "elems": [
+            {
+              "type": "string",
+              "string": "a"
+            },
+            {
+              "type": "string",
+              "string": "bb"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "array_float64",
+      "file": "array_float64.bin",
+      "hex": "02000000000000000000f83f00000000000002c0",
+      "ops": [
+        {
+          "type": "array",
+          "elemType": "float64",
+          "elems": [
+            {
+              "type": "float64",
+              "floatBits": "0x3FF8000000000000"
+            },
+            {
+              "type": "float64",
+              "floatBits": "0xC002000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "map_empty",
+      "file": "map_empty.bin",
+      "hex": "00000000",
+      "ops": [
+        {
+          "type": "map",
+          "keyType": "string",
+          "valType": "int32"
+        }
+      ]
+    },
+    {
+      "name": "map_string_int32",
+      "file": "map_string_int32.bin",
+      "hex": "02000000016101000000016202000000",
+      "ops": [
+        {
+          "type": "map",
+          "keyType": "string",
+          "valType": "int32",
+          "entries": [
+            {
+              "k": {
+                "type": "string",
+                "string": "a"
+              },
+              "v": {
+                "type": "int32",
+                "int32": 1
+              }
+            },
+            {
+              "k": {
+                "type": "string",
+                "string": "b"
+              },
+              "v": {
+                "type": "int32",
+                "int32": 2
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "map_int64_string",
+      "file": "map_int64_string.bin",
+      "hex": "0200000064000000000000000768756e64726564f9ffffffffffffff036e6567",
+      "ops": [
+        {
+          "type": "map",
+          "keyType": "int64",
+          "valType": "string",
+          "entries": [
+            {
+              "k": {
+                "type": "int64",
+                "int64": "100"
+              },
+              "v": {
+                "type": "string",
+                "string": "hundred"
+              }
+            },
+            {
+              "k": {
+                "type": "int64",
+                "int64": "-7"
+              },
+              "v": {
+                "type": "string",
+                "string": "neg"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "message_simple",
+      "file": "message_simple.bin",
+      "hex": "0903426f621900000001",
+      "ops": [
+        {
+          "type": "message",
+          "ops": [
+            {
+              "type": "string",
+              "string": "Bob"
+            },
+            {
+              "type": "int32",
+              "int32": 25
+            },
+            {
+              "type": "bool",
+              "bool": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "message_nested",
+      "file": "message_nested.bin",
+      "hex": "05416c69636508034e594303555341",
+      "ops": [
+        {
+          "type": "string",
+          "string": "Alice"
+        },
+        {
+          "type": "message",
+          "ops": [
+            {
+              "type": "string",
+              "string": "NYC"
+            },
+            {
+              "type": "string",
+              "string": "USA"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "message_empty",
+      "file": "message_empty.bin",
+      "hex": "00",
+      "ops": [
+        {
+          "type": "message"
+        }
+      ]
+    },
+    {
+      "name": "mixed_record",
+      "file": "mixed_record.bin",
+      "hex": "07757365722d34322a000000016666666666a65840020000000561646d696e047573657215ffffffffffffff7fffffffffffffffff04deadbeef",
+      "ops": [
+        {
+          "type": "string",
+          "string": "user-42"
+        },
+        {
+          "type": "int32",
+          "int32": 42
+        },
+        {
+          "type": "bool",
+          "bool": true
+        },
+        {
+          "type": "float64",
+          "floatBits": "0x4058A66666666666"
+        },
+        {
+          "type": "array",
+          "elemType": "string",
+          "elems": [
+            {
+              "type": "string",
+              "string": "admin"
+            },
+            {
+              "type": "string",
+              "string": "user"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "ops": [
+            {
+              "type": "int64",
+              "int64": "9223372036854775807"
+            },
+            {
+              "type": "uint64",
+              "uint64": "18446744073709551615"
+            },
+            {
+              "type": "bytes",
+              "bytes": "deadbeef"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

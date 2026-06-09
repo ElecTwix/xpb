@@ -42,17 +42,6 @@ func runCBinary(t *testing.T, label string, sources []string, includes []string,
 	return run.CombinedOutput()
 }
 
-// repoRoot returns the absolute path to the repo root from this test file's
-// location (tests/integration → ../..).
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	return root
-}
-
 // TestC_RuntimeRoundTrip runs the long-standing tests/c/xpb_test.c
 // round-trip suite against the in-tree runtime/c/xpb.c. Brings the C
 // runtime under `go test ./...`.

@@ -268,8 +268,14 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
 		g.printf("\t\t\tvar mk %s\n", g.goBaseTypeName(*field.Type.KeyType))
 		g.printf("\t\t\tvar mv %s\n", g.goBaseTypeName(*field.Type.ValType))
-		g.generateScalarDecodeInto("mk", *field.Type.KeyType, "\t\t\t", false)
-		g.generateScalarDecodeInto("mv", *field.Type.ValType, "\t\t\t", g.isEnumType(*field.Type.ValType))
+		// Each decode is wrapped in its own block so the temporary `v, err`
+		// declarations do not collide between key and value reads.
+		g.printf("\t\t\t{\n")
+		g.generateScalarDecodeInto("mk", *field.Type.KeyType, "\t\t\t\t", false)
+		g.printf("\t\t\t}\n")
+		g.printf("\t\t\t{\n")
+		g.generateScalarDecodeInto("mv", *field.Type.ValType, "\t\t\t\t", g.isEnumType(*field.Type.ValType))
+		g.printf("\t\t\t}\n")
 		g.printf("\t\t\tm.%s[mk] = mv\n", fieldName)
 		g.printf("\t\t}\n")
 		g.printf("\t}\n")

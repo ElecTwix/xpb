@@ -331,8 +331,13 @@ func (d *Decoder) ReadMessageBytes() ([]byte, error) {
 }
 
 // Skip skips n bytes.
+//
+// A negative n is rejected with io.ErrUnexpectedEOF: without this guard a
+// negative n passes the upper-bound check (d.pos+n is smaller than len(d.buf)),
+// then d.pos += n drives pos negative, and the next Read* indexes d.buf at a
+// negative offset and panics on untrusted input.
 func (d *Decoder) Skip(n int) error {
-	if d.pos+n > len(d.buf) {
+	if n < 0 || d.pos+n > len(d.buf) {
 		return io.ErrUnexpectedEOF
 	}
 	d.pos += n

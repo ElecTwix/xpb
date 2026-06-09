@@ -60,8 +60,10 @@ Length 255+:   [0xFF] [len_uint32_le]     // 5 bytes total
 
 Examples:
 - Length 5: `05`
-- Length 255: `FF 00 01 00 00` (256 in little-endian)
-- Length 1000: `FF E8 03 00 00` (1000 in little-endian = 0x000003E8)
+- Length 254: `FE` (last value that fits in 1 byte)
+- Length 255: `FF FF 00 00 00` (marker + 255 as little-endian uint32 = 0x000000FF)
+- Length 256: `FF 00 01 00 00` (marker + 256 as little-endian uint32 = 0x00000100)
+- Length 1000: `FF E8 03 00 00` (marker + 1000 little-endian = 0x000003E8)
 
 ### String
 
