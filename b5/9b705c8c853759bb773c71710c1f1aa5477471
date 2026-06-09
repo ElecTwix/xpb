@@ -1,0 +1,33 @@
+tests/c/xpb_conformance.c
+  s_165453c95b4380::t_9712e204406468 4-5
+  s_165453c95b4380::t_dd17c07d49afec 1-3,6-588
+runtime/c/xpb.c
+  s_165453c95b4380::t_426a25c1c2d972 281-290
+  s_165453c95b4380::t_3bc12c66df7ad0 263-269
+tests/java/ConformanceTest.java
+  s_165453c95b4380::t_65b0cc43186be2 1-528
+tests/c/run_fuzz.sh
+  s_165453c95b4380::t_a15b1e0da31935 1-175
+tests/lua/conformance.lua
+  s_165453c95b4380::t_a9c05d44a1d871 1-488
+tests/conformance_runner.sh
+  s_165453c95b4380::t_3c1cb20f25cd21 1-113
+tests/c/xpb_fuzz.c
+  s_165453c95b4380::t_869a1455cc1b59 1-305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "b59b705c8c853759bb773c71710c1f1aa5477471",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
