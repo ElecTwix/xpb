@@ -260,10 +260,13 @@ size_t xpb_decoder_remaining(struct xpb_decoder* dec) {
 static uint32_t xpb_decoder_read_le32(struct xpb_decoder* dec) {
     uint32_t v;
 #if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
-    v = dec->data[dec->pos] |
-        (dec->data[dec->pos + 1] << 8) |
-        (dec->data[dec->pos + 2] << 16) |
-        (dec->data[dec->pos + 3] << 24);
+    /* Cast each byte to uint32_t before shifting: bytes promote to signed
+     * int, so `byte << 24` with the high bit set is signed overflow (UB).
+     * UBSan flags it; the unsigned cast keeps the shift well-defined. */
+    v = (uint32_t)dec->data[dec->pos] |
+        ((uint32_t)dec->data[dec->pos + 1] << 8) |
+        ((uint32_t)dec->data[dec->pos + 2] << 16) |
+        ((uint32_t)dec->data[dec->pos + 3] << 24);
 #else
     memcpy(&v, &dec->data[dec->pos], 4);
     v = __builtin_bswap32(v);
@@ -275,14 +278,16 @@ static uint32_t xpb_decoder_read_le32(struct xpb_decoder* dec) {
 static uint64_t xpb_decoder_read_le64(struct xpb_decoder* dec) {
     uint64_t v;
 #if defined(_WIN32) || defined(__LITTLE_ENDIAN__)
-    uint32_t lo = dec->data[dec->pos] |
-                  (dec->data[dec->pos + 1] << 8) |
-                  (dec->data[dec->pos + 2] << 16) |
-                  (dec->data[dec->pos + 3] << 24);
-    uint32_t hi = dec->data[dec->pos + 4] |
-                  (dec->data[dec->pos + 5] << 8) |
-                  (dec->data[dec->pos + 6] << 16) |
-                  (dec->data[dec->pos + 7] << 24);
+    /* Same unsigned-cast rule as read_le32: `byte << 24` would be signed
+     * overflow (UB) when the high bit is set. */
+    uint32_t lo = (uint32_t)dec->data[dec->pos] |
+                  ((uint32_t)dec->data[dec->pos + 1] << 8) |
+                  ((uint32_t)dec->data[dec->pos + 2] << 16) |
+                  ((uint32_t)dec->data[dec->pos + 3] << 24);
+    uint32_t hi = (uint32_t)dec->data[dec->pos + 4] |
+                  ((uint32_t)dec->data[dec->pos + 5] << 8) |
+                  ((uint32_t)dec->data[dec->pos + 6] << 16) |
+                  ((uint32_t)dec->data[dec->pos + 7] << 24);
     v = ((uint64_t)lo) | ((uint64_t)hi << 32);
 #else
     memcpy(&v, &dec->data[dec->pos], 8);
