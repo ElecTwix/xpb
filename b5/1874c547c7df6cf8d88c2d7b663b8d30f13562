@@ -1,0 +1,23 @@
+CHANGELOG.md
+  s_165453c95b4380::t_78da00cf69dcb8 1-52
+runtime/rust/Cargo.toml
+  s_165453c95b4380::t_52c370a0d19301 3
+runtime/ts/package.json
+  s_165453c95b4380::t_fc9836ddf6e24f 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "b51874c547c7df6cf8d88c2d7b663b8d30f13562",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
