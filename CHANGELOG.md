@@ -40,6 +40,10 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   with the high bit set), caught by UBSan on `0xFF`-prefixed values.
 - `Decoder.Skip(n)` (Go): missing `n < 0` guard caused a negative position and a
   panic on the next read.
+- Go codegen: a message with no fields generated an `unmarshalAt` that declared
+  `dec := xpb.NewDecoder(data)` but never used it, which Go rejects at compile
+  time (`declared and not used`). Bodyless messages now emit `_ = data` instead.
+  Covered by a real compile + round-trip test in `tests/integration`.
 
 ### Note
 

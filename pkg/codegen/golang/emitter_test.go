@@ -158,6 +158,16 @@ func TestGenerate_EmptyPackage(t *testing.T) {
 	if !contains(output, "package main") {
 		t.Error("Output should default to 'package main'")
 	}
+	// A bodyless message decodes nothing, so its unmarshalAt must not declare
+	// an unused decoder (that is a hard Go compile error). The authoritative
+	// compile check lives in tests/integration/go_codegen_test.go; this is a
+	// fast guard on the emitted text.
+	if contains(output, "dec := xpb.NewDecoder(data)") {
+		t.Error("empty message should not emit an unused decoder in unmarshalAt")
+	}
+	if !contains(output, "_ = data") {
+		t.Error("empty message unmarshalAt should emit `_ = data` to use the parameter")
+	}
 }
 
 func TestGenerate_RepeatedFields(t *testing.T) {

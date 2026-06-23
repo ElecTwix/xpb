@@ -133,9 +133,15 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 
 	g.printf("func (m *%s) unmarshalAt(data []byte, depth int) error {\n", name)
 	g.printf("\tif depth > xpb.MaxDecodeDepth { return xpb.ErrMaxDepthExceeded }\n")
-	g.printf("\tdec := xpb.NewDecoder(data)\n")
-	for _, field := range msg.Fields {
-		g.generateFieldDecode(field)
+	if len(msg.Fields) == 0 {
+		// A message with no fields decodes nothing; emitting a decoder would
+		// leave `dec` (and `data`) unused, which Go rejects at compile time.
+		g.printf("\t_ = data\n")
+	} else {
+		g.printf("\tdec := xpb.NewDecoder(data)\n")
+		for _, field := range msg.Fields {
+			g.generateFieldDecode(field)
+		}
 	}
 	g.printf("\treturn nil\n")
 	g.printf("}\n\n")
