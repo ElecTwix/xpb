@@ -20,10 +20,11 @@ import (
 
 func main() {
 	var (
-		lang   = flag.String("lang", "go", "Output language(s): go, ts, c, lua, java, rust, or comma-separated list")
-		outDir = flag.String("out", ".", "Output directory")
-		stdout = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
-		help   = flag.Bool("help", false, "Show help")
+		lang            = flag.String("lang", "go", "Output language(s): go, ts, c, lua, java, rust, or comma-separated list")
+		outDir          = flag.String("out", ".", "Output directory")
+		stdout          = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
+		tsRuntimeImport = flag.String("ts-runtime-import", "", "Module specifier for the xpb runtime import in generated TypeScript (default \""+typescript.DefaultRuntimeImport+"\")")
+		help            = flag.Bool("help", false, "Show help")
 	)
 
 	flag.Usage = func() {
@@ -41,6 +42,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=go,ts user.xpb       Generate Go and TypeScript\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts --ts-runtime-import=../runtime user.xpb   Vendored TS runtime import\n")
 	}
 
 	flag.Parse()
@@ -89,7 +91,7 @@ func main() {
 			}
 
 		case "ts", "typescript":
-			if err := generateTypeScript(file, *outDir, baseName, *stdout); err != nil {
+			if err := generateTypeScript(file, *outDir, baseName, *stdout, *tsRuntimeImport); err != nil {
 				fmt.Fprintf(os.Stderr, "TypeScript generation error: %v\n", err)
 				os.Exit(1)
 			}
@@ -153,8 +155,8 @@ func generateGo(file *xpbast.File, outDir, baseName string, stdout bool) error {
 	return os.WriteFile(outPath, code, 0644)
 }
 
-func generateTypeScript(file *xpbast.File, outDir, baseName string, stdout bool) error {
-	code, err := typescript.Generate(file)
+func generateTypeScript(file *xpbast.File, outDir, baseName string, stdout bool, runtimeImport string) error {
+	code, err := typescript.GenerateWithOptions(file, typescript.Options{RuntimeImport: runtimeImport})
 	if err != nil {
 		return err
 	}
