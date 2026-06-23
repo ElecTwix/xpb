@@ -169,6 +169,58 @@ func TestRoundTrip(t *testing.T) {
 	goTestModule(t, dir)
 }
 
+// TestGoCodegen_EmptyMessage guards the bodyless-message codegen path. A
+// message with no fields decodes nothing, so the generated unmarshalAt must
+// not declare an unused decoder (`dec := xpb.NewDecoder(data)` with no reads
+// is a hard Go compile error: "declared and not used"). Compiling the
+// generated module here is what catches the regression -- a substring check
+// would not. The empty message is paired with a non-empty one to confirm the
+// normal decoder path still emits `dec`.
+func TestGoCodegen_EmptyMessage(t *testing.T) {
+	schema := `
+package test
+
+message Ping {
+}
+
+message Wrapped {
+    1: string note
+}
+`
+	src := generateGo(t, schema)
+
+	driver := `package gen
+
+import "testing"
+
+func TestRoundTrip(t *testing.T) {
+	data, err := (&Ping{}).Marshal()
+	if err != nil {
+		t.Fatalf("Marshal empty: %v", err)
+	}
+	var p Ping
+	if err := p.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal empty: %v", err)
+	}
+
+	in := &Wrapped{Note: "hi"}
+	wd, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal wrapped: %v", err)
+	}
+	var out Wrapped
+	if err := out.Unmarshal(wd); err != nil {
+		t.Fatalf("Unmarshal wrapped: %v", err)
+	}
+	if out.Note != in.Note {
+		t.Fatalf("round-trip mismatch: got %q want %q", out.Note, in.Note)
+	}
+}
+`
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
+
 // TestGoCodegen_AllTypes covers every scalar type and asserts a full round-trip,
 // including values where wrong field ordering would corrupt the decode.
 func TestGoCodegen_AllTypes(t *testing.T) {
