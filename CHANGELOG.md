@@ -33,6 +33,11 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   round-tripped with `bun` (replacing substring-only checks).
 - `cmd/ci`: a single Go local-CI runner that runs the full multi-language suite
   (`go run ./cmd/ci`) and an optional `--install-hook` pre-push gate.
+- `--ts-runtime-import` flag on `xpbc` (and `typescript.GenerateWithOptions`):
+  overrides the module specifier in the generated TypeScript runtime import
+  (`from '@xpb/runtime'`). Lets projects emit a vendored/relative runtime path
+  directly instead of post-processing the output. Defaults to `@xpb/runtime`,
+  so existing behavior is unchanged.
 
 ### Fixed
 

@@ -6,6 +6,39 @@ import (
 	"github.com/ElecTwix/xpb/pkg/ast"
 )
 
+func TestGenerate_RuntimeImportDefault(t *testing.T) {
+	file := &ast.File{
+		Package:  "test",
+		Messages: []*ast.Message{{Name: "M", Fields: []*ast.Field{{Number: 1, Name: "x", Type: ast.FieldType{Kind: ast.TypeInt32}}}}},
+	}
+	src, err := Generate(file)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	out := string(src)
+	if !contains(out, "from '@xpb/runtime'") {
+		t.Errorf("default import should be '@xpb/runtime', got:\n%s", out)
+	}
+}
+
+func TestGenerate_RuntimeImportOverride(t *testing.T) {
+	file := &ast.File{
+		Package:  "test",
+		Messages: []*ast.Message{{Name: "M", Fields: []*ast.Field{{Number: 1, Name: "x", Type: ast.FieldType{Kind: ast.TypeInt32}}}}},
+	}
+	src, err := GenerateWithOptions(file, Options{RuntimeImport: "../lib/xpb-runtime"})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions failed: %v", err)
+	}
+	out := string(src)
+	if !contains(out, "from '../lib/xpb-runtime'") {
+		t.Errorf("override import not applied, got:\n%s", out)
+	}
+	if contains(out, "from '@xpb/runtime'") {
+		t.Errorf("default import should be replaced by the override, got:\n%s", out)
+	}
+}
+
 func TestGenerate_SimpleMessage(t *testing.T) {
 	file := &ast.File{
 		Package: "test",
