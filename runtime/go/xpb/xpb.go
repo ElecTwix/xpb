@@ -377,3 +377,185 @@ func (d *Decoder) ReadArrayCount(elementMinBytes, maxElements int) (int32, error
 	}
 	return n, nil
 }
+
+// --- Stateless cursor read helpers ---
+//
+// The *At helpers below are the register-local-cursor counterparts of the
+// stateful (*Decoder).Read* methods above. Each takes the buffer b and the
+// current read offset p, and returns the decoded value together with the new
+// offset (and an error). Threading the cursor through registers — instead of
+// loading and storing the in-struct (*Decoder).pos on every read — is what
+// lets generated decode reach the hand-written local-cursor performance
+// ceiling while keeping all bounds-check logic centralized here.
+//
+// The logic is intentionally identical to the matching Decoder method: same
+// bounds checks, same compact-length 0xFF path, same negative-length
+// rejection, same ReadArrayCount validation semantics. The stateful Decoder
+// API is preserved unchanged for streaming/manual callers; these are added
+// alongside it. Each helper is kept small so the Go inliner can inline it into
+// generated unmarshalAt bodies.
+
+// ReadBoolAt reads a boolean from 1 byte at offset p.
+func ReadBoolAt(b []byte, p int) (bool, int, error) {
+	if p >= len(b) {
+		return false, p, io.ErrUnexpectedEOF
+	}
+	v := b[p] != 0
+	return v, p + 1, nil
+}
+
+// ReadInt32At reads a signed 32-bit integer from 4 bytes at offset p.
+func ReadInt32At(b []byte, p int) (int32, int, error) {
+	if p+4 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	v := int32(binary.LittleEndian.Uint32(b[p:]))
+	return v, p + 4, nil
+}
+
+// ReadInt64At reads a signed 64-bit integer from 8 bytes at offset p.
+func ReadInt64At(b []byte, p int) (int64, int, error) {
+	if p+8 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	v := int64(binary.LittleEndian.Uint64(b[p:]))
+	return v, p + 8, nil
+}
+
+// ReadUint32At reads an unsigned 32-bit integer from 4 bytes at offset p.
+func ReadUint32At(b []byte, p int) (uint32, int, error) {
+	if p+4 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	v := binary.LittleEndian.Uint32(b[p:])
+	return v, p + 4, nil
+}
+
+// ReadUint64At reads an unsigned 64-bit integer from 8 bytes at offset p.
+func ReadUint64At(b []byte, p int) (uint64, int, error) {
+	if p+8 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	v := binary.LittleEndian.Uint64(b[p:])
+	return v, p + 8, nil
+}
+
+// ReadFloat32At reads a 32-bit float from 4 bytes at offset p.
+func ReadFloat32At(b []byte, p int) (float32, int, error) {
+	if p+4 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	bits := binary.LittleEndian.Uint32(b[p:])
+	return math.Float32frombits(bits), p + 4, nil
+}
+
+// ReadFloat64At reads a 64-bit float from 8 bytes at offset p.
+func ReadFloat64At(b []byte, p int) (float64, int, error) {
+	if p+8 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	bits := binary.LittleEndian.Uint64(b[p:])
+	return math.Float64frombits(bits), p + 8, nil
+}
+
+// readCompactLengthAt reads a compact-encoded length at offset p, preserving
+// the 0xFF marker path: a leading byte != marker is the length itself; the
+// marker is followed by a 4-byte little-endian length.
+func readCompactLengthAt(b []byte, p int) (int, int, error) {
+	if p >= len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	first := b[p]
+	p++
+	if first != wire.CompactLengthMarker {
+		return int(first), p, nil
+	}
+	// Read 4-byte length
+	if p+4 > len(b) {
+		return 0, p, io.ErrUnexpectedEOF
+	}
+	length := binary.LittleEndian.Uint32(b[p:])
+	return int(length), p + 4, nil
+}
+
+// ReadStringAt reads a length-prefixed string using zero-copy (unsafe) at
+// offset p. The returned string aliases b; copy it if it must outlive b.
+func ReadStringAt(b []byte, p int) (string, int, error) {
+	length, p, err := readCompactLengthAt(b, p)
+	if err != nil {
+		return "", p, err
+	}
+	if p+length > len(b) {
+		return "", p, io.ErrUnexpectedEOF
+	}
+	s := unsafe.String(unsafe.SliceData(b[p:]), length)
+	return s, p + length, nil
+}
+
+// ReadBytesAt reads a length-prefixed byte slice at offset p, copying it so the
+// result is independent of b.
+func ReadBytesAt(b []byte, p int) ([]byte, int, error) {
+	length, p, err := readCompactLengthAt(b, p)
+	if err != nil {
+		return nil, p, err
+	}
+	if p+length > len(b) {
+		return nil, p, io.ErrUnexpectedEOF
+	}
+	data := make([]byte, length)
+	copy(data, b[p:p+length])
+	return data, p + length, nil
+}
+
+// ReadBytesUnsafeAt reads a length-prefixed byte slice at offset p using
+// zero-copy. The returned slice aliases b and stays valid only while b is.
+func ReadBytesUnsafeAt(b []byte, p int) ([]byte, int, error) {
+	length, p, err := readCompactLengthAt(b, p)
+	if err != nil {
+		return nil, p, err
+	}
+	if p+length > len(b) {
+		return nil, p, io.ErrUnexpectedEOF
+	}
+	data := b[p : p+length]
+	return data, p + length, nil
+}
+
+// ReadMessageBytesAt reads a length-prefixed message envelope at offset p,
+// returning the (zero-copy) body slice for recursive decoding. It aliases b,
+// matching (*Decoder).ReadMessageBytes semantics for the generated nested
+// decode path.
+func ReadMessageBytesAt(b []byte, p int) ([]byte, int, error) {
+	return ReadBytesUnsafeAt(b, p)
+}
+
+// ReadArrayCountAt reads a 4-byte signed array length at offset p used by
+// repeated and map fields, validating it before the caller allocates a backing
+// slice. It is the stateless-cursor counterpart of (*Decoder).ReadArrayCount
+// and applies the identical fail-closed validation: negative maxElements is a
+// programming error; negative counts are rejected first, then counts above
+// maxElements, then counts that cannot fit in the bytes remaining after p
+// (each element occupies at least elementMinBytes). Pass elementMinBytes=1 for
+// variable-length elements and elementMinBytes=0 to skip the buffer bound.
+func ReadArrayCountAt(b []byte, p, elementMinBytes, maxElements int) (int32, int, error) {
+	if maxElements < 0 {
+		return 0, p, fmt.Errorf("xpb: ReadArrayCount maxElements must be >= 0, got %d", maxElements)
+	}
+	n, p, err := ReadInt32At(b, p)
+	if err != nil {
+		return 0, p, err
+	}
+	if n < 0 {
+		return 0, p, fmt.Errorf("xpb: negative array count: %d", n)
+	}
+	if int(n) > maxElements {
+		return 0, p, fmt.Errorf("xpb: array count %d exceeds caller-supplied max %d", n, maxElements)
+	}
+	if elementMinBytes > 0 {
+		max := (len(b) - p) / elementMinBytes
+		if int(n) > max {
+			return 0, p, fmt.Errorf("xpb: array count %d exceeds buffer-bounded max %d", n, max)
+		}
+	}
+	return n, p, nil
+}

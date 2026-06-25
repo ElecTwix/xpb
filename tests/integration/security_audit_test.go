@@ -697,8 +697,13 @@ func TestSecurityAudit_XPB119_GoTSExplicitMaxUniform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read go codegen: %v", err)
 	}
-	if !bytes.Contains(goCG, []byte("dec.ReadArrayCount(%d, %d)")) {
-		t.Fatalf("REGRESSION: Go codegen no longer emits two-arg ReadArrayCount")
+	// The local-cursor decode threads the bounds-checked array-count helper as
+	// xpb.ReadArrayCountAt(data, pos, elementMinBytes, maxElements); the last
+	// two %d args are the explicit element-min and caller-supplied max. The
+	// security property (explicit maxElements, never an unbounded count) is
+	// preserved.
+	if !bytes.Contains(goCG, []byte("xpb.ReadArrayCountAt(data, pos, %d, %d)")) {
+		t.Fatalf("REGRESSION: Go codegen no longer emits explicit-max ReadArrayCountAt")
 	}
 
 	tsCG, err := os.ReadFile(filepath.Join(root, "pkg/codegen/typescript/emitter.go"))
@@ -1116,7 +1121,7 @@ message User {
 		{
 			"Go",
 			func() ([]byte, error) { return golang.Generate(file) },
-			[]string{"enc.WriteBool(m.Nickname != nil)", "present, err := dec.ReadBool()", "if present {"},
+			[]string{"enc.WriteBool(m.Nickname != nil)", "present, pos, err = xpb.ReadBoolAt(data, pos)", "if present {"},
 			[]string{"no presence bit", "emits them as required"},
 		},
 		{

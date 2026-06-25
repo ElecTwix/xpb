@@ -343,10 +343,11 @@ message Container {
 	src := generateGo(t, schema)
 
 	// Security regression (XPB-001/002): repeated-field counts must go through
-	// dec.ReadArrayCount (which bounds the count against the remaining buffer),
-	// not a raw ReadInt32 + unchecked make([]T, count).
-	if !strings.Contains(string(src), "dec.ReadArrayCount(") {
-		t.Error("repeated-field decode must use dec.ReadArrayCount; got raw ReadInt32")
+	// the bounds-checked array-count helper (which bounds the count against the
+	// remaining buffer), not a raw ReadInt32 + unchecked make([]T, count). The
+	// local-cursor decode threads the count through xpb.ReadArrayCountAt.
+	if !strings.Contains(string(src), "xpb.ReadArrayCountAt(") {
+		t.Error("repeated-field decode must use xpb.ReadArrayCountAt; got raw ReadInt32")
 	}
 
 	driver := `package gen
