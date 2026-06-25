@@ -2,6 +2,7 @@ package utekabench
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -238,6 +239,48 @@ func TestDifferential_WireLayoutAnchor(t *testing.T) {
 			t.Errorf("%s wire layout prefix mismatch:\n got =% x\n want=% x", style.name, style.buf, wantPrefix)
 		}
 	}
+}
+
+// TestDifferential_WholeMessageGolden pins the COMPLETE generated Marshal output
+// of two fully-determined messages against captured byte-for-byte golden
+// constants. The ptr==val cross-style equality and the leading-prefix anchor
+// above would both pass if the whole-message framing drifted identically across
+// regenerations (e.g. a codegen change that shifted every field's layout the
+// same way). This golden is the absolute anchor: it was captured from the
+// stateful-encoder output and must remain byte-identical after the Phase 2
+// local-buffer encode rewrite. If the wire format ever changes, this test fails
+// and the constant must be updated deliberately (with a wire-format changelog
+// entry), not silently.
+func TestDifferential_WholeMessageGolden(t *testing.T) {
+	// all_optionals_absent (Type=7, Id="id-only", Timestamp=42, Seq=9, Flags=3,
+	// every optional absent). Fully determined, no variable optional content.
+	absentGolden := mustHex(t, "070000000769642d6f6e6c7900002a00000000000000000009000000000000000300000000")
+	absent := logical{Type: 7, Id: "id-only", Timestamp: 42, Seq: 9, Flags: 3}
+	if got := mustMarshalPtr(t, absent.toPtr()); !bytes.Equal(got, absentGolden) {
+		t.Errorf("all_optionals_absent ptr golden mismatch:\n got =% x\n want=% x", got, absentGolden)
+	}
+	if got := mustMarshalVal(t, absent.toVal()); !bytes.Equal(got, absentGolden) {
+		t.Errorf("all_optionals_absent val golden mismatch:\n got =% x\n want=% x", got, absentGolden)
+	}
+
+	// The realistic RPC sample (sampleVal / samplePtr): Type, Id, Method,
+	// Payload, Timestamp, SessionId set; Error/StreamId/Seq/Flags absent/zero.
+	realisticGolden := mustHex(t, "020000001430314851395a334b374d3258384e34503652305401106d61726b65742e73756273637269626501427b2275736572223a22616c696365222c22616374696f6e223a22737562736372696265222c22746f706963223a22707269636573222c226c696d6974223a3130307d0026b0fd9301000000000000000000000000000000000115736573735f37663361396332653162346436383537")
+	if got := mustMarshalPtr(t, samplePtr()); !bytes.Equal(got, realisticGolden) {
+		t.Errorf("realistic ptr golden mismatch:\n got =% x\n want=% x", got, realisticGolden)
+	}
+	if got := mustMarshalVal(t, sampleVal()); !bytes.Equal(got, realisticGolden) {
+		t.Errorf("realistic val golden mismatch:\n got =% x\n want=% x", got, realisticGolden)
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("decode golden hex: %v", err)
+	}
+	return b
 }
 
 func mustMarshalPtr(t *testing.T, m *ptr.UtekaMessage) []byte {

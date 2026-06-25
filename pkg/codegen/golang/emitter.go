@@ -164,20 +164,26 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	}
 	g.printf("}\n\n")
 
-	// Marshal - V2: no tags, fields in order
+	// Marshal - V2: no tags, fields in order. Encode threads a register-local
+	// `buf` slice through the stateless xpb.Append*To helpers instead of
+	// load/storing the Encoder.buf struct field on every field. Marshal starts
+	// from a fresh encoder of the estimated capacity, binds its buffer to the
+	// local, grows the local once by the fixed-size lower bound, appends each
+	// field into the local, then writes the local back to enc exactly once. This
+	// is the symmetric encode counterpart of Phase 1's local decode cursor; the
+	// wire bytes are byte-identical to the stateful Encoder.
 	g.printf("func (m *%s) Marshal() ([]byte, error) {\n", name)
 	g.printf("\tenc := xpb.NewEncoder(%d)\n", estimateSize(msg))
-	for _, field := range msg.Fields {
-		g.generateFieldEncode(field)
-	}
+	g.generateMarshalBody(msg)
 	g.printf("\treturn enc.Bytes(), nil\n")
 	g.printf("}\n\n")
 
-	// MarshalTo
+	// MarshalTo: same local-buffer pattern, but the local is bound from the
+	// passed encoder's buffer (preserving append-to-existing semantics) and
+	// written back to it once. Pooling is preserved: a pooled encoder is Reset
+	// before MarshalTo, so the local starts empty in the steady-state path.
 	g.printf("func (m *%s) MarshalTo(enc *xpb.Encoder) {\n", name)
-	for _, field := range msg.Fields {
-		g.generateFieldEncode(field)
-	}
+	g.generateMarshalBody(msg)
 	g.printf("}\n\n")
 
 	// Unmarshal - V2: no tags, read fields in order.
@@ -224,6 +230,26 @@ func (g *Generator) isEnumType(t ast.FieldType) bool {
 	return t.Kind == ast.TypeEnum
 }
 
+// generateMarshalBody emits the shared body of Marshal and MarshalTo: bind a
+// register-local `buf` from the encoder, grow it once by the message's
+// fixed-size lower bound, append every field into the local via the stateless
+// xpb.Append*To helpers, then write the local back to enc exactly once. An
+// empty message just rebinds and writes back the (unchanged) buffer.
+func (g *Generator) generateMarshalBody(msg *ast.Message) {
+	g.printf("\tbuf := enc.Buf()\n")
+	if lb := g.fixedSizeLowerBound(msg); lb > 0 {
+		// Grow the local once up front so the per-field appends do not each
+		// re-check capacity. slices.Grow is a single bounds/grow decision; the
+		// fixed-width lower bound never over-allocates past what those fields
+		// need, so variable-length fields still append normally afterwards.
+		g.printf("\tbuf = xpb.GrowBuf(buf, %d)\n", lb)
+	}
+	for _, field := range msg.Fields {
+		g.generateFieldEncode(field)
+	}
+	g.printf("\tenc.SetBuf(buf)\n")
+}
+
 func (g *Generator) generateFieldEncode(field *ast.Field) {
 	fieldName := toCamelCase(field.Name)
 	isEnum := g.isEnumType(field.Type)
@@ -237,7 +263,7 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 		if field.Type.Kind == ast.TypeMessage && !isEnum {
 			// Nested message optionals are *T already. Emit the presence
 			// byte, then the message body only when non-nil.
-			g.printf("\tenc.WriteBool(m.%s != nil)\n", fieldName)
+			g.printf("\tbuf = xpb.AppendBoolTo(buf, m.%s != nil)\n", fieldName)
 			g.printf("\tif m.%s != nil {\n", fieldName)
 			g.generateScalarEncode("m."+fieldName, field.Type, "\t\t", isEnum)
 			g.printf("\t}\n")
@@ -246,7 +272,7 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 		if g.valueOptional(field) {
 			// Value style: presence comes from the Has<Field> bool and the
 			// value is used directly (no pointer deref).
-			g.printf("\tenc.WriteBool(m.Has%s)\n", fieldName)
+			g.printf("\tbuf = xpb.AppendBoolTo(buf, m.Has%s)\n", fieldName)
 			g.printf("\tif m.Has%s {\n", fieldName)
 			g.generateScalarEncode("m."+fieldName, field.Type, "\t\t", isEnum)
 			g.printf("\t}\n")
@@ -254,7 +280,7 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 		}
 		// Scalar/string/bytes/enum optionals are *T pointers; deref the value
 		// after the presence byte.
-		g.printf("\tenc.WriteBool(m.%s != nil)\n", fieldName)
+		g.printf("\tbuf = xpb.AppendBoolTo(buf, m.%s != nil)\n", fieldName)
 		g.printf("\tif m.%s != nil {\n", fieldName)
 		g.generateScalarEncode("*m."+fieldName, field.Type, "\t\t", isEnum)
 		g.printf("\t}\n")
@@ -263,7 +289,7 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 
 	// Handle repeated fields - V2: write count then elements
 	if field.Repeated {
-		g.printf("\tenc.WriteInt32(int32(len(m.%s)))\n", fieldName)
+		g.printf("\tbuf = xpb.AppendInt32To(buf, int32(len(m.%s)))\n", fieldName)
 		g.printf("\tfor _, v := range m.%s {\n", fieldName)
 		g.generateScalarEncode("v", field.Type, "\t\t", isEnum)
 		g.printf("\t}\n")
@@ -272,7 +298,7 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 
 	// Handle map fields - V2: write count then key-value pairs
 	if field.Type.Kind == ast.TypeMap {
-		g.printf("\tenc.WriteInt32(int32(len(m.%s)))\n", fieldName)
+		g.printf("\tbuf = xpb.AppendInt32To(buf, int32(len(m.%s)))\n", fieldName)
 		g.printf("\tfor k, v := range m.%s {\n", fieldName)
 		g.generateScalarEncode("k", *field.Type.KeyType, "\t\t", false)
 		g.generateScalarEncode("v", *field.Type.ValType, "\t\t", g.isEnumType(*field.Type.ValType))
@@ -284,42 +310,48 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 	g.generateScalarEncode("m."+fieldName, field.Type, "\t", isEnum)
 }
 
+// generateScalarEncode appends one scalar/string/bytes/enum/message value into
+// the register-local `buf` via the stateless xpb.Append*To helpers, reassigning
+// buf with the grown slice each time.
 func (g *Generator) generateScalarEncode(varName string, t ast.FieldType, indent string, isEnum bool) {
 	if isEnum || t.Kind == ast.TypeEnum {
-		g.printf("%senc.WriteInt32(int32(%s))\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendInt32To(buf, int32(%s))\n", indent, varName)
 		return
 	}
 
 	switch t.Kind {
 	case ast.TypeBool:
-		g.printf("%senc.WriteBool(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendBoolTo(buf, %s)\n", indent, varName)
 	case ast.TypeInt32:
-		g.printf("%senc.WriteInt32(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendInt32To(buf, %s)\n", indent, varName)
 	case ast.TypeInt64:
-		g.printf("%senc.WriteInt64(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendInt64To(buf, %s)\n", indent, varName)
 	case ast.TypeUint32:
-		g.printf("%senc.WriteUint32(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendUint32To(buf, %s)\n", indent, varName)
 	case ast.TypeUint64:
-		g.printf("%senc.WriteUint64(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendUint64To(buf, %s)\n", indent, varName)
 	case ast.TypeFloat32:
-		g.printf("%senc.WriteFloat32(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendFloat32To(buf, %s)\n", indent, varName)
 	case ast.TypeFloat64:
-		g.printf("%senc.WriteFloat64(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendFloat64To(buf, %s)\n", indent, varName)
 	case ast.TypeString:
-		g.printf("%senc.WriteString(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendStringTo(buf, %s)\n", indent, varName)
 	case ast.TypeBytes:
-		g.printf("%senc.WriteBytes(%s)\n", indent, varName)
+		g.printf("%sbuf = xpb.AppendBytesTo(buf, %s)\n", indent, varName)
 	case ast.TypeMessage:
 		// Nested message fields are represented as Go pointers, so the
 		// value can be nil — either an absent optional field or a
 		// nil entry inside a repeated/map slice. Calling MarshalTo on
 		// a nil pointer would panic; instead, write a 0-length envelope.
 		// This is the symmetric counterpart of the decode-side guard
-		// that skips unmarshalAt on `len(data) > 0`.
+		// that skips unmarshalAt on `len(data) > 0`. The nested message is
+		// encoded into its own pooled encoder (whose own MarshalTo uses the
+		// local-buffer pattern), then its bytes are appended as a
+		// length-prefixed envelope into the parent's local buf.
 		g.printf("%s{\n", indent)
 		g.printf("%s\tnestedEnc := xpb.GetEncoder()\n", indent)
 		g.printf("%s\tif %s != nil { %s.MarshalTo(nestedEnc) }\n", indent, varName, varName)
-		g.printf("%s\tenc.WriteMessage(nestedEnc.Bytes())\n", indent)
+		g.printf("%s\tbuf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())\n", indent)
 		g.printf("%s\txpb.PutEncoder(nestedEnc)\n", indent)
 		g.printf("%s}\n", indent)
 	}
@@ -606,6 +638,55 @@ func estimateSize(msg *ast.Message) int {
 	}
 	if size < 64 {
 		return 64
+	}
+	return size
+}
+
+// fixedSizeLowerBound returns a safe lower bound on the encoded size of msg: the
+// sum of the fixed-width wire sizes of every non-optional, non-repeated,
+// non-map scalar/enum field, plus one presence byte for each optional field and
+// a 4-byte count for each repeated/map field. Variable-length fields (string,
+// bytes, nested message) contribute nothing, since their size is data-dependent.
+// Growing the local encode buffer once by this amount up front replaces the
+// per-field capacity checks of the append helpers for the fixed portion of the
+// message, without ever over-allocating past what the message provably needs.
+func (g *Generator) fixedSizeLowerBound(msg *ast.Message) int {
+	size := 0
+	for _, field := range msg.Fields {
+		if field.Optional {
+			// Optional fields always emit a 1-byte presence flag; the value
+			// (if present) is data-dependent, so only the flag is counted.
+			size += wire.SizeBool
+			continue
+		}
+		if field.Repeated || field.Type.Kind == ast.TypeMap {
+			// Repeated/map emit a 4-byte count then data-dependent elements;
+			// the count alone is a safe fixed lower bound.
+			size += wire.SizeInt32
+			continue
+		}
+		// Enum-typed fields (whether Kind==TypeEnum or an enum alias coming
+		// through Kind==TypeMessage) encode as a fixed 4-byte int32.
+		if g.isEnumType(field.Type) {
+			size += wire.SizeInt32
+			continue
+		}
+		switch field.Type.Kind {
+		case ast.TypeBool:
+			size += wire.SizeBool
+		case ast.TypeInt32, ast.TypeUint32:
+			size += wire.SizeInt32
+		case ast.TypeInt64, ast.TypeUint64:
+			size += wire.SizeInt64
+		case ast.TypeFloat32:
+			size += wire.SizeFloat32
+		case ast.TypeFloat64:
+			size += wire.SizeFloat64
+		case ast.TypeString, ast.TypeBytes, ast.TypeMessage:
+			// Variable-length: a real nested message is at minimum a 1-byte
+			// 0-length envelope, and string/bytes a 1-byte length, but those
+			// are data-dependent past the prefix; count 0 to keep the bound safe.
+		}
 	}
 	return size
 }

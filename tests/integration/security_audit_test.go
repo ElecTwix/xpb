@@ -1121,7 +1121,10 @@ message User {
 		{
 			"Go",
 			func() ([]byte, error) { return golang.Generate(file) },
-			[]string{"enc.WriteBool(m.Nickname != nil)", "present, pos, err = xpb.ReadBoolAt(data, pos)", "if present {"},
+			// Phase 2 local-buffer encode: the optional presence byte is appended
+			// into the register-local buffer via xpb.AppendBoolTo, not the
+			// stateful enc.WriteBool.
+			[]string{"xpb.AppendBoolTo(buf, m.Nickname != nil)", "present, pos, err = xpb.ReadBoolAt(data, pos)", "if present {"},
 			[]string{"no presence bit", "emits them as required"},
 		},
 		{

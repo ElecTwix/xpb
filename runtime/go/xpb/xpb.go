@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sync"
 	"unsafe"
 
@@ -145,6 +146,123 @@ func (e *Encoder) WriteMessage(data []byte) {
 // AppendRaw appends raw bytes directly.
 func (e *Encoder) AppendRaw(data []byte) {
 	e.buf = append(e.buf, data...)
+}
+
+// Buf returns the encoder's current backing buffer so generated Marshal/MarshalTo
+// can bind it to a register-local slice, append into the local via the stateless
+// Append*To helpers, and write the local back once with SetBuf. Returning the
+// full buffer (not buf[:0]) preserves MarshalTo's append-to-existing semantics:
+// a pooled encoder is Reset before use, so this is empty in the steady-state
+// pooled path; a caller that pre-loaded bytes still has them preserved.
+func (e *Encoder) Buf() []byte {
+	return e.buf
+}
+
+// SetBuf writes a register-local buffer back to the encoder exactly once, at the
+// end of a generated Marshal/MarshalTo body. This is the symmetric encode
+// counterpart of Phase 1's stateless decode cursor: append work happens on a
+// local []byte threaded through registers, and the single store back into the
+// Encoder.buf struct field happens here.
+func (e *Encoder) SetBuf(b []byte) {
+	e.buf = b
+}
+
+// --- Stateless cursor append helpers ---
+//
+// The *To helpers below are the register-local-buffer counterparts of the
+// stateful (*Encoder).Write* methods above, mirroring the
+// binary.LittleEndian.Append* style: each takes the destination buffer b and
+// the value, and returns the grown buffer. Threading a local []byte through
+// registers — instead of loading/storing the in-struct (*Encoder).buf 3-word
+// slice header on every field append — is what lets generated encode reach the
+// hand-written local-buffer performance ceiling while keeping the wire format
+// byte-identical to the stateful Encoder.
+//
+// The logic is intentionally identical to the matching Encoder method: same
+// little-endian fixed-width layout, same compact-length 0xFF path. The stateful
+// Encoder API is preserved unchanged for streaming/manual callers and the pool;
+// these are added alongside it. Each helper is kept small so the Go inliner can
+// inline it into generated Marshal/MarshalTo bodies. The fixed-width scalar
+// helpers are thin wrappers over encoding/binary so generated code need not
+// import encoding/binary or math.
+
+// GrowBuf ensures b has spare capacity for at least n more bytes, returning a
+// (possibly reallocated) slice with the same length and contents. Generated
+// Marshal/MarshalTo calls it once up front with the message's fixed-size lower
+// bound so the per-field Append*To helpers do not each re-check capacity for the
+// fixed portion of the message. It is a thin wrapper over slices.Grow so
+// generated code need not import slices.
+func GrowBuf(b []byte, n int) []byte {
+	return slices.Grow(b, n)
+}
+
+// AppendBoolTo appends a boolean as 1 byte.
+func AppendBoolTo(b []byte, v bool) []byte {
+	if v {
+		return append(b, 1)
+	}
+	return append(b, 0)
+}
+
+// AppendInt32To appends a signed 32-bit integer as 4 bytes (little-endian).
+func AppendInt32To(b []byte, v int32) []byte {
+	return binary.LittleEndian.AppendUint32(b, uint32(v))
+}
+
+// AppendInt64To appends a signed 64-bit integer as 8 bytes (little-endian).
+func AppendInt64To(b []byte, v int64) []byte {
+	return binary.LittleEndian.AppendUint64(b, uint64(v))
+}
+
+// AppendUint32To appends an unsigned 32-bit integer as 4 bytes (little-endian).
+func AppendUint32To(b []byte, v uint32) []byte {
+	return binary.LittleEndian.AppendUint32(b, v)
+}
+
+// AppendUint64To appends an unsigned 64-bit integer as 8 bytes (little-endian).
+func AppendUint64To(b []byte, v uint64) []byte {
+	return binary.LittleEndian.AppendUint64(b, v)
+}
+
+// AppendFloat32To appends a 32-bit float as 4 bytes.
+func AppendFloat32To(b []byte, v float32) []byte {
+	return binary.LittleEndian.AppendUint32(b, math.Float32bits(v))
+}
+
+// AppendFloat64To appends a 64-bit float as 8 bytes.
+func AppendFloat64To(b []byte, v float64) []byte {
+	return binary.LittleEndian.AppendUint64(b, math.Float64bits(v))
+}
+
+// AppendCompactLengthTo appends a length using compact encoding, preserving the
+// 0xFF marker path: length <= 254 is a single byte; otherwise the 0xFF marker
+// is followed by a 4-byte little-endian length. Identical to
+// (*Encoder).writeCompactLength.
+func AppendCompactLengthTo(b []byte, length int) []byte {
+	if length <= wire.CompactLengthThreshold {
+		return append(b, byte(length))
+	}
+	b = append(b, wire.CompactLengthMarker)
+	return binary.LittleEndian.AppendUint32(b, uint32(length))
+}
+
+// AppendStringTo appends a length-prefixed string.
+func AppendStringTo(b []byte, v string) []byte {
+	b = AppendCompactLengthTo(b, len(v))
+	return append(b, v...)
+}
+
+// AppendBytesTo appends a length-prefixed byte slice.
+func AppendBytesTo(b []byte, v []byte) []byte {
+	b = AppendCompactLengthTo(b, len(v))
+	return append(b, v...)
+}
+
+// AppendMessageTo appends a length-prefixed nested message (already encoded).
+// It is the stateless-buffer counterpart of (*Encoder).WriteMessage.
+func AppendMessageTo(b []byte, data []byte) []byte {
+	b = AppendCompactLengthTo(b, len(data))
+	return append(b, data...)
 }
 
 // Decoder decodes XPB V2 binary format.
