@@ -1,0 +1,23 @@
+benchmarks/go/uteka/sim_bufreuse_test.go
+  s_5551c6b8158c1a::t_5721d0fe8bffff 231-236
+  s_5551c6b8158c1a::t_2e3019be16fb53 1-92,101,103-181,189-198,207-230,237-289
+  s_5551c6b8158c1a::t_c7de5d21dd5b5b 199-206
+  s_5551c6b8158c1a::t_8fe66fe885a637 182-188
+  s_5551c6b8158c1a::t_dfc6aaf6967848 93-100,102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "baeccceba95c10f1a1bce3be22bc7caeb4afb1c6",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
