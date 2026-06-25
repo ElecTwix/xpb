@@ -59,6 +59,29 @@ var hotInlineHelpers = []string{
 	"ReadFloat64At",
 	"readCompactLengthAt",
 	"ReadMessageBytesAt",
+	// Stateless cursor append helpers (Phase 2): the register-local-buffer
+	// counterparts of the Encoder.Write* methods, threaded through generated
+	// Marshal/MarshalTo. They must stay inlinable for generated encode to reach
+	// the hand-written local-buffer ceiling. The fixed-width scalar *To helpers
+	// are thin wrappers over encoding/binary; the length-prefixed string/bytes/
+	// message helpers reduce to a compact-length append plus append(b, v...),
+	// which (unlike the read side's make/copy) inlines. GrowBuf is a one-line
+	// slices.Grow wrapper, and Buf/SetBuf are the encoder accessors that bind
+	// and write back the local buffer once per message.
+	"(*Encoder).Buf",
+	"(*Encoder).SetBuf",
+	"GrowBuf",
+	"AppendBoolTo",
+	"AppendInt32To",
+	"AppendInt64To",
+	"AppendUint32To",
+	"AppendUint64To",
+	"AppendFloat32To",
+	"AppendFloat64To",
+	"AppendCompactLengthTo",
+	"AppendStringTo",
+	"AppendBytesTo",
+	"AppendMessageTo",
 }
 
 // TestInliningGuard_HotHelpers builds the runtime package with -gcflags=-m and

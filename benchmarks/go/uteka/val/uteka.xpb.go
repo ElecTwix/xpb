@@ -28,60 +28,66 @@ type UtekaMessage struct {
 
 func (m *UtekaMessage) Marshal() ([]byte, error) {
 	enc := xpb.NewEncoder(216)
-	enc.WriteInt32(m.Type)
-	enc.WriteString(m.Id)
-	enc.WriteBool(m.HasMethod)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 29)
+	buf = xpb.AppendInt32To(buf, m.Type)
+	buf = xpb.AppendStringTo(buf, m.Id)
+	buf = xpb.AppendBoolTo(buf, m.HasMethod)
 	if m.HasMethod {
-		enc.WriteString(m.Method)
+		buf = xpb.AppendStringTo(buf, m.Method)
 	}
-	enc.WriteBool(m.HasPayload)
+	buf = xpb.AppendBoolTo(buf, m.HasPayload)
 	if m.HasPayload {
-		enc.WriteBytes(m.Payload)
+		buf = xpb.AppendBytesTo(buf, m.Payload)
 	}
-	enc.WriteInt64(m.Timestamp)
-	enc.WriteBool(m.HasError)
+	buf = xpb.AppendInt64To(buf, m.Timestamp)
+	buf = xpb.AppendBoolTo(buf, m.HasError)
 	if m.HasError {
-		enc.WriteString(m.Error)
+		buf = xpb.AppendStringTo(buf, m.Error)
 	}
-	enc.WriteBool(m.HasStreamId)
+	buf = xpb.AppendBoolTo(buf, m.HasStreamId)
 	if m.HasStreamId {
-		enc.WriteString(m.StreamId)
+		buf = xpb.AppendStringTo(buf, m.StreamId)
 	}
-	enc.WriteInt64(m.Seq)
-	enc.WriteInt32(m.Flags)
-	enc.WriteBool(m.HasSessionId)
+	buf = xpb.AppendInt64To(buf, m.Seq)
+	buf = xpb.AppendInt32To(buf, m.Flags)
+	buf = xpb.AppendBoolTo(buf, m.HasSessionId)
 	if m.HasSessionId {
-		enc.WriteString(m.SessionId)
+		buf = xpb.AppendStringTo(buf, m.SessionId)
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
 func (m *UtekaMessage) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteInt32(m.Type)
-	enc.WriteString(m.Id)
-	enc.WriteBool(m.HasMethod)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 29)
+	buf = xpb.AppendInt32To(buf, m.Type)
+	buf = xpb.AppendStringTo(buf, m.Id)
+	buf = xpb.AppendBoolTo(buf, m.HasMethod)
 	if m.HasMethod {
-		enc.WriteString(m.Method)
+		buf = xpb.AppendStringTo(buf, m.Method)
 	}
-	enc.WriteBool(m.HasPayload)
+	buf = xpb.AppendBoolTo(buf, m.HasPayload)
 	if m.HasPayload {
-		enc.WriteBytes(m.Payload)
+		buf = xpb.AppendBytesTo(buf, m.Payload)
 	}
-	enc.WriteInt64(m.Timestamp)
-	enc.WriteBool(m.HasError)
+	buf = xpb.AppendInt64To(buf, m.Timestamp)
+	buf = xpb.AppendBoolTo(buf, m.HasError)
 	if m.HasError {
-		enc.WriteString(m.Error)
+		buf = xpb.AppendStringTo(buf, m.Error)
 	}
-	enc.WriteBool(m.HasStreamId)
+	buf = xpb.AppendBoolTo(buf, m.HasStreamId)
 	if m.HasStreamId {
-		enc.WriteString(m.StreamId)
+		buf = xpb.AppendStringTo(buf, m.StreamId)
 	}
-	enc.WriteInt64(m.Seq)
-	enc.WriteInt32(m.Flags)
-	enc.WriteBool(m.HasSessionId)
+	buf = xpb.AppendInt64To(buf, m.Seq)
+	buf = xpb.AppendInt32To(buf, m.Flags)
+	buf = xpb.AppendBoolTo(buf, m.HasSessionId)
 	if m.HasSessionId {
-		enc.WriteString(m.SessionId)
+		buf = xpb.AppendStringTo(buf, m.SessionId)
 	}
+	enc.SetBuf(buf)
 }
 
 func (m *UtekaMessage) Unmarshal(data []byte) error {

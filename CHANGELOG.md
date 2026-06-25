@@ -16,9 +16,31 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   memory. This is a generated-code performance improvement only: the wire
   format is byte-identical, decode stays 0 allocations, and the stateful
   `Decoder` API is unchanged for streaming/manual callers.
+- **Generated Go encode now threads a register-local buffer** instead of the
+  stateful `Encoder.buf` struct field. `Marshal`/`MarshalTo` bind a local
+  `buf := enc.Buf()`, grow it once up front by the message's fixed-size lower
+  bound (`xpb.GrowBuf`), append each field into the local via the stateless
+  `xpb.Append*To` helpers, then write the local back with `enc.SetBuf(buf)`
+  exactly once — instead of the per-field `enc.Write*` calls that each did
+  `enc.buf = append(enc.buf, ...)`, reloading/storing the 3-word slice header
+  through memory every field. This is the symmetric encode counterpart of the
+  decode cursor change: the wire format is byte-identical, pooled encode stays
+  0 allocations, the nested-message envelope and pooling semantics are
+  unchanged, and the stateful `Encoder` API (`NewEncoder`/`GetEncoder`/`Write*`/
+  `MarshalTo`) is preserved for manual callers and the pool. On Apple M5 the
+  value-style pooled encode drops from ~24 ns to ~13 ns/op (~1.9x, 0 allocs).
 
 ### Added
 
+- Stateless cursor append helpers in `runtime/go/xpb` (`AppendBoolTo`,
+  `AppendInt32To`, `AppendInt64To`, `AppendUint32To`, `AppendUint64To`,
+  `AppendFloat32To`, `AppendFloat64To`, `AppendCompactLengthTo`,
+  `AppendStringTo`, `AppendBytesTo`, `AppendMessageTo`), plus `GrowBuf` and the
+  `(*Encoder).Buf`/`(*Encoder).SetBuf` accessors: the register-local-buffer
+  counterparts of the `Encoder.Write*` methods, mirroring the
+  `binary.LittleEndian.Append*` style, with identical little-endian fixed-width
+  layout and compact-length (`0xFF`) framing. Added alongside the unchanged
+  stateful `Encoder` API; threaded through generated `Marshal`/`MarshalTo`.
 - Stateless cursor read helpers in `runtime/go/xpb` (`ReadBoolAt`,
   `ReadInt32At`, `ReadInt64At`, `ReadUint32At`, `ReadUint64At`,
   `ReadFloat32At`, `ReadFloat64At`, `ReadStringAt`, `ReadBytesAt`,

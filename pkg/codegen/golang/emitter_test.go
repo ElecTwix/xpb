@@ -132,26 +132,152 @@ func TestGenerate_AllTypes(t *testing.T) {
 
 	output := string(src)
 
-	// Verify all types are handled
+	// Encode (Phase 2) threads a register-local `buf` slice through the
+	// stateless xpb.Append*To helpers instead of calling the in-struct
+	// Encoder.Write* methods that reload/store Encoder.buf on every field. Each
+	// type must encode via its Append*To helper.
 	typeTests := []struct {
 		name    string
 		pattern string
 	}{
-		{"Bool", "WriteBool"},
-		{"Int32", "WriteInt32"},
-		{"Int64", "WriteInt64"},
-		{"Uint32", "WriteUint32"},
-		{"Uint64", "WriteUint64"},
-		{"Float32", "WriteFloat32"},
-		{"Float64", "WriteFloat64"},
-		{"String", "WriteString"},
-		{"Bytes", "WriteBytes"},
+		{"Bool", "xpb.AppendBoolTo(buf, "},
+		{"Int32", "xpb.AppendInt32To(buf, "},
+		{"Int64", "xpb.AppendInt64To(buf, "},
+		{"Uint32", "xpb.AppendUint32To(buf, "},
+		{"Uint64", "xpb.AppendUint64To(buf, "},
+		{"Float32", "xpb.AppendFloat32To(buf, "},
+		{"Float64", "xpb.AppendFloat64To(buf, "},
+		{"String", "xpb.AppendStringTo(buf, "},
+		{"Bytes", "xpb.AppendBytesTo(buf, "},
 	}
 
 	for _, tt := range typeTests {
 		if !contains(output, tt.pattern) {
-			t.Errorf("Output should contain %s method call", tt.name)
+			t.Errorf("Output should contain %s append helper %q", tt.name, tt.pattern)
 		}
+	}
+
+	// The local-buffer encode must NOT call the per-field stateful Encoder
+	// Write* methods (each of which does enc.buf = append(enc.buf, ...),
+	// reloading the 3-word slice header through memory every field).
+	for _, banned := range []string{
+		"enc.WriteBool(", "enc.WriteInt32(", "enc.WriteInt64(",
+		"enc.WriteString(", "enc.WriteBytes(",
+	} {
+		if contains(output, banned) {
+			t.Errorf("local-buffer encode must not call the stateful %q; use the Append*To helpers", banned)
+		}
+	}
+
+	// Marshal binds the local once, grows once, and writes back exactly once.
+	if !contains(output, "buf := enc.Buf()") {
+		t.Error("encode should bind a register-local buffer via `buf := enc.Buf()`")
+	}
+	if !contains(output, "xpb.GrowBuf(buf, ") {
+		t.Error("encode should grow the local buffer once up front via xpb.GrowBuf")
+	}
+	if !contains(output, "enc.SetBuf(buf)") {
+		t.Error("encode should write the local buffer back to the encoder once via enc.SetBuf(buf)")
+	}
+}
+
+// TestFixedSizeLowerBound asserts the exact grow-once lower bound the emitter
+// computes, per the contract that it sums only the provably-emitted fixed bytes
+// (fixed-width scalars/enums at their wire width, one presence byte per optional,
+// a 4-byte count per repeated/map) and counts variable-length string/bytes/
+// message fields as 0. A regression that under-counts (silently re-grown by the
+// Append*To helpers) or over-counts (wastes capacity past what the message
+// provably needs) is caught here, not just that "xpb.GrowBuf(buf, " appears.
+// (Review finding: the prior round asserted the call exists but never its value.)
+func TestFixedSizeLowerBound(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields []*ast.Field
+		want   int
+	}{
+		{
+			// All fixed-width scalars: bool(1)+int32(4)+int64(8)+uint32(4)+
+			// uint64(8)+float32(4)+float64(8) = 37.
+			name: "all_fixed_scalars",
+			fields: []*ast.Field{
+				{Name: "b", Type: ast.FieldType{Kind: ast.TypeBool}},
+				{Name: "i32", Type: ast.FieldType{Kind: ast.TypeInt32}},
+				{Name: "i64", Type: ast.FieldType{Kind: ast.TypeInt64}},
+				{Name: "u32", Type: ast.FieldType{Kind: ast.TypeUint32}},
+				{Name: "u64", Type: ast.FieldType{Kind: ast.TypeUint64}},
+				{Name: "f32", Type: ast.FieldType{Kind: ast.TypeFloat32}},
+				{Name: "f64", Type: ast.FieldType{Kind: ast.TypeFloat64}},
+			},
+			want: 37,
+		},
+		{
+			// Variable-length only: string + bytes both count 0.
+			name: "var_length_only",
+			fields: []*ast.Field{
+				{Name: "s", Type: ast.FieldType{Kind: ast.TypeString}},
+				{Name: "data", Type: ast.FieldType{Kind: ast.TypeBytes}},
+			},
+			want: 0,
+		},
+		{
+			// Mixed: int32(4) + optional string(1 presence byte, value var) +
+			// repeated int32(4-byte count, elements var) + int64(8) = 17.
+			name: "mixed_required_optional_repeated",
+			fields: []*ast.Field{
+				{Name: "id", Type: ast.FieldType{Kind: ast.TypeInt32}},
+				{Name: "method", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+				{Name: "scores", Type: ast.FieldType{Kind: ast.TypeInt32}, Repeated: true},
+				{Name: "ts", Type: ast.FieldType{Kind: ast.TypeInt64}},
+			},
+			want: 17,
+		},
+		{
+			// The uteka message: Type(4)+Id(0)+Method opt(1)+Payload opt(1)+
+			// Timestamp(8)+Error opt(1)+StreamId opt(1)+Seq(8)+Flags(4)+
+			// SessionId opt(1) = 29. This is the value the generated benchmark
+			// fixtures must carry.
+			name: "uteka_message",
+			fields: []*ast.Field{
+				{Name: "Type", Type: ast.FieldType{Kind: ast.TypeInt32}},
+				{Name: "Id", Type: ast.FieldType{Kind: ast.TypeString}},
+				{Name: "Method", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+				{Name: "Payload", Type: ast.FieldType{Kind: ast.TypeBytes}, Optional: true},
+				{Name: "Timestamp", Type: ast.FieldType{Kind: ast.TypeInt64}},
+				{Name: "Error", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+				{Name: "StreamId", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+				{Name: "Seq", Type: ast.FieldType{Kind: ast.TypeInt64}},
+				{Name: "Flags", Type: ast.FieldType{Kind: ast.TypeInt32}},
+				{Name: "SessionId", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+			},
+			want: 29,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &Generator{enums: make(map[string]bool)}
+			got := g.fixedSizeLowerBound(&ast.Message{Name: "M", Fields: tc.fields})
+			if got != tc.want {
+				t.Errorf("fixedSizeLowerBound = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFixedSizeLowerBound_EnumCountsAsInt32 proves an enum field (which shares
+// Kind==TypeMessage in the AST but resolves via the Generator's enum set)
+// contributes a fixed 4 bytes to the lower bound, since enums encode as int32.
+func TestFixedSizeLowerBound_EnumCountsAsInt32(t *testing.T) {
+	g := &Generator{enums: map[string]bool{"Status": true}}
+	msg := &ast.Message{
+		Name: "M",
+		Fields: []*ast.Field{
+			{Name: "id", Type: ast.FieldType{Kind: ast.TypeInt32}},                          // 4
+			{Name: "status", Type: ast.FieldType{Kind: ast.TypeMessage, Message: "Status"}}, // enum -> 4
+		},
+	}
+	if got := g.fixedSizeLowerBound(msg); got != 8 {
+		t.Errorf("fixedSizeLowerBound with enum = %d, want 8", got)
 	}
 }
 
@@ -338,6 +464,15 @@ func TestGenerate_NestedMessage(t *testing.T) {
 	if !contains(output, "if m.Addr != nil") || !contains(output, "m.Addr.MarshalTo(nestedEnc)") {
 		t.Error("Output should guard nested MarshalTo on `m.Field != nil` to handle nil pointers without panicking")
 	}
+	// The nested-message envelope is appended into the parent's local buffer
+	// via the length-prefixed xpb.AppendMessageTo helper (Phase 2 local-buffer
+	// encode), not the stateful enc.WriteMessage.
+	if !contains(output, "xpb.AppendMessageTo(buf, nestedEnc.Bytes())") {
+		t.Error("Output should append the nested-message envelope via xpb.AppendMessageTo(buf, nestedEnc.Bytes())")
+	}
+	if contains(output, "enc.WriteMessage(") {
+		t.Error("local-buffer encode must not call the stateful enc.WriteMessage")
+	}
 }
 
 func TestGenerator_DefaultPackage(t *testing.T) {
@@ -418,12 +553,13 @@ func TestGenerate_ValueOptionalStyle(t *testing.T) {
 		t.Error("value style must not produce pointer optionals (*[]byte)")
 	}
 
-	// Encode: presence driven by Has<Field>, value passed directly.
-	if !contains(output, "enc.WriteBool(m.HasMethod)") {
-		t.Error("encode should gate on m.HasMethod")
+	// Encode (Phase 2, local buffer): presence driven by Has<Field> via the
+	// stateless append helper, value appended directly (no pointer deref).
+	if !contains(output, "xpb.AppendBoolTo(buf, m.HasMethod)") {
+		t.Error("encode should gate on m.HasMethod via xpb.AppendBoolTo(buf, ...)")
 	}
-	if !contains(output, "enc.WriteString(m.Method)") {
-		t.Error("encode should write m.Method directly (no deref)")
+	if !contains(output, "xpb.AppendStringTo(buf, m.Method)") {
+		t.Error("encode should append m.Method directly via xpb.AppendStringTo(buf, ...) (no deref)")
 	}
 
 	// Decode: set value + presence bool.
