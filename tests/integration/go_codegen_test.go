@@ -115,14 +115,23 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
-// generateGo parses a schema and returns the generated Go source, failing on error.
+// generateGo parses a schema and returns the generated Go source using default
+// (pointer-style, copying) options, failing on error.
 func generateGo(t *testing.T, schema string) []byte {
+	t.Helper()
+	return generateGoWith(t, schema, golang.Options{})
+}
+
+// generateGoWith parses a schema and returns the generated Go source for the
+// given codegen options, failing on error. This lets the matrix tests exercise
+// the value-optional and zero-copy-bytes codegen paths, not just the default.
+func generateGoWith(t *testing.T, schema string, opts golang.Options) []byte {
 	t.Helper()
 	file, err := parser.ParseFile(schema)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	src, err := golang.Generate(file)
+	src, err := golang.GenerateWithOptions(file, opts)
 	if err != nil {
 		t.Fatalf("generate failed: %v\n%s", err, src)
 	}
@@ -610,6 +619,253 @@ message Pair {
 	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
 	goTestModule(t, dir)
 }
+
+// comprehensiveSchema mirrors testdata/comprehensive.xpb: it has an enum
+// (Status), optional scalars (?string email / avatar_url / postal_code), and an
+// optional MESSAGE field (?Address address). The optional message stays *T in
+// both Go optional styles, while the optional scalars switch between *T and
+// value+Has<Field>. Address also carries a required `bytes raw` field so the
+// value+zero-copy matrix row actually emits and round-trips the zero-copy
+// ReadBytesUnsafe decode path (a schema with no bytes field would never
+// exercise the flag). This is the schema the value-style + zero-copy matrix
+// exercises end to end.
+const comprehensiveSchema = `
+package myapp
+
+enum Status {
+    UNKNOWN = 0
+    ACTIVE = 1
+    INACTIVE = 2
+    PENDING = 3
+}
+
+message User {
+    1: string name
+    2: int32 age
+    3: bool active
+    4: ?string email
+    5: []string tags
+    6: Status status
+}
+
+message Address {
+    1: string city
+    2: string country
+    3: ?string postal_code
+    4: bytes raw
+}
+
+message Profile {
+    1: string bio
+    2: ?string avatar_url
+    3: User user
+    4: ?Address address
+    5: []int32 scores
+    6: map<string, string> metadata
+}
+`
+
+// TestGoCodegen_ComprehensiveMatrix extends the throwaway-module compile +
+// round-trip verifier to cover the value-optional and zero-copy-bytes codegen
+// paths on the comprehensive schema, not just the default pointer style. Each
+// matrix entry generates the schema with its options, writes a style-specific
+// driver, and `go test`s the throwaway module for a real compile + round-trip.
+//
+// The driver differs per optional style because an optional scalar is `*T`
+// (pointer) vs `T` + `Has<Field>` (value); the optional MESSAGE field
+// (?Address) and the enum field are identical across styles and are asserted in
+// every variant.
+func TestGoCodegen_ComprehensiveMatrix(t *testing.T) {
+	cases := []struct {
+		name   string
+		opts   golang.Options
+		driver string
+	}{
+		{
+			name:   "default_pointer",
+			opts:   golang.Options{},
+			driver: comprehensivePtrDriver,
+		},
+		{
+			name:   "value_optionals",
+			opts:   golang.Options{OptionalStyle: golang.OptionalValue},
+			driver: comprehensiveValDriver,
+		},
+		{
+			name:   "value_optionals_zero_copy",
+			opts:   golang.Options{OptionalStyle: golang.OptionalValue, ZeroCopyBytes: true},
+			driver: comprehensiveValDriver,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := generateGoWith(t, comprehensiveSchema, tc.opts)
+			dir := buildGenModule(t, src, "roundtrip_test.go", tc.driver)
+			goTestModule(t, dir)
+		})
+	}
+}
+
+// comprehensivePtrDriver round-trips Profile under the default pointer style:
+// optional scalars are *string, the optional Address message is *Address, and
+// the enum is exercised. It covers both present and absent optional cases,
+// including the optional MESSAGE field, which is the path comprehensive.xpb adds
+// over the simpler schemas.
+const comprehensivePtrDriver = `package gen
+
+import (
+	"bytes"
+	"reflect"
+	"testing"
+)
+
+func TestComprehensivePresent(t *testing.T) {
+	email := "a@b.com"
+	postal := "94016"
+	avatar := "http://x/a.png"
+	raw := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	in := &Profile{
+		Bio:       "hi",
+		AvatarUrl: &avatar,
+		User:      &User{Name: "alice", Age: 30, Active: true, Email: &email, Tags: []string{"x", "y"}, Status: Status_ACTIVE},
+		Address:   &Address{City: "SF", Country: "US", PostalCode: &postal, Raw: raw},
+		Scores:    []int32{1, 2, 3},
+		Metadata:  map[string]string{"k": "v"},
+	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.AvatarUrl == nil || *out.AvatarUrl != avatar {
+		t.Fatalf("AvatarUrl: %v", out.AvatarUrl)
+	}
+	if out.User == nil || out.User.Status != Status_ACTIVE || out.User.Email == nil || *out.User.Email != email {
+		t.Fatalf("User: %+v", out.User)
+	}
+	if out.Address == nil || out.Address.City != "SF" || out.Address.PostalCode == nil || *out.Address.PostalCode != postal {
+		t.Fatalf("Address: %+v", out.Address)
+	}
+	if !bytes.Equal(out.Address.Raw, raw) {
+		t.Fatalf("Address.Raw = % x, want % x", out.Address.Raw, raw)
+	}
+	if !reflect.DeepEqual(out.Scores, in.Scores) || !reflect.DeepEqual(out.Metadata, in.Metadata) {
+		t.Fatalf("scores/metadata mismatch: %+v", out)
+	}
+}
+
+func TestComprehensiveAbsentMessage(t *testing.T) {
+	// Optional Address message ABSENT; the field after it (Scores) must still
+	// decode, proving the presence flag is consumed.
+	in := &Profile{
+		Bio:    "hi",
+		User:   &User{Name: "bob", Status: Status_PENDING},
+		Scores: []int32{9, 8, 7},
+	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Address != nil {
+		t.Fatalf("absent optional message must decode to nil, got %+v", out.Address)
+	}
+	if out.AvatarUrl != nil {
+		t.Fatalf("absent optional scalar must decode to nil, got %q", *out.AvatarUrl)
+	}
+	if !reflect.DeepEqual(out.Scores, in.Scores) {
+		t.Fatalf("field after absent optional corrupted: %+v", out.Scores)
+	}
+	if out.User == nil || out.User.Status != Status_PENDING {
+		t.Fatalf("enum mismatch: %+v", out.User)
+	}
+}
+`
+
+// comprehensiveValDriver round-trips Profile under the value-optional style:
+// optional scalars are value + Has<Field>, while the optional Address message
+// stays *Address. Address.Raw is a required bytes field, so under the zero-copy
+// matrix variant its decode is emitted via ReadBytesUnsafe (aliasing the input)
+// rather than ReadBytes (copy). The driver round-trips Raw to prove the
+// zero-copy bytes decode path compiles and decodes correctly with the flag set,
+// alongside value optionals + the enum + the optional message.
+const comprehensiveValDriver = `package gen
+
+import (
+	"bytes"
+	"reflect"
+	"testing"
+)
+
+func TestComprehensivePresent(t *testing.T) {
+	raw := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	in := &Profile{
+		Bio:       "hi",
+		AvatarUrl: "http://x/a.png", HasAvatarUrl: true,
+		User:    &User{Name: "alice", Age: 30, Active: true, Email: "a@b.com", HasEmail: true, Tags: []string{"x", "y"}, Status: Status_ACTIVE},
+		Address: &Address{City: "SF", Country: "US", PostalCode: "94016", HasPostalCode: true, Raw: raw},
+		Scores:  []int32{1, 2, 3},
+		Metadata: map[string]string{"k": "v"},
+	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !out.HasAvatarUrl || out.AvatarUrl != "http://x/a.png" {
+		t.Fatalf("AvatarUrl: has=%v val=%q", out.HasAvatarUrl, out.AvatarUrl)
+	}
+	if out.User == nil || out.User.Status != Status_ACTIVE || !out.User.HasEmail || out.User.Email != "a@b.com" {
+		t.Fatalf("User: %+v", out.User)
+	}
+	if out.Address == nil || out.Address.City != "SF" || !out.Address.HasPostalCode || out.Address.PostalCode != "94016" {
+		t.Fatalf("Address: %+v", out.Address)
+	}
+	if !bytes.Equal(out.Address.Raw, raw) {
+		t.Fatalf("Address.Raw = % x, want % x", out.Address.Raw, raw)
+	}
+	if !reflect.DeepEqual(out.Scores, in.Scores) || !reflect.DeepEqual(out.Metadata, in.Metadata) {
+		t.Fatalf("scores/metadata mismatch: %+v", out)
+	}
+}
+
+func TestComprehensiveAbsentMessage(t *testing.T) {
+	in := &Profile{
+		Bio:    "hi",
+		User:   &User{Name: "bob", Status: Status_PENDING},
+		Scores: []int32{9, 8, 7},
+	}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Address != nil {
+		t.Fatalf("absent optional message must decode to nil, got %+v", out.Address)
+	}
+	if out.HasAvatarUrl {
+		t.Fatalf("absent optional scalar must have HasAvatarUrl=false, got %q", out.AvatarUrl)
+	}
+	if !reflect.DeepEqual(out.Scores, in.Scores) {
+		t.Fatalf("field after absent optional corrupted: %+v", out.Scores)
+	}
+	if out.User == nil || out.User.Status != Status_PENDING {
+		t.Fatalf("enum mismatch: %+v", out.User)
+	}
+}
+`
 
 // BenchmarkGoCodegen_Simple benchmarks simple message generation.
 func BenchmarkGoCodegen_Simple(b *testing.B) {
