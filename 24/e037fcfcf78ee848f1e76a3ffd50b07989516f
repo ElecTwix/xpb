@@ -1,0 +1,43 @@
+runtime/go/xpb/xpb.go
+  s_5551c6b8158c1a::t_87b226588d753b 380-561
+runtime/go/xpb/inline_test.go
+  s_5551c6b8158c1a::t_16febf73b73c76 39,53-60
+  s_5551c6b8158c1a::t_29c990178132d8 46-52
+  s_5551c6b8158c1a::t_1e631c7fd41e2f 40-45,61
+tests/integration/go_codegen_test.go
+  s_5551c6b8158c1a::t_3e36124ad17a06 346-350
+runtime/go/xpb/at_test.go
+  s_5551c6b8158c1a::t_9ab9e1620d9eb3 1-194,199-202,204,212,216-218,221-222,236,299-320,325-326,329-330,333-334,336-337,340-342,344-345,348-470
+  s_5551c6b8158c1a::t_e4a7c4c14073d3 321-324,327-328,331-332,335,338-339,343,346-347
+  s_5551c6b8158c1a::t_1cb121fc52217e 195-198,203,205-211,213-215,219-220,223-235,237-298
+pkg/codegen/golang/emitter.go
+  s_5551c6b8158c1a::t_46566a57b83965 480-485,488-489,495,503-505,507,509,511,513-517
+  s_5551c6b8158c1a::t_6aaeb871d62d11 76-78,81,83
+  s_5551c6b8158c1a::t_4a36dfc66ff58a 452-455,459,461,463,465,467,469,471,473
+  s_5551c6b8158c1a::t_a506125bcb299d 334-336,339-340,347-350,353,358-359,363-364,370-371,376-377,390-391,396-397,413-414,420-422,438-439
+  s_5551c6b8158c1a::t_f111de1518e063 197-198,201-208
+CHANGELOG.md
+  s_5551c6b8158c1a::t_e282225baca8a7 8-19,22-28
+tests/integration/security_audit_test.go
+  s_5551c6b8158c1a::t_c07881cc9d416b 700-706
+  s_5551c6b8158c1a::t_17716582047832 1124
+pkg/codegen/golang/emitter_test.go
+  s_5551c6b8158c1a::t_96e95cd46f9b97 46-62
+  s_5551c6b8158c1a::t_5b980fff01cfb7 319-329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "24e037fcfcf78ee848f1e76a3ffd50b07989516f",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
