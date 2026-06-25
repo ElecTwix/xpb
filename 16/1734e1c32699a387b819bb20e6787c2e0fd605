@@ -1,0 +1,19 @@
+.gitignore
+  s_5551c6b8158c1a::t_9e7b7602baed72 13-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "161734e1c32699a387b819bb20e6787c2e0fd605",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
