@@ -1,0 +1,24 @@
+benchmarks/go/uteka/sim_concurrency_test.go
+  s_5551c6b8158c1a::t_bc224177de42a5 228-240
+  s_5551c6b8158c1a::t_dfd3f01866fdd5 1-8,10-42,49-79,97-227,241-260,264,268-283
+  s_5551c6b8158c1a::t_8d0eb554882eb3 261-263,265-267
+  s_5551c6b8158c1a::t_a218079c586f36 9
+  s_5551c6b8158c1a::t_c33326c5c3deec 43-48
+  s_5551c6b8158c1a::t_25374afa1cc47f 80-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "268e5a1c7a4926b71ab8f93c74742e8b09af0a24",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
