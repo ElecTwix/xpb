@@ -1,174 +1,178 @@
+// Command xpbench is the XPB cross-runtime benchmark runner. It encodes a fixed
+// set of canonical message shapes with the Go reference encoder and drives every
+// AVAILABLE language runtime (Go, Rust, TypeScript, C, Lua, Java) over the SAME
+// shapes, emitting one normalized table so encode/decode cost is directly
+// comparable across runtimes:
+//
+//	runtime | shape | wire size | encode ns/op + MB/s | decode ns/op + MB/s | allocs/op (Go)
+//
+// Each non-Go runtime is gated on toolchain availability and SKIPPED cleanly if
+// its toolchain is absent (mirroring cmd/ci) -- a missing toolchain is never a
+// hard failure. Output is human-readable by default and machine-readable on
+// request (--format json|csv, optionally --out FILE).
+//
+//	go run ./cmd/xpbench                      # human table for locally-available runtimes
+//	go run ./cmd/xpbench --format json        # machine-readable JSON to stdout
+//	go run ./cmd/xpbench --format csv --out r.csv   # CSV to file + human table on stdout
+//	go run ./cmd/xpbench --runtimes go,rust   # restrict to a subset
+//
+// Note: this tool benchmarks only the XPB codec ACROSS runtimes; it deliberately
+// does NOT touch the pre-existing-broken root benchmarks/go package.
 package main
 
 import (
-	"flag"
 	"fmt"
+	"io"
 	"os"
-	"sort"
 	"strings"
-	"text/tabwriter"
 )
 
+// namedRunner pairs a runtime's display name with its driver.
+type namedRunner struct {
+	name string
+	fn   func(root, corpus string, metas []shapeMeta) ([]Row, runtimeStatus)
+}
+
+// allRunners returns every runtime driver in display order. Go is in-process;
+// the rest shell out to a per-runtime harness gated on toolchain availability.
+func allRunners() []namedRunner {
+	return []namedRunner{
+		{"Go", runGo},
+		{"Rust", runRust},
+		{"TypeScript", runTS},
+		{"C", runC},
+		{"Lua", runLua},
+		{"Java", runJava},
+	}
+}
+
+// selectRunners filters allRunners by a comma-separated name list. An empty
+// list or "all" selects everything; unknown names are ignored.
+func selectRunners(spec string) []namedRunner {
+	spec = strings.TrimSpace(spec)
+	if spec == "" || strings.EqualFold(spec, "all") {
+		return allRunners()
+	}
+	want := map[string]bool{}
+	for _, n := range strings.Split(spec, ",") {
+		want[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	var out []namedRunner
+	for _, r := range allRunners() {
+		if want[strings.ToLower(r.name)] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// collectRows runs each selected runtime over the corpus and returns the
+// aggregated rows plus the per-runtime statuses. Progress is written to
+// progress (pass io.Discard to silence it).
+func collectRows(root, corpus string, metas []shapeMeta, runners []namedRunner, progress io.Writer) ([]Row, []runtimeStatus) {
+	var rows []Row
+	statuses := make([]runtimeStatus, 0, len(runners))
+	for _, r := range runners {
+		fmt.Fprintf(progress, "running %s...\n", r.name)
+		rr, st := r.fn(root, corpus, metas)
+		rows = append(rows, rr...)
+		statuses = append(statuses, st)
+	}
+	return rows, statuses
+}
+
+// runBenchmark writes the shared corpus to a temp dir and drives the selected
+// runtimes over it. It is the testable core of the command.
+func runBenchmark(root string, shapes []shape, runners []namedRunner, progress io.Writer) ([]Row, []runtimeStatus, []shapeMeta, error) {
+	dir, err := os.MkdirTemp("", "xpbench_corpus")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer os.RemoveAll(dir)
+
+	metas, err := writeCorpus(dir, shapes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	rows, statuses := collectRows(root, dir, metas, runners, progress)
+	return rows, statuses, metas, nil
+}
+
 func main() {
-	runGo := flag.Bool("go", false, "Run Go benchmarks")
-	runNode := flag.Bool("node", false, "Run Node.js benchmarks")
-	runBrowser := flag.Bool("browser", false, "Run Browser benchmarks")
-	flag.Parse()
-
-	// Default to all if none specified
-	if !*runGo && !*runNode && !*runBrowser {
-		*runGo = true
-		*runNode = true
-		*runBrowser = true
-	}
-
-	var allResults []Result
-
-	if *runGo {
-		res, err := runGoBenchmarks()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error running Go benchmarks: %v\n", err)
-		} else {
-			allResults = append(allResults, res...)
-		}
-	}
-
-	if *runNode {
-		res, err := runNodeBenchmarks()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error running Node benchmarks: %v\n", err)
-		} else {
-			allResults = append(allResults, res...)
-		}
-	}
-
-	if *runBrowser {
-		res, err := runBrowserBenchmarks()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error running Browser benchmarks: %v\n", err)
-		} else {
-			allResults = append(allResults, res...)
-		}
-	}
-
-	printTable(allResults)
-}
-
-func printTable(results []Result) {
-	fmt.Println("\n╔═══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║               XPB V2 Unified Benchmark Results                ║")
-	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
-
-	// Filter/Aggregate best XPB results if multiple (e.g. JIT vs Manual)
-	// For this report, we'll just show them all sorted.
-
-	// Group by Category -> Operation -> Format -> Platform
-
-	categories := []string{"Small", "Large", "StringArray", "Int32Array", "StringMap"}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
-	for _, cat := range categories {
-		fmt.Printf("\n📦 %s Benchmarks\n", cat)
-		fmt.Fprintln(w, "Format\tOperation\tGo\tNode.js\tBrowser\tSize")
-		fmt.Fprintln(w, "------\t---------\t--\t-------\t-------\t----")
-
-		// Find unique formats in this category
-		formats := make(map[string]bool)
-		for _, r := range results {
-			if r.Category == cat {
-				// Simplify format name for grouping
-				fmtName := simplifyFormatName(r.Format)
-				formats[fmtName] = true
-			}
-		}
-
-		sortedFormats := []string{}
-		for f := range formats {
-			sortedFormats = append(sortedFormats, f)
-		}
-		sort.Strings(sortedFormats)
-
-		// Prioritize XPB
-		sort.Slice(sortedFormats, func(i, j int) bool {
-			if strings.Contains(sortedFormats[i], "XPB") && !strings.Contains(sortedFormats[j], "XPB") {
-				return true
-			}
-			if !strings.Contains(sortedFormats[i], "XPB") && strings.Contains(sortedFormats[j], "XPB") {
-				return false
-			}
-			return sortedFormats[i] < sortedFormats[j]
-		})
-
-		for _, fmtName := range sortedFormats {
-			for _, op := range []string{"Encode", "Decode"} {
-				goRes := findResult(results, "Go", cat, fmtName, op)
-				nodeRes := findResult(results, "Node", cat, fmtName, op)
-				browserRes := findResult(results, "Browser", cat, fmtName, op)
-
-				// Format times
-				goStr := formatNs(goRes)
-				nodeStr := formatNs(nodeRes)
-				browserStr := formatNs(browserRes)
-
-				// Size (take from any)
-				size := int64(0)
-				if goRes != nil {
-					size = goRes.Size
-				} else if nodeRes != nil {
-					size = nodeRes.Size
-				} else if browserRes != nil {
-					size = browserRes.Size
-				}
-
-				sizeStr := "-"
-				if size > 0 {
-					sizeStr = fmt.Sprintf("%d B", size)
-				}
-
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", fmtName, op, goStr, nodeStr, browserStr, sizeStr)
-			}
-			// Add separator between formats
-			// fmt.Fprintln(w, "\t\t\t\t\t")
-		}
-		w.Flush()
+	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "xpbench:", err)
+		os.Exit(1)
 	}
 }
 
-func simplifyFormatName(name string) string {
-	if strings.Contains(name, "XPB") {
-		return "XPB V2"
-	} // Group JIT/Manual together?
-	// Actually, we want to see JIT vs Manual.
-	// But keeping it simple for the consolidated table:
-	if strings.Contains(name, "JIT") {
-		return "XPB V2 (JIT)"
+// run is main minus os.Exit, so it is unit-testable. It parses flags, drives the
+// benchmark, and renders the requested output.
+func run(args []string, stdout, stderr io.Writer) error {
+	var (
+		format   = "table"
+		outPath  = ""
+		runtimes = "all"
+	)
+	fs := newFlagSet(&format, &outPath, &runtimes)
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	if strings.Contains(name, "Manual") {
-		return "XPB V2 (Man)"
+	switch format {
+	case "table", "json", "csv":
+	default:
+		return fmt.Errorf("unknown --format %q (want table|json|csv)", format)
 	}
-	return name
-}
 
-func findResult(results []Result, platform, cat, fmtName, op string) *Result {
-	// Try exact match first
-	for i := range results {
-		r := &results[i]
-		if r.Platform == platform && r.Category == cat && r.Operation == op {
-			// fuzzy match format
-			if simplifyFormatName(r.Format) == fmtName {
-				// If multiple matches (e.g. Manual vs JIT both mapping to XPB V2), pick best?
-				// But we distinguished them above.
-				return r
-			}
-		}
+	root, err := repoRoot()
+	if err != nil {
+		return err
 	}
+	runners := selectRunners(runtimes)
+	if len(runners) == 0 {
+		return fmt.Errorf("no runtimes selected by %q", runtimes)
+	}
+
+	rows, statuses, metas, err := runBenchmark(root, canonicalShapes(), runners, stderr)
+	if err != nil {
+		return err
+	}
+	order := shapeOrderFromMeta(metas)
+
+	if err := render(rows, order, format, outPath, stdout); err != nil {
+		return err
+	}
+	writeSummary(stderr, statuses)
 	return nil
 }
 
-func formatNs(r *Result) string {
-	if r == nil {
-		return "-"
+// render writes the rows in the requested format. When --out is set, the chosen
+// format is written to that file AND the human table is also printed to stdout
+// (so one run yields both a saved machine artifact and an on-screen view).
+func render(rows []Row, order map[string]int, format, outPath string, stdout io.Writer) error {
+	if outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := emit(f, rows, order, format); err != nil {
+			return err
+		}
+		writeTable(stdout, rows, order)
+		return nil
 	}
-	return fmt.Sprintf("%.0f ns", r.NsPerOp)
+	return emit(stdout, rows, order, format)
+}
+
+// emit writes rows to w in the given format.
+func emit(w io.Writer, rows []Row, order map[string]int, format string) error {
+	switch format {
+	case "json":
+		return writeJSON(w, rows, order)
+	case "csv":
+		return writeCSV(w, rows, order)
+	default:
+		writeTable(w, rows, order)
+		return nil
+	}
 }
