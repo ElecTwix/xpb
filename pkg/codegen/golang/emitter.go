@@ -179,6 +179,21 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 
 	// Struct
 	g.printf("// %s is a generated XPB message.\n", name)
+	if messageHasMapField(msg) {
+		// Map fields are encoded by ranging over the Go map, whose iteration
+		// order is randomized, so a value of this type with a multi-entry map is
+		// NOT guaranteed to encode to byte-identical output across encodes. Decode
+		// always round-trips correctly (it is order-insensitive), but callers MUST
+		// NOT hash, sign, or byte-compare encoded messages that contain maps, and
+		// must not rely on byte-identity for caching or golden comparisons. The
+		// same applies across every XPB language runtime. See docs/WIRE_FORMAT.md.
+		g.printf("//\n")
+		g.printf("// NOTE: this message contains a map field. Map encoding is NOT canonical /\n")
+		g.printf("// byte-stable: a >1-entry map encodes to different bytes across encodes\n")
+		g.printf("// (Go map iteration order is randomized). Decode round-trips correctly, but\n")
+		g.printf("// do NOT hash, sign, or byte-compare encoded messages containing maps. The\n")
+		g.printf("// same caveat applies in every XPB language runtime.\n")
+	}
 	g.printf("type %s struct {\n", name)
 	for _, field := range msg.Fields {
 		goType := g.goTypeName(field)
@@ -777,6 +792,19 @@ func toCamelCase(s string) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// messageHasMapField reports whether the message declares at least one map<>
+// field. Map fields are encoded by ranging over the Go map, so their on-wire
+// key order is non-deterministic; the generated struct doc comment surfaces that
+// non-canonical / non-byte-stable contract to callers.
+func messageHasMapField(msg *ast.Message) bool {
+	for _, field := range msg.Fields {
+		if field.Type.Kind == ast.TypeMap {
+			return true
+		}
+	}
+	return false
 }
 
 func estimateSize(msg *ast.Message) int {
