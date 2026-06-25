@@ -1,175 +1,173 @@
-# XPB V2 Benchmark Results
+# Benchmark Measurement Protocol
 
-Environment: Linux (Intel Core i9-13900H), Go 1.23.0, Node.js (V8 engine)
+This document describes how to **measure** Go performance reproducibly and how to
+run the **profile-guided-optimization (PGO)** workflow. It is the measurement
+counterpart to the deterministic correctness gates:
 
-## Small Message (Tiny)
+- **Deterministic gates** (allocs-per-op, wire size, inlining) live in the Go
+  test suite (`benchmarks/go/uteka/alloc_test.go`,
+  `runtime/go/xpb/inline_test.go`, and the per-shape gate tests). They run under
+  plain `go test` / `make verify` and **fail CI** on a regression without
+  depending on any wall-clock number.
+- **Measurement** (ns/op throughput) is what this document and the `make bench*`
+  targets cover. Raw ns/op is **never** a hard CI gate (see
+  [Why ns/op is never CI-gated](#why-nsop-is-never-ci-gated)).
 
-Single boolean: `{active: true}`
+Pre-rendered result tables for a specific machine live in
+[`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md); this file is about *how* to produce
+trustworthy numbers, not a snapshot of them.
 
-| Format | Encode | Decode | Size | Allocs |
-|--------|--------|--------|------|--------|
-| **XPB V2** | 9.5 ns | 0.16 ns | 1 B | 0 |
-| JSON | 80 ns | 428 ns | 11 B | 1 |
-| MessagePack | 234 ns | 171 ns | 9 B | 2 |
-| Protobuf | - | - | - | - |
-
-Encode speedup: 8.5x vs JSON
-Decode speedup: 2735x vs JSON
-
-## Small Message (3 fields: name, age, active)
-
-### Go Runtime
-
-| Format | Encode | Decode | Size | Allocs |
-|--------|--------|--------|------|--------|
-| **XPB V2** | 10.9 ns | 3.4 ns | 19 B | 0 |
-| JSON | 144 ns | 788 ns | 47 B | 1 |
-| MessagePack | 255 ns | 319 ns | 33 B | 2 |
-| Protobuf | 90 ns | 148 ns | 19 B | 1 |
-
-Encode speedup: 13.2x vs JSON
-Decode speedup: 229x vs JSON
-Size reduction: 60% vs JSON
-
-### Node.js Runtime (JIT)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| **XPB V2 (JIT)** | 12 ns | 57 ns | 19 B |
-| **XPB V2 (Manual)** | 42 ns | 176 ns | 19 B |
-| JSON | 80 ns | 217 ns | 47 B |
-| MessagePack | 1213 ns | 326 ns | 33 B |
-| Protobuf | 187 ns | 81 ns | 19 B |
-
-Encode speedup: 6.5x vs JSON
-Decode speedup: 3.8x vs JSON
-Size reduction: 60% vs JSON
-
-## Large Message (7 fields)
-
-### Go Runtime
-
-| Format | Encode | Decode | Size | Allocs |
-|--------|--------|--------|------|--------|
-| **XPB V2** | 17.5 ns | 7.8 ns | 53 B | 0 |
-| JSON | 519 ns | 1867 ns | 192 B | 1 |
-| MessagePack | 718 ns | 711 ns | 165 B | 4 |
-| Protobuf | 217 ns | 397 ns | 53 B | 1 |
-
-Encode speedup: 29.7x vs JSON
-Decode speedup: 238x vs JSON
-
-### Node.js Runtime (JIT)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| **XPB V2 (JIT)** | 155 ns | 259 ns | 121 B |
-| **XPB V2 (Manual)** | 252 ns | 399 ns | 121 B |
-| JSON | 271 ns | 436 ns | 192 B |
-| MessagePack | 1572 ns | 893 ns | 165 B |
-| Protobuf | 563 ns | 222 ns | 124 B |
-
-Encode speedup: 1.75x vs JSON
-Decode speedup: 1.68x vs JSON
-
-## Collections (Node.js Runtime)
-
-### String Array (100 elements)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| **XPB V2** | 2122 ns | 7972 ns | 1304 B |
-| JSON | 1177 ns | 2390 ns | 1501 B |
-| MessagePack | 6004 ns | 6835 ns | 1303 B |
-
-⚠️ XPB is **0.55x** encode, **0.30x** decode (slower than JSON)
-- JSON.stringify is highly optimized in V8 for string arrays
-- Int32 arrays work well, but string arrays have significant overhead
-
-### Int32 Array (100 elements)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| **XPB V2** | 113 ns | 132 ns | 404 B |
-| JSON | 809 ns | 843 ns | 435 B |
-| MessagePack | 1522 ns | 809 ns | 279 B |
-
-Encode speedup: 7.2x vs JSON
-Decode speedup: 6.4x vs JSON
-
-### String Map (100 entries)
-
-| Format | Encode | Decode | Size |
-|--------|--------|--------|------|
-| **XPB V2** | 5868 ns | 17219 ns | 2604 B |
-| JSON | 4614 ns | 4812 ns | 3001 B |
-| MessagePack | 17046 ns | 39496 ns | 2603 B |
-
-⚠️ XPB is **0.79x** encode, **0.28x** decode (slower than JSON)
-- Same issue as string arrays: JSON.parse/stringify is highly optimized
-
-## Size Scaling
-
-| Message Size | XPB (B) | JSON (B) | Savings |
-|--------------|---------|----------|---------|
-| Tiny (1 bool) | 1 | 11 | 90.9% |
-| Small (3 fld) | 19 | 47 | 59.6% |
-| Medium (8 fld) | 195 | 376 | 48.1% |
-| Large (10 KB) | 10,604 | 10,982 | 3.4% |
-| XLarge (50 KB) | 52,407 | 53,434 | 1.9% |
-
-## Key Observations
-
-### Go Runtime
-1. **Small messages**: XPB excels (13-230x faster) due to no parsing overhead
-2. **Large messages**: Speedup diminishes as data transfer dominates
-3. **Collections**: Array/map decode shows 10-30x improvement
-4. **Memory**: Zero allocations for encode, minimal for decode
-5. **Size**: Best savings on small messages (up to 90%)
-
-### Node.js Runtime
-1. **Primitive types**: Fast (6.5x encode, 3.8x decode for small messages)
-2. **Int32 arrays**: Excellent (7x faster than JSON)
-3. **String collections**: Slower than JSON (0.2x-0.4x decode)
-   - JIT compiler issue with string handling in collections
-   - Int32 arrays work well, but string operations need optimization
-4. **Large messages**: Moderate speedup (1.7x) as overhead diminishes
-
-## Known Issues (Node.js)
-
-| Issue | Impact | Workaround |
-|-------|--------|------------|
-| String Array decode | 0.30x vs JSON | Use JSON for string arrays |
-| String Map decode | 0.28x vs JSON | Use JSON for string maps |
-| String Array encode | 0.55x vs JSON | Use JSON for string arrays |
-
-These issues are fundamental to competing with V8's highly optimized JSON.stringify/parse for strings. XPB excels with:
-- Primitive types (bool, int, float)
-- Numeric arrays (int32, float64)
-- Small messages with mixed types
-
-## Running Benchmarks
+## Quick start
 
 ```bash
-# Go benchmarks
-go test -bench=. -benchmem -count=1 ./benchmarks/go
-
-# Node.js benchmarks
-cd runtime/ts && npm run bench
-
-# Unified benchmark tool
-go run ./cmd/xpbench
+make benchstat-install   # one-time: install golang.org/x/perf/cmd/benchstat
+make bench               # reproducible run; writes bench.out
+make bench-compare       # benchstat the run against a committed baseline
+make bench-pgo           # capture default.pgo and measure the PGO delta
 ```
 
-## Files
+All of these are **additive** and **not** wired into `make verify` / `make ci`.
 
-### Go Benchmarks
-- Benchmark code: `benchmarks/go/benchmark_test.go`
-- Comparison tests: `benchmarks/go/comparison_test.go`
-- Collection tests: `benchmarks/go/collections_test.go`
-- Size scaling: `benchmarks/go/size_scaling_test.go`
+## The targets
 
-### TypeScript Benchmarks
-- Main benchmark: `benchmarks/ts/src/benchmark.ts`
-- JIT compiler: `runtime/ts/src/jit.ts`
-- Collections: `runtime/ts/src/collections.ts`
+| Target | What it does |
+|--------|--------------|
+| `make bench` | Runs the Go benchmarks with the reproducible settings below over `./benchmarks/go/uteka/...` and `./benchmarks/go/matrix/...` (the matrix tree is included only when it exists), writing results to `bench.out`. |
+| `make bench-compare` | Runs `bench`, then `benchstat`s the fresh run against a committed baseline and prints each delta with a confidence interval. Informational, not a gate. |
+| `make bench-pgo` | Captures a CPU profile into `default.pgo`, then measures the PGO delta (bench with vs. without `-pgo`) via `benchstat`. |
+| `make benchstat-install` | Installs `benchstat` into `$(go env GOPATH)/bin` (mirrors `make mutate-install`). |
+
+Override the knobs on the command line, e.g.
+`make bench BENCH_COUNT=20 BENCH_BENCHTIME=20000x`.
+
+## Why these settings (reproducibility)
+
+The point of a measurement is that **the same change produces the same verdict**
+on the same machine. Three sources of variance are pinned away:
+
+- **Fixed iteration count, not wall-clock time** — the targets pass
+  `-benchtime=<N>x` (e.g. `5000x`), not the default time-based `-benchtime=1s`.
+  A time-based run does *a different amount of work* every time (and a different
+  amount on a faster/slower machine), so the iteration count — and thus the noise
+  profile — drifts. A fixed `Nx` count makes every run execute identical work.
+- **`GOMAXPROCS=1`** — pinning to a single OS thread removes goroutine-scheduler
+  and cross-core migration jitter, which is the largest source of run-to-run
+  variance for these tiny (single-digit-ns) operations. Measure single-core
+  throughput first; concurrency scaling is a separate experiment.
+- **`-count=10`** — repeating the whole run gives `benchstat` enough samples to
+  compute a mean, a variation band, and a significance test. A single run cannot
+  distinguish a real change from noise.
+- **`-benchmem`** — always report `B/op` and `allocs/op`. Allocation counts are
+  deterministic (see below) and are the most reliable signal in the output.
+
+### Pinning the environment
+
+ns/op is only comparable against numbers captured on the **same machine, in the
+same power/thermal state**. For trustworthy comparisons:
+
+- Capture the baseline and the candidate **back to back** on the same host.
+- On a laptop, disable turbo / pin the governor to a fixed frequency if you can,
+  plug in to AC, and let the machine reach thermal steady state.
+- Record `goos`, `goarch`, `cpu`, and the Go version (`go test` prints the first
+  three; they appear at the top of `bench.out`). Never compare numbers across
+  different `cpu:` lines.
+- Close other CPU-heavy work; `GOMAXPROCS=1` helps but does not isolate the box.
+
+## Comparing with benchstat (confidence, not eyeballing)
+
+Never compare two ns/op numbers by eye — a 5% difference between single runs is
+almost always noise. `benchstat` takes the `-count=10` samples from each side and
+reports the delta **with a confidence interval and a p-value**:
+
+```bash
+# Seed a committed baseline once (writes a .txt you can `git add`):
+make bench BENCH_OUT=benchmarks/go/uteka/baseline.txt
+git add benchmarks/go/uteka/baseline.txt
+
+# Later, after a change:
+make bench-compare       # benchstat baseline.txt bench.out
+```
+
+`bench-compare` prints something like `~` (no significant change) or a delta with
+`(p=0.001 n=10)`. **Only a statistically-significant delta counts as a
+regression or a win.** Everything else is noise. If no baseline is committed yet,
+`bench-compare` still prints the current run's summary and tells you how to seed
+one.
+
+## Why ns/op is never CI-gated
+
+Raw throughput (ns/op) depends on the host CPU, its thermal/power state,
+neighbouring load, and the Go version. Gating CI on it would make the build flaky
+(green on a cold runner, red on a hot one) and would punish contributors for the
+CI machine's mood. So ns/op is **measured and reported for humans**, compared
+with `benchstat`'s significance test, and discussed in review — but it never
+fails the build.
+
+What **is** gated (in the deterministic test suite, T-16, run by `make verify`):
+
+- **`allocs/op` / `B/op`** — allocation counts are deterministic for a given code
+  path. `TestZeroAlloc_ValDecode` / `TestZeroAlloc_PooledEncode` assert
+  `testing.AllocsPerRun(...) == 0`, so a 0→N allocation regression fails CI
+  immediately, independent of wall-clock speed.
+- **Wire size** — the encoded byte length for a given message is fixed by the
+  wire format. The conformance/golden vectors and size assertions catch any
+  unintended size change.
+- **Inlining of the hot helpers** — `TestInliningGuard_HotHelpers` asserts the
+  hot `Read*`/`Write*` helpers still report "can inline", catching the
+  optimization regressions that *cause* ns/op regressions — deterministically,
+  without measuring time.
+
+In short: gate the **deterministic** proxies of performance (allocs, size,
+inlining); only **measure** the non-deterministic one (ns/op).
+
+## Profile-guided optimization (PGO) workflow
+
+[PGO](https://go.dev/doc/pgo) lets the compiler use a representative CPU profile
+to drive inlining and devirtualization on the hot path. `make bench-pgo`
+automates the capture-and-measure loop:
+
+1. **Capture** a CPU profile from the uteka hot path (which exercises the
+   `runtime/go/xpb` encode/decode primitives) and write it as `default.pgo`:
+
+   ```bash
+   GOMAXPROCS=1 go test -run '^$' -bench=. -benchtime=5000x \
+       -cpuprofile=default.pgo ./benchmarks/go/uteka/
+   ```
+
+2. **Measure the delta** — run the benchmarks once without PGO and once with
+   `-pgo=default.pgo`, then diff with `benchstat`:
+
+   ```bash
+   GOMAXPROCS=1 go test -run '^$' -bench=. -benchmem -count=10 \
+       ./benchmarks/go/uteka/... > bench-nopgo.out
+   GOMAXPROCS=1 go test -pgo=default.pgo -run '^$' -bench=. -benchmem -count=10 \
+       ./benchmarks/go/uteka/... > bench-pgo.out
+   benchstat bench-nopgo.out bench-pgo.out
+   ```
+
+   `make bench-pgo` runs all four steps for you.
+
+3. **Ship the win** — Go auto-detects a file named `default.pgo` in a `main`
+   package's directory at build time, or pass `-pgo=<path>` to any
+   `go build`/`go test`. Re-measure after committing the profile to confirm the
+   delta holds.
+
+The profile (`default.pgo`) and the `*.out` result files are **local build
+artifacts** — they should be added to `.gitignore` and not committed, except for
+a deliberately curated `default.pgo` placed next to a `main` package you want PGO
+to optimize.
+
+## Future determinism options
+
+Two techniques could make even the timing side more reproducible; they are noted
+here as future work, not yet implemented:
+
+- **`testing/synctest`** — for the concurrency-scaling benchmarks, a synthetic
+  clock (Go 1.24+ `testing/synctest`) removes wall-clock and scheduler
+  nondeterminism so concurrent ser/de can be measured deterministically rather
+  than wall-clock-timed.
+- **Instruction-count measurement** — counting retired instructions (e.g. via
+  `perf stat` / hardware counters or a simulator like `cachegrind`) instead of
+  nanoseconds yields a machine-independent, noise-free metric that *could* be
+  CI-gated, unlike ns/op. This would let throughput regressions be caught
+  deterministically the way allocs and wire size already are.
