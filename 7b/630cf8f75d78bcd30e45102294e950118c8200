@@ -1,0 +1,21 @@
+CHANGELOG.md
+  s_5551c6b8158c1a::t_f2639dbb64add3 14-15
+docs/MIGRATION.md
+  s_5551c6b8158c1a::t_ab45cd72b86659 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "7b630cf8f75d78bcd30e45102294e950118c8200",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
