@@ -1,0 +1,38 @@
+benchmarks/go/uteka/fuzz_test.go
+  s_5551c6b8158c1a::t_e6cd6fceb6eb76 26-58
+  s_5551c6b8158c1a::t_abe21b72ec91d7 60-68,103-123
+  s_5551c6b8158c1a::t_013ebaa146aab6 69-102
+pkg/codegen/golang/emitter_test.go
+  s_5551c6b8158c1a::t_779624c5640fcc 282-283,285-342
+  s_5551c6b8158c1a::t_7d82de5503f34c 135-143,147-155,157-194,198-205,230-281
+pkg/codegen/golang/emitter.go
+  s_5551c6b8158c1a::t_b99dae81ead541 214,231-238
+  s_5551c6b8158c1a::t_552d0b1bc06dde 269-277
+  s_5551c6b8158c1a::t_12c1732ecae988 834-913
+  s_5551c6b8158c1a::t_c1e938c8dd02a4 215-230
+  s_5551c6b8158c1a::t_a40228b6a39c4d 513-606,611,614-623
+  s_5551c6b8158c1a::t_86075dbf756144 607-610,612-613
+runtime/go/xpb/xpb.go
+  s_5551c6b8158c1a::t_a3ad841845784c 680-797
+runtime/go/xpb/inline_test.go
+  s_5551c6b8158c1a::t_a8d7459597cae3 85-109
+CHANGELOG.md
+  s_5551c6b8158c1a::t_89d951b99fb262 75-84
+  s_5551c6b8158c1a::t_69ed10085be50f 32-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "03b503c23dfaaf1753cd3147921867df330df0db",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
