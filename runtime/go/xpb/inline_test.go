@@ -36,6 +36,29 @@ var hotInlineHelpers = []string{
 	"(*Decoder).ReadFloat32",
 	"(*Decoder).ReadFloat64",
 	"(*Decoder).readCompactLength",
+	// Stateless cursor read helpers (Phase 1): the fixed-width scalar *At
+	// helpers, the compact-length helper, and the nested-message envelope
+	// helper are the register-local-cursor counterparts threaded through
+	// generated decode. They must stay inlinable for generated unmarshalAt to
+	// reach the hand-written local-cursor ceiling. ReadMessageBytesAt is the
+	// per-nested-message envelope read and inlines because it is a thin alias
+	// of ReadBytesUnsafeAt.
+	//
+	// Intentionally NOT listed (and not a regression):
+	//   - ReadStringAt / ReadBytesAt / ReadBytesUnsafeAt: like their Decoder
+	//     counterparts they call unsafe.String / make / copy and do not inline.
+	//   - ReadArrayCountAt: like the stateful (*Decoder).ReadArrayCount it
+	//     calls fmt.Errorf on the validation paths and does not inline; it runs
+	//     once per repeated/map field, not on the per-scalar hot path.
+	"ReadBoolAt",
+	"ReadInt32At",
+	"ReadInt64At",
+	"ReadUint32At",
+	"ReadUint64At",
+	"ReadFloat32At",
+	"ReadFloat64At",
+	"readCompactLengthAt",
+	"ReadMessageBytesAt",
 }
 
 // TestInliningGuard_HotHelpers builds the runtime package with -gcflags=-m and

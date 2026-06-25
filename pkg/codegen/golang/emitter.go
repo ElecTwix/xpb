@@ -73,13 +73,14 @@ func (g *Generator) valueOptional(field *ast.Field) bool {
 	return true
 }
 
-// bytesReadCall returns the decoder expression for reading a bytes field,
-// honoring the ZeroCopyBytes option.
+// bytesReadCall returns the stateless cursor expression for reading a bytes
+// field, honoring the ZeroCopyBytes option. The expression yields
+// `(value, newPos, error)` and takes (data, pos) as the cursor.
 func (g *Generator) bytesReadCall() string {
 	if g.opts.ZeroCopyBytes {
-		return "dec.ReadBytesUnsafe()"
+		return "xpb.ReadBytesUnsafeAt(data, pos)"
 	}
-	return "dec.ReadBytes()"
+	return "xpb.ReadBytesAt(data, pos)"
 }
 
 func (g *Generator) generate(file *ast.File) ([]byte, error) {
@@ -193,11 +194,18 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	g.printf("func (m *%s) unmarshalAt(data []byte, depth int) error {\n", name)
 	g.printf("\tif depth > xpb.MaxDecodeDepth { return xpb.ErrMaxDepthExceeded }\n")
 	if len(msg.Fields) == 0 {
-		// A message with no fields decodes nothing; emitting a decoder would
-		// leave `dec` (and `data`) unused, which Go rejects at compile time.
+		// A message with no fields decodes nothing; declaring a cursor would
+		// leave `pos` (and `data`) unused, which Go rejects at compile time.
 		g.printf("\t_ = data\n")
 	} else {
-		g.printf("\tdec := xpb.NewDecoder(data)\n")
+		// Decode threads a register-local int cursor (`pos`) through the
+		// stateless xpb.*At helpers instead of carrying it in a Decoder struct
+		// field. Centralized bounds/compact-length/array-count logic stays in
+		// the runtime helpers; the generated body just advances the cursor. The
+		// function-scoped `pos`/`err` are reassigned (=) inside the per-field
+		// blocks so the cursor is shared across fields rather than shadowed.
+		g.printf("\tpos := 0\n")
+		g.printf("\tvar err error\n")
 		for _, field := range msg.Fields {
 			g.generateFieldDecode(field)
 		}
@@ -323,41 +331,50 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 
 	// Optional fields: read the 1-byte presence flag first. On false, leave
 	// the (nil) pointer as-is and consume nothing more, so the next field
-	// decodes correctly. On true, read the value and store its address.
+	// decodes correctly. On true, read the value and store its address. The
+	// cursor (pos) and err are the function-scoped variables, reassigned with
+	// = so the cursor advances across fields.
 	if field.Optional {
 		g.printf("\t{\n")
-		g.printf("\t\tpresent, err := dec.ReadBool()\n")
+		g.printf("\t\tvar present bool\n")
+		g.printf("\t\tpresent, pos, err = xpb.ReadBoolAt(data, pos)\n")
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tif present {\n")
 		if field.Type.Kind == ast.TypeMessage && !isEnum {
 			// Nested message optional: *T. A present message is always a
 			// non-empty envelope (it carries at least its own fields, or a
 			// 0-length envelope which we still materialize since presence
-			// said so).
-			g.printf("\t\t\tdata, err := dec.ReadMessageBytes()\n")
+			// said so). Read the length-prefixed envelope via the cursor,
+			// then recurse with depth+1.
+			g.printf("\t\t\tvar mb []byte\n")
+			g.printf("\t\t\tmb, pos, err = xpb.ReadMessageBytesAt(data, pos)\n")
 			g.printf("\t\t\tif err != nil { return err }\n")
 			g.printf("\t\t\tm.%s = &%s{}\n", fieldName, field.Type.Message)
-			g.printf("\t\t\tif err := m.%s.unmarshalAt(data, depth+1); err != nil { return err }\n", fieldName)
+			g.printf("\t\t\tif err := m.%s.unmarshalAt(mb, depth+1); err != nil { return err }\n", fieldName)
 		} else if g.valueOptional(field) {
 			// Value style: store the decoded value and flip the Has<Field>
 			// bool. No pointer is taken, so no per-field boxing allocation.
 			if isEnum {
-				g.printf("\t\t\tv, err := dec.ReadInt32()\n")
+				g.printf("\t\t\tvar v int32\n")
+				g.printf("\t\t\tv, pos, err = xpb.ReadInt32At(data, pos)\n")
 				g.printf("\t\t\tif err != nil { return err }\n")
 				g.printf("\t\t\tm.%s = %s(v)\n", fieldName, field.Type.Message)
 			} else {
-				g.printf("\t\t\tv, err := %s\n", g.scalarReadCall(field.Type))
+				g.printf("\t\t\tvar v %s\n", g.goBaseTypeName(field.Type))
+				g.printf("\t\t\tv, pos, err = %s\n", g.scalarReadCall(field.Type))
 				g.printf("\t\t\tif err != nil { return err }\n")
 				g.printf("\t\t\tm.%s = v\n", fieldName)
 			}
 			g.printf("\t\t\tm.Has%s = true\n", fieldName)
 		} else if isEnum {
-			g.printf("\t\t\tv, err := dec.ReadInt32()\n")
+			g.printf("\t\t\tvar v int32\n")
+			g.printf("\t\t\tv, pos, err = xpb.ReadInt32At(data, pos)\n")
 			g.printf("\t\t\tif err != nil { return err }\n")
 			g.printf("\t\t\tev := %s(v)\n", field.Type.Message)
 			g.printf("\t\t\tm.%s = &ev\n", fieldName)
 		} else {
-			g.printf("\t\t\tv, err := %s\n", g.scalarReadCall(field.Type))
+			g.printf("\t\t\tvar v %s\n", g.goBaseTypeName(field.Type))
+			g.printf("\t\t\tv, pos, err = %s\n", g.scalarReadCall(field.Type))
 			g.printf("\t\t\tif err != nil { return err }\n")
 			g.printf("\t\t\tm.%s = &v\n", fieldName)
 		}
@@ -370,12 +387,14 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	if field.Repeated {
 		elemMin := minWireBytes(field.Type, isEnum)
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadArrayCount(%d, %d)\n", elemMin, common.DefaultMaxElements)
+		g.printf("\t\tvar count int32\n")
+		g.printf("\t\tcount, pos, err = xpb.ReadArrayCountAt(data, pos, %d, %d)\n", elemMin, common.DefaultMaxElements)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s, count)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
 		if isEnum {
-			g.printf("\t\t\tv, err := dec.ReadInt32()\n")
+			g.printf("\t\t\tvar v int32\n")
+			g.printf("\t\t\tv, pos, err = xpb.ReadInt32At(data, pos)\n")
 			g.printf("\t\t\tif err != nil { return err }\n")
 			g.printf("\t\t\tm.%s[i] = %s(v)\n", fieldName, field.Type.Message)
 		} else {
@@ -391,14 +410,16 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 		keyMin := minWireBytes(*field.Type.KeyType, false)
 		valMin := minWireBytes(*field.Type.ValType, g.isEnumType(*field.Type.ValType))
 		g.printf("\t{\n")
-		g.printf("\t\tcount, err := dec.ReadArrayCount(%d, %d)\n", keyMin+valMin, common.DefaultMaxElements)
+		g.printf("\t\tvar count int32\n")
+		g.printf("\t\tcount, pos, err = xpb.ReadArrayCountAt(data, pos, %d, %d)\n", keyMin+valMin, common.DefaultMaxElements)
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = make(%s)\n", fieldName, g.goTypeName(field))
 		g.printf("\t\tfor i := int32(0); i < count; i++ {\n")
 		g.printf("\t\t\tvar mk %s\n", g.goBaseTypeName(*field.Type.KeyType))
 		g.printf("\t\t\tvar mv %s\n", g.goBaseTypeName(*field.Type.ValType))
-		// Each decode is wrapped in its own block so the temporary `v, err`
-		// declarations do not collide between key and value reads.
+		// Each decode is wrapped in its own block so the temporary `v`
+		// declarations do not collide between key and value reads; pos/err
+		// thread through the function-scoped cursor.
 		g.printf("\t\t\t{\n")
 		g.generateScalarDecodeInto("mk", *field.Type.KeyType, "\t\t\t\t", false)
 		g.printf("\t\t\t}\n")
@@ -414,7 +435,8 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	// Handle enum field
 	if isEnum {
 		g.printf("\t{\n")
-		g.printf("\t\tv, err := dec.ReadInt32()\n")
+		g.printf("\t\tvar v int32\n")
+		g.printf("\t\tv, pos, err = xpb.ReadInt32At(data, pos)\n")
 		g.printf("\t\tif err != nil { return err }\n")
 		g.printf("\t\tm.%s = %s(v)\n", fieldName, field.Type.Message)
 		g.printf("\t}\n")
@@ -427,80 +449,50 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	g.printf("\t}\n")
 }
 
-// scalarReadCall returns the decoder read expression (which yields `(value,
-// error)`) for a scalar/string/bytes type. Used by the optional decode path,
-// which reads into a fresh local before taking its address. Not valid for
-// message/map/enum types.
+// scalarReadCall returns the stateless cursor read expression (which yields
+// `(value, newPos, error)` and takes (data, pos)) for a scalar/string/bytes
+// type. Used by the optional decode path, which reads into a fresh local
+// before taking its address. Not valid for message/map/enum types.
 func (g *Generator) scalarReadCall(t ast.FieldType) string {
 	switch t.Kind {
 	case ast.TypeBool:
-		return "dec.ReadBool()"
+		return "xpb.ReadBoolAt(data, pos)"
 	case ast.TypeInt32:
-		return "dec.ReadInt32()"
+		return "xpb.ReadInt32At(data, pos)"
 	case ast.TypeInt64:
-		return "dec.ReadInt64()"
+		return "xpb.ReadInt64At(data, pos)"
 	case ast.TypeUint32:
-		return "dec.ReadUint32()"
+		return "xpb.ReadUint32At(data, pos)"
 	case ast.TypeUint64:
-		return "dec.ReadUint64()"
+		return "xpb.ReadUint64At(data, pos)"
 	case ast.TypeFloat32:
-		return "dec.ReadFloat32()"
+		return "xpb.ReadFloat32At(data, pos)"
 	case ast.TypeFloat64:
-		return "dec.ReadFloat64()"
+		return "xpb.ReadFloat64At(data, pos)"
 	case ast.TypeString:
-		return "dec.ReadString()"
+		return "xpb.ReadStringAt(data, pos)"
 	case ast.TypeBytes:
 		return g.bytesReadCall()
 	}
 	return g.bytesReadCall()
 }
 
+// generateScalarDecodeInto emits a cursor-threaded read of a scalar/string/
+// bytes/enum/message into varName. The cursor (pos) and err are the
+// function-scoped variables, advanced with =; the decoded value goes through a
+// fresh block-local `v` (each call site is wrapped in its own block, or is a
+// fresh loop-body scope, so `v` never collides). The nested-message case reads
+// the length-prefixed envelope via the cursor and recurses with depth+1.
 func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, indent string, isEnum bool) {
 	if isEnum {
-		g.printf("%sv, err := dec.ReadInt32()\n", indent)
+		g.printf("%svar v int32\n", indent)
+		g.printf("%sv, pos, err = xpb.ReadInt32At(data, pos)\n", indent)
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = %s(v)\n", indent, varName, t.Message)
 		return
 	}
 
-	switch t.Kind {
-	case ast.TypeBool:
-		g.printf("%sv, err := dec.ReadBool()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeInt32:
-		g.printf("%sv, err := dec.ReadInt32()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeInt64:
-		g.printf("%sv, err := dec.ReadInt64()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeUint32:
-		g.printf("%sv, err := dec.ReadUint32()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeUint64:
-		g.printf("%sv, err := dec.ReadUint64()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeFloat32:
-		g.printf("%sv, err := dec.ReadFloat32()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeFloat64:
-		g.printf("%sv, err := dec.ReadFloat64()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeString:
-		g.printf("%sv, err := dec.ReadString()\n", indent)
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeBytes:
-		g.printf("%sv, err := %s\n", indent, g.bytesReadCall())
-		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%s%s = v\n", indent, varName)
-	case ast.TypeMessage:
+	if t.Kind == ast.TypeMessage {
 		// A nil/absent nested message encoded as a 0-length envelope must
 		// decode back to a nil pointer rather than crashing. Skip the
 		// allocation + recursive unmarshalAt when the length prefix is
@@ -508,14 +500,21 @@ func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, in
 		// nested type's first ReadString/ReadBytes inside an empty
 		// buffer. Leaves the destination nil, which is symmetric with
 		// what a caller of the encode side would produce when the field
-		// is nil.
-		g.printf("%sdata, err := dec.ReadMessageBytes()\n", indent)
+		// is nil. mb aliases the envelope body via the cursor read.
+		g.printf("%svar mb []byte\n", indent)
+		g.printf("%smb, pos, err = xpb.ReadMessageBytesAt(data, pos)\n", indent)
 		g.printf("%sif err != nil { return err }\n", indent)
-		g.printf("%sif len(data) > 0 {\n", indent)
+		g.printf("%sif len(mb) > 0 {\n", indent)
 		g.printf("%s\t%s = &%s{}\n", indent, varName, t.Message)
-		g.printf("%s\tif err := %s.unmarshalAt(data, depth+1); err != nil { return err }\n", indent, varName)
+		g.printf("%s\tif err := %s.unmarshalAt(mb, depth+1); err != nil { return err }\n", indent, varName)
 		g.printf("%s}\n", indent)
+		return
 	}
+
+	g.printf("%svar v %s\n", indent, g.goBaseTypeName(t))
+	g.printf("%sv, pos, err = %s\n", indent, g.scalarReadCall(t))
+	g.printf("%sif err != nil { return err }\n", indent)
+	g.printf("%s%s = v\n", indent, varName)
 }
 
 func (g *Generator) goTypeName(field *ast.Field) string {

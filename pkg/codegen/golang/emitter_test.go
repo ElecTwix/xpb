@@ -43,6 +43,23 @@ func TestGenerate_SimpleMessage(t *testing.T) {
 	if !contains(output, "func (m *User) Unmarshal") {
 		t.Error("Output should contain Unmarshal method")
 	}
+
+	// Decode (Phase 1) threads a register-local int cursor (`pos`) through the
+	// stateless xpb.*At helpers instead of constructing a stateful Decoder.
+	// This is the core of the local-cursor decode rewrite: no `dec :=
+	// xpb.NewDecoder(data)`, a `pos := 0` local, and *At reads.
+	if contains(output, "xpb.NewDecoder(") {
+		t.Error("local-cursor decode must not construct a stateful Decoder (xpb.NewDecoder)")
+	}
+	if !contains(output, "pos := 0") {
+		t.Errorf("decode should declare a local cursor `pos := 0`, got:\n%s", output)
+	}
+	if !contains(output, "xpb.ReadStringAt(data, pos)") {
+		t.Error("string decode should use the stateless xpb.ReadStringAt(data, pos) helper")
+	}
+	if !contains(output, "xpb.ReadInt32At(data, pos)") {
+		t.Error("int32 decode should use the stateless xpb.ReadInt32At(data, pos) helper")
+	}
 }
 
 func TestGenerate_WithEnum(t *testing.T) {
@@ -299,12 +316,17 @@ func TestGenerate_NestedMessage(t *testing.T) {
 		t.Error("Output should contain 'Addr *Address' field type")
 	}
 
-	// Nested-message decode must guard the recursive unmarshalAt on
-	// `len(data) > 0`. Without the guard, a 0-length envelope (which a
-	// caller of the encode side produces when the field is nil) triggers
-	// `unexpected EOF` at the nested type's first ReadString / ReadBytes.
-	if !contains(output, "if len(data) > 0 {") {
-		t.Error("Output should guard nested unmarshalAt on len(data) > 0 to round-trip nil pointers")
+	// Nested-message decode must guard the recursive unmarshalAt on the
+	// envelope body length (`len(mb) > 0`). Without the guard, a 0-length
+	// envelope (which a caller of the encode side produces when the field is
+	// nil) triggers `unexpected EOF` at the nested type's first ReadString /
+	// ReadBytes. The local-cursor decode reads the envelope into `mb` via
+	// xpb.ReadMessageBytesAt and recurses with depth+1.
+	if !contains(output, "if len(mb) > 0 {") {
+		t.Error("Output should guard nested unmarshalAt on len(mb) > 0 to round-trip nil pointers")
+	}
+	if !contains(output, "xpb.ReadMessageBytesAt(data, pos)") {
+		t.Error("Output should read the nested-message envelope via xpb.ReadMessageBytesAt(data, pos)")
 	}
 
 	// Nested-message encode must nil-guard MarshalTo. Without the guard,

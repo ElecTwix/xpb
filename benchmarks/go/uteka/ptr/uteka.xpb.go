@@ -87,28 +87,33 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 	if depth > xpb.MaxDecodeDepth {
 		return xpb.ErrMaxDepthExceeded
 	}
-	dec := xpb.NewDecoder(data)
+	pos := 0
+	var err error
 	{
-		v, err := dec.ReadInt32()
+		var v int32
+		v, pos, err = xpb.ReadInt32At(data, pos)
 		if err != nil {
 			return err
 		}
 		m.Type = v
 	}
 	{
-		v, err := dec.ReadString()
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
 		m.Id = v
 	}
 	{
-		present, err := dec.ReadBool()
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
 		if err != nil {
 			return err
 		}
 		if present {
-			v, err := dec.ReadString()
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
@@ -116,12 +121,14 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 		}
 	}
 	{
-		present, err := dec.ReadBool()
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
 		if err != nil {
 			return err
 		}
 		if present {
-			v, err := dec.ReadBytes()
+			var v []byte
+			v, pos, err = xpb.ReadBytesAt(data, pos)
 			if err != nil {
 				return err
 			}
@@ -129,19 +136,22 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 		}
 	}
 	{
-		v, err := dec.ReadInt64()
+		var v int64
+		v, pos, err = xpb.ReadInt64At(data, pos)
 		if err != nil {
 			return err
 		}
 		m.Timestamp = v
 	}
 	{
-		present, err := dec.ReadBool()
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
 		if err != nil {
 			return err
 		}
 		if present {
-			v, err := dec.ReadString()
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
@@ -149,12 +159,14 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 		}
 	}
 	{
-		present, err := dec.ReadBool()
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
 		if err != nil {
 			return err
 		}
 		if present {
-			v, err := dec.ReadString()
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
@@ -162,26 +174,30 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 		}
 	}
 	{
-		v, err := dec.ReadInt64()
+		var v int64
+		v, pos, err = xpb.ReadInt64At(data, pos)
 		if err != nil {
 			return err
 		}
 		m.Seq = v
 	}
 	{
-		v, err := dec.ReadInt32()
+		var v int32
+		v, pos, err = xpb.ReadInt32At(data, pos)
 		if err != nil {
 			return err
 		}
 		m.Flags = v
 	}
 	{
-		present, err := dec.ReadBool()
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
 		if err != nil {
 			return err
 		}
 		if present {
-			v, err := dec.ReadString()
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}

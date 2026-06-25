@@ -5,8 +5,27 @@ versioning; while pre-1.0, breaking changes bump the minor version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Generated Go decode now threads a register-local cursor** instead of the
+  stateful `Decoder.pos` struct field. The `unmarshalAt` body declares a local
+  `pos int` and advances it through new stateless `xpb.*At` runtime helpers
+  (`ReadInt32At`, `ReadStringAt`, `ReadBytesAt`/`ReadBytesUnsafeAt`,
+  `ReadArrayCountAt`, etc.) rather than constructing `xpb.NewDecoder` and
+  calling per-field methods that reload/store `pos` and `len(buf)` through
+  memory. This is a generated-code performance improvement only: the wire
+  format is byte-identical, decode stays 0 allocations, and the stateful
+  `Decoder` API is unchanged for streaming/manual callers.
+
 ### Added
 
+- Stateless cursor read helpers in `runtime/go/xpb` (`ReadBoolAt`,
+  `ReadInt32At`, `ReadInt64At`, `ReadUint32At`, `ReadUint64At`,
+  `ReadFloat32At`, `ReadFloat64At`, `ReadStringAt`, `ReadBytesAt`,
+  `ReadBytesUnsafeAt`, `ReadMessageBytesAt`, `ReadArrayCountAt`): the
+  register-local-cursor counterparts of the `Decoder.Read*` methods, with
+  identical bounds, compact-length (`0xFF`), negative-length, and array-count
+  validation. Added alongside the unchanged stateful `Decoder` API.
 - `--go-optional-style=value` flag on `xpbc` (and `golang.Options.OptionalStyle`):
   generates optional scalar/string/bytes/enum fields as a value field plus a
   `Has<Field>` bool instead of `*T`. Eliminates the per-present-field
