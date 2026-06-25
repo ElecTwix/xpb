@@ -1,0 +1,42 @@
+benchmarks/go/matrix/strptr/strptr.xpb
+  s_5551c6b8158c1a::t_4f7312fe964001 1-13
+benchmarks/go/matrix/optval/optval.xpb
+  s_5551c6b8158c1a::t_67f8023735584a 1-16
+benchmarks/go/matrix/optptr/optptr.xpb
+  s_5551c6b8158c1a::t_abd7a588ec70ee 1-17
+benchmarks/go/matrix/arr/arr.xpb
+  s_5551c6b8158c1a::t_6c46c4dd99aff2 1-11
+benchmarks/go/matrix/strval/strval.xpb
+  s_5551c6b8158c1a::t_21f48162a268fe 1-11
+benchmarks/go/matrix/matrix_test.go
+  s_5551c6b8158c1a::t_c0dcd931f6f8a8 326-331
+  s_5551c6b8158c1a::t_ac300ab1c29b57 191,201,214,226,235,245,257,266,280,288,296
+  s_5551c6b8158c1a::t_8297ed9b38ada3 178,180
+  s_5551c6b8158c1a::t_194276d784eb81 1-177,179,181-190,192-200,202-213,215-225,227-234,236-244,246-256,258-265,267-279,281-287,289-295,297-325,332-336
+benchmarks/go/matrix/scalar/scalar.xpb
+  s_5551c6b8158c1a::t_fd52df868b1746 1-18
+benchmarks/go/matrix/micro_test.go
+  s_5551c6b8158c1a::t_169525deac171d 1-66
+benchmarks/go/matrix/nest/nest.xpb
+  s_5551c6b8158c1a::t_2415bdd5bd3794 1-31
+benchmarks/go/matrix/mapd/mapd.xpb
+  s_5551c6b8158c1a::t_828b42abfe9c93 1-9
+benchmarks/go/matrix/gate_test.go
+  s_5551c6b8158c1a::t_db0bbee900a8d5 1-124,129-163,165-433
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "ad85894e3358b404016d86017ed23ea190784c52",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
