@@ -1,0 +1,11 @@
+package arr
+
+// Arrays is the ARRAY/REPEATED-HEAVY shape. Ints exercises a repeated
+// fixed-width element (per-element AppendInt32To / ReadInt32At) and Strs
+// exercises a repeated variable-length element (AppendStringTo / ReadStringAt).
+// Decode allocates exactly the two backing slices (no per-element boxing,
+// strings alias the input).
+message Arrays {
+    1: []int32 Ints
+    2: []string Strs
+}

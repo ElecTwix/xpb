@@ -1,0 +1,17 @@
+package optptr
+
+// Optional is the OPTIONAL-HEAVY shape, PTR variant
+// (--go-optional-style=pointer). Fields are identical to the val variant; here
+// each optional is represented as *T, so decoding a present optional heap-boxes
+// one value per present field. This is the 0.4.x-equivalent representation kept
+// for comparison against the val (value + Has) default.
+message Optional {
+    1: ?int32 A
+    2: ?int64 B
+    3: ?string C
+    4: ?bool D
+    5: ?float64 E
+    6: ?uint32 F
+    7: ?string G
+    8: ?int32 H
+}

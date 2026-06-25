@@ -1,0 +1,9 @@
+package mapd
+
+// Maps is the MAP-HEAVY shape. Map fields encode in Go map-iteration order, so
+// the wire bytes are NOT canonical/byte-stable (see CLAUDE.md / T-7); decode is
+// order-insensitive. Tests therefore compare decoded VALUES, never bytes.
+message Maps {
+    1: map<string, int32> M1
+    2: map<int32, string> M2
+}
