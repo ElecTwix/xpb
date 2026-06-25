@@ -1,0 +1,50 @@
+runtime/ts/package.json
+  s_5551c6b8158c1a::t_bde5ef9989fe82 3
+cmd/xpbc/main.go
+  s_5551c6b8158c1a::t_5f5e1460f28f46 48-50
+  s_5551c6b8158c1a::t_c018bd7b799743 27-28
+  s_5551c6b8158c1a::t_b716fad20d093c 97
+tests/integration/go_codegen_test.go
+  s_5551c6b8158c1a::t_82a7ecaf798d10 760-762,764-770,779-781
+  s_5551c6b8158c1a::t_725e94fe054225 878-882
+  s_5551c6b8158c1a::t_cafa949751a97b 623-693
+  s_5551c6b8158c1a::t_3304decb855863 513-518,521-524,534-536,538
+  s_5551c6b8158c1a::t_0307d19a1bbeec 118-120
+  s_5551c6b8158c1a::t_d9d9f57654c823 703,705-706
+benchmarks/go/uteka/aliasing_test.go
+  s_5551c6b8158c1a::t_fb2adbf5ead76b 11-13,15,20-22
+  s_5551c6b8158c1a::t_d075da20a9b6ed 71-73,79-82
+  s_5551c6b8158c1a::t_c6ae08ea082ea8 45-48
+  s_5551c6b8158c1a::t_da0185d9abf68d 105,107
+pkg/codegen/golang/emitter.go
+  s_5551c6b8158c1a::t_190699a7a9297a 90
+  s_5551c6b8158c1a::t_e976ced9262535 100-103,105
+  s_5551c6b8158c1a::t_132a89338e8735 727-731
+  s_5551c6b8158c1a::t_efc8a54f03400c 17-21,23-25,30-39,42-45,47-58,60-61
+runtime/rust/Cargo.toml
+  s_5551c6b8158c1a::t_d4d45a610fa78e 3
+benchmarks/go/uteka/uteka_test.go
+  s_5551c6b8158c1a::t_78b7b24c0be22d 5-9
+CHANGELOG.md
+  s_5551c6b8158c1a::t_22422da9ab8006 130-138
+tests/integration/security_audit_test.go
+  s_5551c6b8158c1a::t_59a6138bd7cef4 1126-1129
+pkg/codegen/golang/emitter_test.go
+  s_5551c6b8158c1a::t_7a037e66fcfdad 679-683,689-690,692-712,716-717,755-759,764-772,776-780,782-786,788-789
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "71fecfdf79cf4aabf47094ad049698dc64921765",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
