@@ -1,0 +1,13 @@
+package strptr
+
+// StrBytes is the STRING/BYTES-HEAVY shape, PTR variant
+// (--go-optional-style=pointer --go-safe-bytes). The fields are identical to the
+// val variant; the relevant difference is --go-safe-bytes, which decodes bytes
+// by COPYING (ReadBytesAt) so the decoded []byte owns its memory instead of
+// aliasing the input buffer.
+message StrBytes {
+    1: string S1
+    2: bytes B1
+    3: string S2
+    4: bytes B2
+}

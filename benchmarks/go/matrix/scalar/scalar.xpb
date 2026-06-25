@@ -1,0 +1,18 @@
+package scalar
+
+// Scalar is the ALL-SCALAR shape: a maximal run of consecutive non-optional,
+// fixed-width fields. Codegen coalesces the whole struct into ONE ExtendRun /
+// EnsureRunAt window (one bounds-check on decode, one grow on encode), so this
+// shape exercises the coalesced fixed-width run path end to end.
+message Scalar {
+    1: int32 A
+    2: int64 B
+    3: uint32 C
+    4: uint64 D
+    5: float32 E
+    6: float64 F
+    7: bool G
+    8: int32 H
+    9: int64 I
+    10: bool J
+}

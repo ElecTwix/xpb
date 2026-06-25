@@ -1,0 +1,31 @@
+package nest
+
+// nest is the DEEPLY-NESTED shape: a five-level chain of nested messages
+// (Level1 -> Level2 -> ... -> Level5). Each nested message field is *T, so
+// decoding the chain allocates exactly one pointer per level below the root.
+// Referenced messages must be declared before their referent.
+
+message Level5 {
+    1: int32 V
+    2: string S
+}
+
+message Level4 {
+    1: int32 V
+    2: Level5 Child
+}
+
+message Level3 {
+    1: int32 V
+    2: Level4 Child
+}
+
+message Level2 {
+    1: int32 V
+    2: Level3 Child
+}
+
+message Level1 {
+    1: int32 V
+    2: Level2 Child
+}
