@@ -2,12 +2,10 @@
 package myapp
 
 import (
-	"github.com/ElecTwix/xpb/pkg/wire"
 	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 var _ = xpb.NewEncoder
-var _ = wire.WireVarint
 
 // User is a generated XPB message.
 type User struct {
@@ -16,251 +14,274 @@ type User struct {
 	Active bool
 }
 
-// Marshal encodes the message to XPB binary format.
 func (m *User) Marshal() ([]byte, error) {
 	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, m.Name)
-	enc.WriteInt32(2, m.Age)
-	enc.WriteBool(3, m.Active)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 5)
+	buf = xpb.AppendStringTo(buf, m.Name)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 5)
+		xpb.PutInt32At(buf, runOff+0, m.Age)
+		xpb.PutBoolAt(buf, runOff+4, m.Active)
+	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
-// MarshalTo encodes the message to the given encoder.
 func (m *User) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.Name)
-	enc.WriteInt32(2, m.Age)
-	enc.WriteBool(3, m.Active)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 5)
+	buf = xpb.AppendStringTo(buf, m.Name)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 5)
+		xpb.PutInt32At(buf, runOff+0, m.Age)
+		xpb.PutBoolAt(buf, runOff+4, m.Active)
+	}
+	enc.SetBuf(buf)
 }
 
-// Unmarshal decodes XPB binary format into the message.
 func (m *User) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *User) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Name = v
-		case 2:
-			v, err := dec.ReadInt32()
-			if err != nil {
-				return err
-			}
-			m.Age = v
-		case 3:
-			v, err := dec.ReadBool()
-			if err != nil {
-				return err
-			}
-			m.Active = v
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
+		m.Name = v
+	}
+	{
+		runEnd, rerr := xpb.EnsureRunAt(data, pos, 5)
+		if rerr != nil {
+			return rerr
 		}
+		m.Age = xpb.RunInt32At(data, pos+0)
+		m.Active = xpb.RunBoolAt(data, pos+4)
+		pos = runEnd
 	}
 	return nil
-}
-
-// Size returns the encoded size of the message.
-func (m *User) Size() int {
-	enc := xpb.NewEncoder(64)
-	enc.WriteString(1, m.Name)
-	enc.WriteInt32(2, m.Age)
-	enc.WriteBool(3, m.Active)
-	return enc.Len()
 }
 
 // Address is a generated XPB message.
 type Address struct {
 	City       string
 	Country    string
-	PostalCode string
+	PostalCode *string
 }
 
-// Marshal encodes the message to XPB binary format.
 func (m *Address) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(102)
-	enc.WriteString(1, m.City)
-	enc.WriteString(2, m.Country)
-	if m.PostalCode != "" {
-		enc.WriteString(3, m.PostalCode)
+	enc := xpb.NewEncoder(96)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 1)
+	buf = xpb.AppendStringTo(buf, m.City)
+	buf = xpb.AppendStringTo(buf, m.Country)
+	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
+	if m.PostalCode != nil {
+		buf = xpb.AppendStringTo(buf, *m.PostalCode)
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
-// MarshalTo encodes the message to the given encoder.
 func (m *Address) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.City)
-	enc.WriteString(2, m.Country)
-	if m.PostalCode != "" {
-		enc.WriteString(3, m.PostalCode)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 1)
+	buf = xpb.AppendStringTo(buf, m.City)
+	buf = xpb.AppendStringTo(buf, m.Country)
+	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
+	if m.PostalCode != nil {
+		buf = xpb.AppendStringTo(buf, *m.PostalCode)
 	}
+	enc.SetBuf(buf)
 }
 
-// Unmarshal decodes XPB binary format into the message.
 func (m *Address) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *Address) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
+		m.City = v
+	}
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
+		if err != nil {
+			return err
+		}
+		m.Country = v
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
-			m.City = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Country = v
-		case 3:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.PostalCode = v
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
+			m.PostalCode = &v
 		}
 	}
 	return nil
-}
-
-// Size returns the encoded size of the message.
-func (m *Address) Size() int {
-	enc := xpb.NewEncoder(102)
-	enc.WriteString(1, m.City)
-	enc.WriteString(2, m.Country)
-	if m.PostalCode != "" {
-		enc.WriteString(3, m.PostalCode)
-	}
-	return enc.Len()
 }
 
 // Profile is a generated XPB message.
 type Profile struct {
 	Bio       string
-	AvatarUrl string
+	AvatarUrl *string
 	User      *User
 	Address   *Address
 }
 
-// Marshal encodes the message to XPB binary format.
 func (m *Profile) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(200)
-	enc.WriteString(1, m.Bio)
-	if m.AvatarUrl != "" {
-		enc.WriteString(2, m.AvatarUrl)
+	enc := xpb.NewEncoder(192)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 2)
+	buf = xpb.AppendStringTo(buf, m.Bio)
+	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
+	if m.AvatarUrl != nil {
+		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
 	}
-	// Nested message encoding
-	nestedEnc := xpb.NewEncoder(64)
-	m.User.MarshalTo(nestedEnc)
-	enc.WriteMessage(3, nestedEnc.Bytes())
+	{
+		nestedEnc := xpb.GetEncoder()
+		if m.User != nil {
+			m.User.MarshalTo(nestedEnc)
+		}
+		buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+		xpb.PutEncoder(nestedEnc)
+	}
+	buf = xpb.AppendBoolTo(buf, m.Address != nil)
 	if m.Address != nil {
-		// Nested message encoding
-		nestedEnc := xpb.NewEncoder(64)
-		m.Address.MarshalTo(nestedEnc)
-		enc.WriteMessage(4, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if m.Address != nil {
+				m.Address.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
-// MarshalTo encodes the message to the given encoder.
 func (m *Profile) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.Bio)
-	if m.AvatarUrl != "" {
-		enc.WriteString(2, m.AvatarUrl)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 2)
+	buf = xpb.AppendStringTo(buf, m.Bio)
+	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
+	if m.AvatarUrl != nil {
+		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
 	}
-	// Nested message encoding
-	nestedEnc := xpb.NewEncoder(64)
-	m.User.MarshalTo(nestedEnc)
-	enc.WriteMessage(3, nestedEnc.Bytes())
+	{
+		nestedEnc := xpb.GetEncoder()
+		if m.User != nil {
+			m.User.MarshalTo(nestedEnc)
+		}
+		buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+		xpb.PutEncoder(nestedEnc)
+	}
+	buf = xpb.AppendBoolTo(buf, m.Address != nil)
 	if m.Address != nil {
-		// Nested message encoding
-		nestedEnc := xpb.NewEncoder(64)
-		m.Address.MarshalTo(nestedEnc)
-		enc.WriteMessage(4, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if m.Address != nil {
+				m.Address.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
+	enc.SetBuf(buf)
 }
 
-// Unmarshal decodes XPB binary format into the message.
 func (m *Profile) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *Profile) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
+		m.Bio = v
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
-			m.Bio = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.AvatarUrl = v
-		case 3:
-			data, err := dec.ReadMessageBytes()
-			if err != nil {
-				return err
-			}
+			m.AvatarUrl = &v
+		}
+	}
+	{
+		var mb []byte
+		mb, pos, err = xpb.ReadMessageBytesAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if len(mb) > 0 {
 			m.User = &User{}
-			if err := m.User.Unmarshal(data); err != nil {
+			if err := m.User.unmarshalAt(mb, depth+1); err != nil {
 				return err
 			}
-		case 4:
-			data, err := dec.ReadMessageBytes()
+		}
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var mb []byte
+			mb, pos, err = xpb.ReadMessageBytesAt(data, pos)
 			if err != nil {
 				return err
 			}
 			m.Address = &Address{}
-			if err := m.Address.Unmarshal(data); err != nil {
-				return err
-			}
-		default:
-			if err := dec.Skip(wireType); err != nil {
+			if err := m.Address.unmarshalAt(mb, depth+1); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
-}
-
-// Size returns the encoded size of the message.
-func (m *Profile) Size() int {
-	enc := xpb.NewEncoder(200)
-	enc.WriteString(1, m.Bio)
-	if m.AvatarUrl != "" {
-		enc.WriteString(2, m.AvatarUrl)
-	}
-	// Nested message encoding
-	nestedEnc := xpb.NewEncoder(64)
-	m.User.MarshalTo(nestedEnc)
-	enc.WriteMessage(3, nestedEnc.Bytes())
-	if m.Address != nil {
-		// Nested message encoding
-		nestedEnc := xpb.NewEncoder(64)
-		m.Address.MarshalTo(nestedEnc)
-		enc.WriteMessage(4, nestedEnc.Bytes())
-	}
-	return enc.Len()
 }
