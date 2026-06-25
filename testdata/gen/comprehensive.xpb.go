@@ -34,12 +34,13 @@ func (e Status) String() string {
 
 // User is a generated XPB message.
 type User struct {
-	Name   string
-	Age    int32
-	Active bool
-	Email  *string
-	Tags   []string
-	Status Status
+	Name     string
+	Age      int32
+	Active   bool
+	Email    string
+	HasEmail bool
+	Tags     []string
+	Status   Status
 }
 
 func (m *User) Marshal() ([]byte, error) {
@@ -53,9 +54,9 @@ func (m *User) Marshal() ([]byte, error) {
 		xpb.PutInt32At(buf, runOff+0, m.Age)
 		xpb.PutBoolAt(buf, runOff+4, m.Active)
 	}
-	buf = xpb.AppendBoolTo(buf, m.Email != nil)
-	if m.Email != nil {
-		buf = xpb.AppendStringTo(buf, *m.Email)
+	buf = xpb.AppendBoolTo(buf, m.HasEmail)
+	if m.HasEmail {
+		buf = xpb.AppendStringTo(buf, m.Email)
 	}
 	buf = xpb.AppendInt32To(buf, int32(len(m.Tags)))
 	for _, v := range m.Tags {
@@ -76,9 +77,9 @@ func (m *User) MarshalTo(enc *xpb.Encoder) {
 		xpb.PutInt32At(buf, runOff+0, m.Age)
 		xpb.PutBoolAt(buf, runOff+4, m.Active)
 	}
-	buf = xpb.AppendBoolTo(buf, m.Email != nil)
-	if m.Email != nil {
-		buf = xpb.AppendStringTo(buf, *m.Email)
+	buf = xpb.AppendBoolTo(buf, m.HasEmail)
+	if m.HasEmail {
+		buf = xpb.AppendStringTo(buf, m.Email)
 	}
 	buf = xpb.AppendInt32To(buf, int32(len(m.Tags)))
 	for _, v := range m.Tags {
@@ -127,7 +128,8 @@ func (m *User) unmarshalAt(data []byte, depth int) error {
 			if err != nil {
 				return err
 			}
-			m.Email = &v
+			m.Email = v
+			m.HasEmail = true
 		}
 	}
 	{
@@ -159,9 +161,10 @@ func (m *User) unmarshalAt(data []byte, depth int) error {
 
 // Address is a generated XPB message.
 type Address struct {
-	City       string
-	Country    string
-	PostalCode *string
+	City          string
+	Country       string
+	PostalCode    string
+	HasPostalCode bool
 }
 
 func (m *Address) Marshal() ([]byte, error) {
@@ -170,9 +173,9 @@ func (m *Address) Marshal() ([]byte, error) {
 	buf = xpb.GrowBuf(buf, 1)
 	buf = xpb.AppendStringTo(buf, m.City)
 	buf = xpb.AppendStringTo(buf, m.Country)
-	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
-	if m.PostalCode != nil {
-		buf = xpb.AppendStringTo(buf, *m.PostalCode)
+	buf = xpb.AppendBoolTo(buf, m.HasPostalCode)
+	if m.HasPostalCode {
+		buf = xpb.AppendStringTo(buf, m.PostalCode)
 	}
 	enc.SetBuf(buf)
 	return enc.Bytes(), nil
@@ -183,9 +186,9 @@ func (m *Address) MarshalTo(enc *xpb.Encoder) {
 	buf = xpb.GrowBuf(buf, 1)
 	buf = xpb.AppendStringTo(buf, m.City)
 	buf = xpb.AppendStringTo(buf, m.Country)
-	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
-	if m.PostalCode != nil {
-		buf = xpb.AppendStringTo(buf, *m.PostalCode)
+	buf = xpb.AppendBoolTo(buf, m.HasPostalCode)
+	if m.HasPostalCode {
+		buf = xpb.AppendStringTo(buf, m.PostalCode)
 	}
 	enc.SetBuf(buf)
 }
@@ -228,7 +231,8 @@ func (m *Address) unmarshalAt(data []byte, depth int) error {
 			if err != nil {
 				return err
 			}
-			m.PostalCode = &v
+			m.PostalCode = v
+			m.HasPostalCode = true
 		}
 	}
 	return nil
@@ -236,12 +240,13 @@ func (m *Address) unmarshalAt(data []byte, depth int) error {
 
 // Profile is a generated XPB message.
 type Profile struct {
-	Bio       string
-	AvatarUrl *string
-	User      *User
-	Address   *Address
-	Scores    []int32
-	Metadata  map[string]string
+	Bio          string
+	AvatarUrl    string
+	HasAvatarUrl bool
+	User         *User
+	Address      *Address
+	Scores       []int32
+	Metadata     map[string]string
 }
 
 func (m *Profile) Marshal() ([]byte, error) {
@@ -249,9 +254,9 @@ func (m *Profile) Marshal() ([]byte, error) {
 	buf := enc.Buf()
 	buf = xpb.GrowBuf(buf, 10)
 	buf = xpb.AppendStringTo(buf, m.Bio)
-	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
-	if m.AvatarUrl != nil {
-		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
+	buf = xpb.AppendBoolTo(buf, m.HasAvatarUrl)
+	if m.HasAvatarUrl {
+		buf = xpb.AppendStringTo(buf, m.AvatarUrl)
 	}
 	{
 		nestedEnc := xpb.GetEncoder()
@@ -289,9 +294,9 @@ func (m *Profile) MarshalTo(enc *xpb.Encoder) {
 	buf := enc.Buf()
 	buf = xpb.GrowBuf(buf, 10)
 	buf = xpb.AppendStringTo(buf, m.Bio)
-	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
-	if m.AvatarUrl != nil {
-		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
+	buf = xpb.AppendBoolTo(buf, m.HasAvatarUrl)
+	if m.HasAvatarUrl {
+		buf = xpb.AppendStringTo(buf, m.AvatarUrl)
 	}
 	{
 		nestedEnc := xpb.GetEncoder()
@@ -354,7 +359,8 @@ func (m *Profile) unmarshalAt(data []byte, depth int) error {
 			if err != nil {
 				return err
 			}
-			m.AvatarUrl = &v
+			m.AvatarUrl = v
+			m.HasAvatarUrl = true
 		}
 	}
 	{

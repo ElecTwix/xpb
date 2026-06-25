@@ -24,8 +24,8 @@ func main() {
 		outDir          = flag.String("out", ".", "Output directory")
 		stdout          = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		tsRuntimeImport = flag.String("ts-runtime-import", "", "Module specifier for the xpb runtime import in generated TypeScript (default \""+typescript.DefaultRuntimeImport+"\")")
-		goOptionalStyle = flag.String("go-optional-style", golang.OptionalPointer, "Go optional-field representation: pointer (*T, default) or value (value + Has<Field> bool, fewer decode allocations)")
-		goZeroCopyBytes = flag.Bool("go-zero-copy-bytes", false, "Go: decode bytes fields by aliasing the input buffer (zero-copy) instead of copying; decoded []byte stays valid only while the source buffer is alive and unmodified")
+		goOptionalStyle = flag.String("go-optional-style", golang.OptionalValue, "Go optional-field representation: value (value + Has<Field> bool, default, fewer decode allocations) or pointer (*T, opt-out)")
+		goSafeBytes     = flag.Bool("go-safe-bytes", false, "Go: opt OUT of the zero-copy bytes default; decode bytes fields by COPYING (ReadBytes) so the decoded []byte owns its memory. Default (false) decodes bytes by aliasing the input buffer (zero-copy), valid only while the source buffer is alive and unmodified")
 		help            = flag.Bool("help", false, "Show help")
 	)
 
@@ -45,8 +45,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts --ts-runtime-import=../runtime user.xpb   Vendored TS runtime import\n")
-		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-optional-style=value user.xpb       Value optionals (fewer decode allocs)\n")
-		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-zero-copy-bytes user.xpb            Zero-copy bytes decode (aliases input)\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go user.xpb                                 Default Go: value optionals + zero-copy bytes (fast path)\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-optional-style=pointer user.xpb     Opt out to pointer (*T) optionals\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-safe-bytes user.xpb                 Opt out to copying bytes decode (decoded []byte owns its memory)\n")
 	}
 
 	flag.Parse()
@@ -93,7 +94,7 @@ func main() {
 		l = strings.TrimSpace(l)
 		switch l {
 		case "go", "golang":
-			goOpts := golang.Options{OptionalStyle: *goOptionalStyle, ZeroCopyBytes: *goZeroCopyBytes}
+			goOpts := golang.Options{OptionalStyle: *goOptionalStyle, SafeBytes: *goSafeBytes}
 			if err := generateGo(file, *outDir, baseName, *stdout, goOpts); err != nil {
 				fmt.Fprintf(os.Stderr, "Go generation error: %v\n", err)
 				os.Exit(1)

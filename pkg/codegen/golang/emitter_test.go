@@ -676,20 +676,45 @@ func valueOptFile() *ast.File {
 	}
 }
 
-func TestGenerate_DefaultOptionalIsPointer(t *testing.T) {
+// TestGenerate_DefaultOptionalIsValue proves the 0.5.0 BREAKING default flip:
+// Generate() with a zero-value Options{} now emits value-style optionals (value
+// field + Has<Field> bool), NOT *T pointers. The empty OptionalStyle resolves to
+// OptionalValue.
+func TestGenerate_DefaultOptionalIsValue(t *testing.T) {
 	src, err := Generate(valueOptFile())
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
 	output := string(src)
-	if !contains(output, "*string") {
-		t.Errorf("default style should keep pointer optional (*string), got:\n%s", output)
+	if contains(output, "*string") {
+		t.Errorf("default style (value) must not emit pointer optional (*string), got:\n%s", output)
 	}
-	if contains(output, "HasMethod") {
-		t.Error("default style must not emit a presence bool field")
+	if contains(output, "*[]byte") {
+		t.Errorf("default style (value) must not emit pointer optional (*[]byte), got:\n%s", output)
+	}
+	if !contains(output, "HasMethod") {
+		t.Errorf("default style (value) should emit a HasMethod presence bool, got:\n%s", output)
+	}
+	if !contains(output, "HasPayload") {
+		t.Error("default style (value) should emit a HasPayload presence bool")
 	}
 }
 
+// TestGenerate_DefaultBytesIsZeroCopy proves the second 0.5.0 BREAKING default:
+// Generate() with a zero-value Options{} now decodes bytes via the zero-copy
+// ReadBytesUnsafe (aliasing the input), NOT the copying ReadBytes.
+func TestGenerate_DefaultBytesIsZeroCopy(t *testing.T) {
+	src, err := Generate(valueOptFile())
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if !contains(string(src), "ReadBytesUnsafe") {
+		t.Errorf("default bytes decode should be zero-copy (ReadBytesUnsafe), got:\n%s", src)
+	}
+}
+
+// TestGenerate_ValueOptionalStyle exercises the value-style codegen in detail.
+// It is equivalent to the default now, but pins the encode/decode shape.
 func TestGenerate_ValueOptionalStyle(t *testing.T) {
 	src, err := GenerateWithOptions(valueOptFile(), Options{OptionalStyle: OptionalValue})
 	if err != nil {
@@ -727,24 +752,41 @@ func TestGenerate_ValueOptionalStyle(t *testing.T) {
 	}
 }
 
-func TestGenerate_ZeroCopyBytes(t *testing.T) {
-	src, err := GenerateWithOptions(valueOptFile(), Options{ZeroCopyBytes: true})
+// TestGenerate_PointerOptionalOptOut proves the --go-optional-style=pointer
+// opt-out still emits *T optionals (and no Has<Field> bool), preserving the
+// pre-0.5.0 representation for callers that explicitly request it.
+func TestGenerate_PointerOptionalOptOut(t *testing.T) {
+	src, err := GenerateWithOptions(valueOptFile(), Options{OptionalStyle: OptionalPointer})
 	if err != nil {
 		t.Fatalf("GenerateWithOptions failed: %v", err)
 	}
 	output := string(src)
-	if !contains(output, "ReadBytesUnsafe") {
-		t.Errorf("zero-copy should decode bytes via ReadBytesUnsafe, got:\n%s", output)
+	if !contains(output, "*string") {
+		t.Errorf("pointer opt-out should keep pointer optional (*string), got:\n%s", output)
+	}
+	if contains(output, "HasMethod") {
+		t.Error("pointer opt-out must not emit a presence bool field")
+	}
+	// Decode derefs into a fresh local then takes its address.
+	if !contains(output, "m.Method = &v") {
+		t.Errorf("pointer opt-out decode should store &v into the *T field, got:\n%s", output)
 	}
 }
 
-func TestGenerate_DefaultBytesCopies(t *testing.T) {
-	src, err := Generate(valueOptFile())
+// TestGenerate_SafeBytesOptOut proves the --go-safe-bytes opt-out switches the
+// bytes decode back to the copying ReadBytes (not the zero-copy
+// ReadBytesUnsafe), so the decoded slice owns its memory.
+func TestGenerate_SafeBytesOptOut(t *testing.T) {
+	src, err := GenerateWithOptions(valueOptFile(), Options{SafeBytes: true})
 	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+		t.Fatalf("GenerateWithOptions failed: %v", err)
 	}
-	if contains(string(src), "ReadBytesUnsafe") {
-		t.Error("default should use copying ReadBytes, not ReadBytesUnsafe")
+	output := string(src)
+	if contains(output, "ReadBytesUnsafe") {
+		t.Errorf("safe-bytes opt-out must use copying ReadBytes, not ReadBytesUnsafe, got:\n%s", output)
+	}
+	if !contains(output, "xpb.ReadBytesAt(data, pos)") {
+		t.Errorf("safe-bytes opt-out should decode bytes via the copying xpb.ReadBytesAt, got:\n%s", output)
 	}
 }
 

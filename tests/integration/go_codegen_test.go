@@ -115,8 +115,9 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
-// generateGo parses a schema and returns the generated Go source using default
-// (pointer-style, copying) options, failing on error.
+// generateGo parses a schema and returns the generated Go source using the
+// default (0.5.0: value-style optionals + zero-copy bytes) options, failing on
+// error.
 func generateGo(t *testing.T, schema string) []byte {
 	t.Helper()
 	return generateGoWith(t, schema, golang.Options{})
@@ -509,16 +510,18 @@ func TestRoundTrip(t *testing.T) {
 	goTestModule(t, dir)
 }
 
-// TestGoCodegen_OptionalField confirms a schema using the `?` optional marker
-// generates code that compiles and round-trips BOTH a present optional (value
-// preserved) and an absent optional (decodes to nil) -- and that the field
-// after an absent optional still decodes correctly, proving the 1-byte presence
-// flag is consumed and does not corrupt the following field.
+// TestGoCodegen_OptionalFieldPointerOptOut confirms the --go-optional-style=
+// pointer OPT-OUT: a schema using the `?` optional marker generates code that
+// compiles and round-trips BOTH a present optional (value preserved) and an
+// absent optional (decodes to nil) -- and that the field after an absent
+// optional still decodes correctly, proving the 1-byte presence flag is consumed
+// and does not corrupt the following field.
 //
 // Wire format: an optional field is encoded as a 1-byte presence flag (0x01 +
-// value when present, 0x00 with no value bytes when absent). The Go codegen
-// represents non-message optionals as pointers; nil == absent.
-func TestGoCodegen_OptionalField(t *testing.T) {
+// value when present, 0x00 with no value bytes when absent). Under the pointer
+// opt-out the Go codegen represents non-message optionals as pointers; nil ==
+// absent. (The 0.5.0 default is value-style; see TestGoCodegen_OptionalFieldValueDefault.)
+func TestGoCodegen_OptionalFieldPointerOptOut(t *testing.T) {
 	schema := `
 package test
 
@@ -528,10 +531,11 @@ message Profile {
     3: int32 followers
 }
 `
-	src := generateGo(t, schema)
-	// The optional scalar must be a pointer so absence is representable.
+	src := generateGoWith(t, schema, golang.Options{OptionalStyle: golang.OptionalPointer})
+	// Under the pointer opt-out the optional scalar must be a pointer so absence
+	// is representable.
 	if !strings.Contains(string(src), "AvatarUrl *string") {
-		t.Errorf("optional scalar must be a *string pointer; got:\n%s", src)
+		t.Errorf("optional scalar under pointer opt-out must be a *string pointer; got:\n%s", src)
 	}
 
 	driver := `package gen
@@ -616,7 +620,77 @@ message Pair {
     2: int32 b
 }
 `
-	src = generateGo(t, schema2)
+	src = generateGoWith(t, schema2, golang.Options{OptionalStyle: golang.OptionalPointer})
+	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
+	goTestModule(t, dir)
+}
+
+// TestGoCodegen_OptionalFieldValueDefault confirms the 0.5.0 DEFAULT (value
+// optionals): the same `?`-marked schema, generated with the zero-value
+// Options{}, emits a value field + Has<Field> bool (no *T) and round-trips both
+// present and absent optionals, with the field after an absent optional still
+// decoding correctly (presence flag consumed).
+func TestGoCodegen_OptionalFieldValueDefault(t *testing.T) {
+	schema := `
+package test
+
+message Profile {
+    1: string bio
+    2: ?string avatar_url
+    3: int32 followers
+}
+`
+	src := generateGo(t, schema)
+	// The default (value) optional must be a plain value paired with a presence bool.
+	if !strings.Contains(string(src), "HasAvatarUrl") {
+		t.Errorf("default optional must emit a HasAvatarUrl presence bool; got:\n%s", src)
+	}
+	if strings.Contains(string(src), "AvatarUrl *string") {
+		t.Errorf("default optional must not be a *string pointer; got:\n%s", src)
+	}
+
+	driver := `package gen
+
+import "testing"
+
+func TestPresentRoundTrip(t *testing.T) {
+	in := &Profile{Bio: "hi", AvatarUrl: "http://x/y.png", HasAvatarUrl: true, Followers: 9}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Bio != in.Bio || !out.HasAvatarUrl || out.AvatarUrl != in.AvatarUrl || out.Followers != in.Followers {
+		t.Fatalf("present round-trip mismatch: got %+v want %+v", out, *in)
+	}
+}
+
+func TestAbsentRoundTrip(t *testing.T) {
+	// AvatarUrl absent (HasAvatarUrl false). The presence byte must be consumed
+	// so the FOLLOWING field (Followers) still decodes correctly.
+	in := &Profile{Bio: "hi", Followers: 9}
+	data, err := in.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out Profile
+	if err := out.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.HasAvatarUrl {
+		t.Fatalf("absent optional must decode to HasAvatarUrl=false, got %q", out.AvatarUrl)
+	}
+	if out.Bio != "hi" {
+		t.Fatalf("field before optional corrupted: bio=%q", out.Bio)
+	}
+	if out.Followers != 9 {
+		t.Fatalf("field after absent optional corrupted (presence byte not consumed): followers=%d, want 9", out.Followers)
+	}
+}
+`
 	dir := buildGenModule(t, src, "roundtrip_test.go", driver)
 	goTestModule(t, dir)
 }
@@ -626,10 +700,10 @@ message Pair {
 // optional MESSAGE field (?Address address). The optional message stays *T in
 // both Go optional styles, while the optional scalars switch between *T and
 // value+Has<Field>. Address also carries a required `bytes raw` field so the
-// value+zero-copy matrix row actually emits and round-trips the zero-copy
+// value+zero-copy matrix rows actually emit and round-trip the zero-copy
 // ReadBytesUnsafe decode path (a schema with no bytes field would never
-// exercise the flag). This is the schema the value-style + zero-copy matrix
-// exercises end to end.
+// exercise it), while the safe-bytes opt-out row exercises the copying decode.
+// This is the schema the optional-style x bytes-mode matrix exercises end to end.
 const comprehensiveSchema = `
 package myapp
 
@@ -683,8 +757,17 @@ func TestGoCodegen_ComprehensiveMatrix(t *testing.T) {
 		driver string
 	}{
 		{
-			name:   "default_pointer",
+			// The default (zero-value Options{}) is now value optionals +
+			// zero-copy bytes under 0.5.0, so it drives the value-style driver.
+			name:   "default_value_zero_copy",
 			opts:   golang.Options{},
+			driver: comprehensiveValDriver,
+		},
+		{
+			// Explicit pointer + safe-bytes opt-out reproduces the pre-0.5.0
+			// default: *T optionals and a copying bytes decode.
+			name:   "pointer_safe_bytes_optout",
+			opts:   golang.Options{OptionalStyle: golang.OptionalPointer, SafeBytes: true},
 			driver: comprehensivePtrDriver,
 		},
 		{
@@ -693,8 +776,9 @@ func TestGoCodegen_ComprehensiveMatrix(t *testing.T) {
 			driver: comprehensiveValDriver,
 		},
 		{
-			name:   "value_optionals_zero_copy",
-			opts:   golang.Options{OptionalStyle: golang.OptionalValue, ZeroCopyBytes: true},
+			// Value optionals with the safe-bytes (copying) opt-out.
+			name:   "value_optionals_safe_bytes",
+			opts:   golang.Options{OptionalStyle: golang.OptionalValue, SafeBytes: true},
 			driver: comprehensiveValDriver,
 		},
 	}
@@ -791,10 +875,11 @@ func TestComprehensiveAbsentMessage(t *testing.T) {
 
 // comprehensiveValDriver round-trips Profile under the value-optional style:
 // optional scalars are value + Has<Field>, while the optional Address message
-// stays *Address. Address.Raw is a required bytes field, so under the zero-copy
-// matrix variant its decode is emitted via ReadBytesUnsafe (aliasing the input)
-// rather than ReadBytes (copy). The driver round-trips Raw to prove the
-// zero-copy bytes decode path compiles and decodes correctly with the flag set,
+// stays *Address. Address.Raw is a required bytes field, so under the default
+// (zero-copy) matrix variants its decode is emitted via ReadBytesUnsafe
+// (aliasing the input), and under the safe-bytes variant via ReadBytes (copy).
+// The wire buffer (`data`) is not mutated, so the round-trip is correct either
+// way; this proves both bytes decode paths compile and decode correctly,
 // alongside value optionals + the enum + the optional message.
 const comprehensiveValDriver = `package gen
 

@@ -1123,8 +1123,10 @@ message User {
 			func() ([]byte, error) { return golang.Generate(file) },
 			// Phase 2 local-buffer encode: the optional presence byte is appended
 			// into the register-local buffer via xpb.AppendBoolTo, not the
-			// stateful enc.WriteBool.
-			[]string{"xpb.AppendBoolTo(buf, m.Nickname != nil)", "present, pos, err = xpb.ReadBoolAt(data, pos)", "if present {"},
+			// stateful enc.WriteBool. Under the 0.5.0 value-style default the
+			// presence is driven by the generated Has<Field> bool, and decode sets
+			// it when the presence flag is set.
+			[]string{"xpb.AppendBoolTo(buf, m.HasNickname)", "present, pos, err = xpb.ReadBoolAt(data, pos)", "if present {", "m.HasNickname = true"},
 			[]string{"no presence bit", "emits them as required"},
 		},
 		{
