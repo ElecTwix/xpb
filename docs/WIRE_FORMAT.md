@@ -122,6 +122,31 @@ Example: `{"a": 1, "b": 2}`
      +-- count  + len + key  + value      + len + key  + value
 ```
 
+#### Map encoding is NOT canonical / byte-stable
+
+Map entries are written in the host map's native iteration order, which is **not
+specified** and, in several runtimes (notably Go), is **deliberately
+randomized**. As a consequence:
+
+- A message containing a map field with **more than one entry** can encode to a
+  **different byte sequence on each encode**, even for the exact same value.
+- The repository's byte-identical / golden guarantees **do not hold** for
+  map-containing messages. (Maps with 0 or 1 entries have only one possible
+  order and so are stable, but you must not rely on this for the general case.)
+- Decoding is **order-insensitive**: a map always decodes back to the same
+  logical key/value set regardless of the order the pairs appear on the wire, so
+  round-tripping is always correct. Only the *byte layout* varies — never the
+  byte count (the non-determinism is reordering, not size drift or corruption).
+
+Therefore, callers **must not** hash, sign, deduplicate, cache by bytes, or
+byte-compare encoded messages that contain map fields, and must not treat their
+encoding as a stable identity. Compare the **decoded values** instead. This
+caveat applies identically across **every** XPB language runtime.
+
+Sorting map keys to make the encoding canonical is intentionally **not** done
+here: it would change the wire bytes for all runtimes and the conformance golden
+vectors, so it is tracked as a separate decision.
+
 ## Message Structure
 
 Messages encode fields in declaration order without field tags or numbers.

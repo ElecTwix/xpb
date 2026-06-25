@@ -132,6 +132,14 @@ XPB V2 uses struct mode encoding:
 
 Fields are written/read in declaration order with no field tags.
 
+> **Map fields are not byte-stable.** Map entries are encoded in the host map's
+> native iteration order (randomized in Go and unspecified elsewhere), so a
+> message containing a map with more than one entry can encode to different bytes
+> on each encode. Decoding is order-insensitive and always round-trips correctly,
+> but callers **must not** hash, sign, cache-by-bytes, or byte-compare encoded
+> messages that contain maps — compare the decoded values instead. This applies
+> across every XPB language runtime. See [docs/WIRE_FORMAT.md](docs/WIRE_FORMAT.md#map-encoding-is-not-canonical--byte-stable).
+
 ## Schema Example
 
 ```xpb
