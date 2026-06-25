@@ -1,0 +1,26 @@
+docs/WIRE_FORMAT.md
+  s_5551c6b8158c1a::t_e95eace860150a 125-149
+tests/integration/go_map_nondeterminism_test.go
+  s_5551c6b8158c1a::t_d8f93d0ec8bb26 1-201
+README.md
+  s_5551c6b8158c1a::t_763a0ec591e3c2 135-142
+pkg/codegen/golang/emitter.go
+  s_5551c6b8158c1a::t_7fbdffb32f9ea8 182-196
+  s_5551c6b8158c1a::t_dcd7a565e3183b 797-809
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "6f718cb58b9012d4e98903bdaa6694bf81275a74",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
