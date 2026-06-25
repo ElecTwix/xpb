@@ -1,0 +1,47 @@
+pkg/codegen/golang/emitter_test.go
+  s_5551c6b8158c1a::t_728067d2e2597c 369-370
+  s_5551c6b8158c1a::t_b54da20826e9fe 345-368,371-383,391-433
+  s_5551c6b8158c1a::t_929e7b159ddefb 384-390
+pkg/codegen/golang/emitter.go
+  s_5551c6b8158c1a::t_e8a85469667ea0 341-353
+  s_5551c6b8158c1a::t_13998582784432 453,455
+  s_5551c6b8158c1a::t_bdf6b5d3278ed1 533-535
+  s_5551c6b8158c1a::t_36a1454172fed1 160-162
+  s_5551c6b8158c1a::t_06868ed5a51fdb 15-40,45,48,50-55,58,63-83
+  s_5551c6b8158c1a::t_4d4e2f19b2e770 238-246
+  s_5551c6b8158c1a::t_5c0b4a2d79b1b7 500
+cmd/xpbc/main.go
+  s_5551c6b8158c1a::t_d335ba121461f7 59-65
+  s_5551c6b8158c1a::t_f92140788b296a 157-158
+  s_5551c6b8158c1a::t_d9331b5ff8f0cd 27-28
+  s_5551c6b8158c1a::t_e9fcde4092b439 96-97
+  s_5551c6b8158c1a::t_8da8c3df834f99 48-49
+benchmarks/go/uteka/val/uteka.xpb
+  s_5551c6b8158c1a::t_db19ffef06ee07 1-14
+benchmarks/go/uteka/ptr/uteka.xpb.go
+  s_5551c6b8158c1a::t_eac09ab1390eac 1-192
+benchmarks/go/uteka/val/uteka.xpb.go
+  s_5551c6b8158c1a::t_eac09ab1390eac 1-202
+benchmarks/go/uteka/uteka_test.go
+  s_5551c6b8158c1a::t_ca4b9aaca86747 1-199
+CHANGELOG.md
+  s_5551c6b8158c1a::t_170e235214723f 6-24
+benchmarks/go/uteka/ptr/uteka.xpb
+  s_5551c6b8158c1a::t_3094b85f424125 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "6fda8557e1475d8080b489e46f9c6b6bd5a76b18",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
