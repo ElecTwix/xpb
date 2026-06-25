@@ -1,0 +1,30 @@
+runtime/go/xpb/mutation_kill_test.go
+  s_5551c6b8158c1a::t_b06a5b504e5e28 215-230
+  s_5551c6b8158c1a::t_9f76ec71a9148a 177-178,180-181,183-184,192-193,195-196
+  s_5551c6b8158c1a::t_4037625dfda3aa 1-176,179,182,185-191,194,197-214,231-272
+pkg/codegen/golang/mutation_kill_test.go
+  s_5551c6b8158c1a::t_296e0af519f6f3 194-222,237
+  s_5551c6b8158c1a::t_4ca146370c07e1 1-193
+  s_5551c6b8158c1a::t_71747537f89340 223-236
+docs/MUTATION.md
+  s_5551c6b8158c1a::t_1750ddd2fe08fa 1-122
+Makefile
+  s_5551c6b8158c1a::t_40d911ac213823 46-96
+  s_5551c6b8158c1a::t_2ca29b9dfdf306 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "0394af809d961b9830abb77b8e74a52d4192dda2",
+  "prompts": {},
+  "sessions": {
+    "s_5551c6b8158c1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d21b3a79-1149-42af-a404-9e0de2f3fbfe",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
