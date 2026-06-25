@@ -1,0 +1,21 @@
+tests/integration/go_codegen_test.go
+  s_165453c95b4380::t_a9c2a0fae3f587 29,30,40,44,45,55,77,100,107,113,149,150,158,165,187,190,195,197,202,207,217-218,221-223,227-228,230,232-233,237,238,245,266,278,284
+tests/integration/ts_codegen_test.go
+  s_165453c95b4380::t_81825d83589d88 182,209,248-249,289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3ebf519cc978d69b6a74c7e1c3cabac63662489f",
+  "prompts": {},
+  "sessions": {
+    "s_165453c95b4380": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3ea7243-e691-4736-bbb4-d246da0e396b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "ElecTwix <root@electwix.dev>"
+    }
+  }
+}
