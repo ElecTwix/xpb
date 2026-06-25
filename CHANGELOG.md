@@ -11,7 +11,8 @@ The Go code generator now emits the **fast path by default**. These are
 source-level and decode-time changes only — the wire format is byte-identical,
 so the cross-language conformance golden vectors are unchanged and data encoded
 by older xpb versions still decodes. Both breaks fail at Go compile time (or at
-an explicit aliasing-safety boundary), which is intended.
+an explicit aliasing-safety boundary), which is intended. See
+[docs/MIGRATION.md](docs/MIGRATION.md) for before/after migration steps.
 
 - **Optional scalar/string/bytes/enum fields now default to the VALUE style**
   (`m.X T` plus a generated `m.HasX bool`) instead of a pointer (`m.X *T`).
