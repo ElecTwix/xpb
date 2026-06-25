@@ -82,6 +82,31 @@ var hotInlineHelpers = []string{
 	"AppendStringTo",
 	"AppendBytesTo",
 	"AppendMessageTo",
+	// Coalesced fixed-width run helpers (Phase 3): a maximal run of contiguous
+	// fixed-width fields is bounds-checked once (EnsureRunAt) / grown once
+	// (ExtendRun), then each field is read/written at a known offset with an
+	// unchecked Run*At / Put*At helper. These are the hot path for coalesced
+	// runs and must stay inlinable so the single up-front check is the only
+	// branch and the per-field moves fold into the generated body. EnsureRunAt
+	// (one compare) and ExtendRun (a slices.Grow wrapper + reslice) inline like
+	// their GrowBuf sibling; the Run*/Put* accessors are single
+	// binary.LittleEndian moves.
+	"EnsureRunAt",
+	"ExtendRun",
+	"RunBoolAt",
+	"RunInt32At",
+	"RunInt64At",
+	"RunUint32At",
+	"RunUint64At",
+	"RunFloat32At",
+	"RunFloat64At",
+	"PutBoolAt",
+	"PutInt32At",
+	"PutInt64At",
+	"PutUint32At",
+	"PutUint64At",
+	"PutFloat32At",
+	"PutFloat64At",
 }
 
 // TestInliningGuard_HotHelpers builds the runtime package with -gcflags=-m and

@@ -211,9 +211,31 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 		// function-scoped `pos`/`err` are reassigned (=) inside the per-field
 		// blocks so the cursor is shared across fields rather than shadowed.
 		g.printf("\tpos := 0\n")
-		g.printf("\tvar err error\n")
-		for _, field := range msg.Fields {
-			g.generateFieldDecode(field)
+		groups, coalesced := g.fieldRuns(msg)
+		// The function-scoped `err` is only needed by the per-field decode path
+		// (the *At helpers return an error). A message whose fields are entirely
+		// one coalesced fixed-width run reads through xpb.EnsureRunAt + the
+		// unchecked Run*At readers and a block-local `rerr`, so a `var err error`
+		// here would be declared-and-unused — a hard Go compile error. Only emit
+		// it when at least one non-coalesced group exists.
+		hasPerField := false
+		for _, c := range coalesced {
+			if !c {
+				hasPerField = true
+				break
+			}
+		}
+		if hasPerField {
+			g.printf("\tvar err error\n")
+		}
+		for gi, group := range groups {
+			if coalesced[gi] {
+				g.generateRunDecode(group)
+				continue
+			}
+			for _, field := range group {
+				g.generateFieldDecode(field)
+			}
 		}
 	}
 	g.printf("\treturn nil\n")
@@ -244,8 +266,15 @@ func (g *Generator) generateMarshalBody(msg *ast.Message) {
 		// need, so variable-length fields still append normally afterwards.
 		g.printf("\tbuf = xpb.GrowBuf(buf, %d)\n", lb)
 	}
-	for _, field := range msg.Fields {
-		g.generateFieldEncode(field)
+	groups, coalesced := g.fieldRuns(msg)
+	for gi, group := range groups {
+		if coalesced[gi] {
+			g.generateRunEncode(group)
+			continue
+		}
+		for _, field := range group {
+			g.generateFieldEncode(field)
+		}
 	}
 	g.printf("\tenc.SetBuf(buf)\n")
 }
@@ -481,6 +510,117 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 	g.printf("\t}\n")
 }
 
+// runReadExpr returns the unchecked Run*At read expression for one fixed-width
+// field at a known offset `off` within a coalesced run. It assumes the caller
+// already verified the whole run is in-bounds via xpb.EnsureRunAt, so these
+// readers carry no per-field bounds check. Enums read as int32 and are converted
+// at the assignment site, so this returns the raw int32 reader for them.
+func (g *Generator) runReadExpr(field *ast.Field, off int) string {
+	if g.isEnumType(field.Type) {
+		return fmt.Sprintf("xpb.RunInt32At(data, pos+%d)", off)
+	}
+	switch field.Type.Kind {
+	case ast.TypeBool:
+		return fmt.Sprintf("xpb.RunBoolAt(data, pos+%d)", off)
+	case ast.TypeInt32:
+		return fmt.Sprintf("xpb.RunInt32At(data, pos+%d)", off)
+	case ast.TypeInt64:
+		return fmt.Sprintf("xpb.RunInt64At(data, pos+%d)", off)
+	case ast.TypeUint32:
+		return fmt.Sprintf("xpb.RunUint32At(data, pos+%d)", off)
+	case ast.TypeUint64:
+		return fmt.Sprintf("xpb.RunUint64At(data, pos+%d)", off)
+	case ast.TypeFloat32:
+		return fmt.Sprintf("xpb.RunFloat32At(data, pos+%d)", off)
+	case ast.TypeFloat64:
+		return fmt.Sprintf("xpb.RunFloat64At(data, pos+%d)", off)
+	}
+	return ""
+}
+
+// generateRunDecode emits a coalesced decode for a maximal run of contiguous
+// fixed-width fields. The whole run (runWidth bytes) is bounds-checked ONCE via
+// xpb.EnsureRunAt; on success every field is read with an unchecked Run*At reader
+// at its known offset from the run base, and the cursor advances by the run width
+// exactly once. A truncated input that ends partway through the run fails the
+// single EnsureRunAt with the same io.ErrUnexpectedEOF the per-field path would
+// have produced — there is no per-field OOB to hit because the up-front check
+// covers the entire window. The wire bytes consumed are identical to decoding the
+// fields one at a time.
+func (g *Generator) generateRunDecode(run []*ast.Field) {
+	width := g.runWidth(run)
+	g.printf("\t{\n")
+	g.printf("\t\trunEnd, rerr := xpb.EnsureRunAt(data, pos, %d)\n", width)
+	g.printf("\t\tif rerr != nil { return rerr }\n")
+	off := 0
+	for _, field := range run {
+		fieldName := toCamelCase(field.Name)
+		w, _ := g.fixedRunWidth(field)
+		if g.isEnumType(field.Type) {
+			// Enum (incl. enum-alias): read int32, convert to the enum type.
+			g.printf("\t\tm.%s = %s(%s)\n", fieldName, field.Type.Message, g.runReadExpr(field, off))
+		} else {
+			g.printf("\t\tm.%s = %s\n", fieldName, g.runReadExpr(field, off))
+		}
+		off += w
+	}
+	g.printf("\t\tpos = runEnd\n")
+	g.printf("\t}\n")
+}
+
+// runWriteStmt returns the Put*At write statement for one fixed-width field at a
+// known offset `off` within a coalesced run, writing into the just-extended local
+// buffer. Enums and enum aliases are written as int32. The destination region was
+// extended once via xpb.ExtendRun, so these writers carry no per-field capacity
+// check; every byte of the run is written exactly once.
+func (g *Generator) runWriteStmt(field *ast.Field, valExpr string, off int) string {
+	if g.isEnumType(field.Type) {
+		return fmt.Sprintf("xpb.PutInt32At(buf, runOff+%d, int32(%s))", off, valExpr)
+	}
+	switch field.Type.Kind {
+	case ast.TypeBool:
+		return fmt.Sprintf("xpb.PutBoolAt(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeInt32:
+		return fmt.Sprintf("xpb.PutInt32At(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeInt64:
+		return fmt.Sprintf("xpb.PutInt64At(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeUint32:
+		return fmt.Sprintf("xpb.PutUint32At(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeUint64:
+		return fmt.Sprintf("xpb.PutUint64At(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeFloat32:
+		return fmt.Sprintf("xpb.PutFloat32At(buf, runOff+%d, %s)", off, valExpr)
+	case ast.TypeFloat64:
+		return fmt.Sprintf("xpb.PutFloat64At(buf, runOff+%d, %s)", off, valExpr)
+	}
+	return ""
+}
+
+// generateRunEncode emits a coalesced encode for a maximal run of contiguous
+// fixed-width fields. The local buffer is extended ONCE by the run width via
+// xpb.ExtendRun (which returns the run's base offset), then each field is written
+// at its known offset with an unchecked Put*At writer. This replaces the run's
+// per-field Append*To capacity checks with a single grow. The bytes written are
+// byte-identical to appending the fields one at a time.
+func (g *Generator) generateRunEncode(run []*ast.Field) {
+	width := g.runWidth(run)
+	// Reassign the outer `buf` (not `:=`, which would shadow it inside the block
+	// and discard the grown slice) so a reallocation in ExtendRun is visible to
+	// the following fields and to enc.SetBuf(buf). runOff stays block-scoped so
+	// successive runs do not collide.
+	g.printf("\t{\n")
+	g.printf("\t\tvar runOff int\n")
+	g.printf("\t\tbuf, runOff = xpb.ExtendRun(buf, %d)\n", width)
+	off := 0
+	for _, field := range run {
+		fieldName := toCamelCase(field.Name)
+		w, _ := g.fixedRunWidth(field)
+		g.printf("\t\t%s\n", g.runWriteStmt(field, "m."+fieldName, off))
+		off += w
+	}
+	g.printf("\t}\n")
+}
+
 // scalarReadCall returns the stateless cursor read expression (which yields
 // `(value, newPos, error)` and takes (data, pos)) for a scalar/string/bytes
 // type. Used by the optional decode path, which reads into a fresh local
@@ -689,6 +829,86 @@ func (g *Generator) fixedSizeLowerBound(msg *ast.Message) int {
 		}
 	}
 	return size
+}
+
+// minCoalesceRun is the shortest run of contiguous fixed-width fields worth
+// coalescing. A run of 1 already costs exactly one bounds check (decode) / one
+// append's capacity check absorbed by the up-front GrowBuf (encode), so
+// coalescing it would only obscure the generated code for no measurable gain.
+const minCoalesceRun = 2
+
+// fixedRunWidth reports the on-wire width of a field that may participate in a
+// coalesced fixed-width run, and whether it qualifies at all. A field qualifies
+// only when it is a single, unconditional, fixed-width value: non-optional,
+// non-repeated, non-map, and a bool/int32/uint32/float32/enum (4) / int64/uint64/
+// float64 (8) scalar. Anything optional (carries a presence byte then a
+// conditional value), repeated/map (carries a count then a variable number of
+// elements), or variable-length (string/bytes/nested message) breaks a run,
+// because its byte span is data-dependent and cannot be bounds-checked or grown
+// as part of a single contiguous region.
+func (g *Generator) fixedRunWidth(field *ast.Field) (int, bool) {
+	if field.Optional || field.Repeated || field.Type.Kind == ast.TypeMap {
+		return 0, false
+	}
+	// Enums (whether Kind==TypeEnum or an enum alias arriving as TypeMessage)
+	// encode as a fixed 4-byte int32.
+	if g.isEnumType(field.Type) {
+		return 4, true
+	}
+	switch field.Type.Kind {
+	case ast.TypeBool:
+		return 1, true
+	case ast.TypeInt32, ast.TypeUint32, ast.TypeFloat32:
+		return 4, true
+	case ast.TypeInt64, ast.TypeUint64, ast.TypeFloat64:
+		return 8, true
+	default:
+		// string, bytes, message: variable-length, breaks the run.
+		return 0, false
+	}
+}
+
+// fieldRuns partitions msg.Fields into consecutive groups. Each group is either
+// a maximal run of coalescable fixed-width fields (length >= minCoalesceRun) or a
+// trailing/standalone slice of fields handled one at a time. The returned slices
+// reference msg.Fields in order, so concatenating every group reproduces the
+// original field order exactly. `coalesced` reports, per group, whether the group
+// is a fixed-width run to be emitted as a single bounds-checked / grown block.
+func (g *Generator) fieldRuns(msg *ast.Message) (groups [][]*ast.Field, coalesced []bool) {
+	i := 0
+	for i < len(msg.Fields) {
+		if _, ok := g.fixedRunWidth(msg.Fields[i]); ok {
+			j := i + 1
+			for j < len(msg.Fields) {
+				if _, ok := g.fixedRunWidth(msg.Fields[j]); !ok {
+					break
+				}
+				j++
+			}
+			if j-i >= minCoalesceRun {
+				groups = append(groups, msg.Fields[i:j])
+				coalesced = append(coalesced, true)
+				i = j
+				continue
+			}
+			// A run of length 1 (j-i == 1) falls through to the per-field path;
+			// emit just that one field as a non-coalesced group of one.
+		}
+		groups = append(groups, msg.Fields[i:i+1])
+		coalesced = append(coalesced, false)
+		i++
+	}
+	return groups, coalesced
+}
+
+// runWidth sums the fixed wire widths of every field in a coalesced run.
+func (g *Generator) runWidth(run []*ast.Field) int {
+	total := 0
+	for _, f := range run {
+		w, _ := g.fixedRunWidth(f)
+		total += w
+	}
+	return total
 }
 
 // minWireBytes returns the smallest possible on-wire size for one element of

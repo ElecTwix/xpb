@@ -44,8 +44,12 @@ func (m *UtekaMessage) Marshal() ([]byte, error) {
 	if m.StreamId != nil {
 		buf = xpb.AppendStringTo(buf, *m.StreamId)
 	}
-	buf = xpb.AppendInt64To(buf, m.Seq)
-	buf = xpb.AppendInt32To(buf, m.Flags)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 12)
+		xpb.PutInt64At(buf, runOff+0, m.Seq)
+		xpb.PutInt32At(buf, runOff+8, m.Flags)
+	}
 	buf = xpb.AppendBoolTo(buf, m.SessionId != nil)
 	if m.SessionId != nil {
 		buf = xpb.AppendStringTo(buf, *m.SessionId)
@@ -76,8 +80,12 @@ func (m *UtekaMessage) MarshalTo(enc *xpb.Encoder) {
 	if m.StreamId != nil {
 		buf = xpb.AppendStringTo(buf, *m.StreamId)
 	}
-	buf = xpb.AppendInt64To(buf, m.Seq)
-	buf = xpb.AppendInt32To(buf, m.Flags)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 12)
+		xpb.PutInt64At(buf, runOff+0, m.Seq)
+		xpb.PutInt32At(buf, runOff+8, m.Flags)
+	}
 	buf = xpb.AppendBoolTo(buf, m.SessionId != nil)
 	if m.SessionId != nil {
 		buf = xpb.AppendStringTo(buf, *m.SessionId)
@@ -180,20 +188,13 @@ func (m *UtekaMessage) unmarshalAt(data []byte, depth int) error {
 		}
 	}
 	{
-		var v int64
-		v, pos, err = xpb.ReadInt64At(data, pos)
-		if err != nil {
-			return err
+		runEnd, rerr := xpb.EnsureRunAt(data, pos, 12)
+		if rerr != nil {
+			return rerr
 		}
-		m.Seq = v
-	}
-	{
-		var v int32
-		v, pos, err = xpb.ReadInt32At(data, pos)
-		if err != nil {
-			return err
-		}
-		m.Flags = v
+		m.Seq = xpb.RunInt64At(data, pos+0)
+		m.Flags = xpb.RunInt32At(data, pos+8)
+		pos = runEnd
 	}
 	{
 		var present bool

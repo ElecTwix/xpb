@@ -677,3 +677,121 @@ func ReadArrayCountAt(b []byte, p, elementMinBytes, maxElements int) (int32, int
 	}
 	return n, p, nil
 }
+
+// --- Coalesced fixed-width run helpers (Phase 3) ---
+//
+// A maximal run of consecutive fixed-width, non-optional, non-repeated,
+// non-map, non-message fields occupies one contiguous little-endian byte
+// region on the wire, so the whole region can be bounds-checked once (decode)
+// or grown once (encode) instead of per field. The generated unmarshalAt / Marshal
+// bodies do the offset arithmetic; these helpers keep the single bounds check and
+// the raw little-endian moves centralized (so generated code need not import
+// encoding/binary or math) and identical to the per-field paths byte-for-byte.
+//
+// Decode contract: the generated code calls EnsureRunAt(data, pos, N) ONCE for a
+// run of N total bytes. On success the entire [pos, pos+N) window is provably
+// in-bounds, so the Run* readers below index it WITHOUT their own bounds check.
+// They must only ever be called at offsets the immediately-preceding EnsureRunAt
+// guaranteed; calling one past a checked window is a generator bug, not an
+// input-driven OOB. A truncated input that ends partway through a run fails the
+// single EnsureRunAt exactly as the per-field ReadAt would have failed at the
+// first short field.
+
+// EnsureRunAt verifies that n bytes are available starting at offset p, returning
+// the post-run offset p+n on success. It is the single up-front bounds check for
+// a coalesced fixed-width run: it rejects the same truncated inputs the per-field
+// ReadInt32At/ReadInt64At/ReadBoolAt would have rejected, but only once for the
+// whole run. n is a generator-computed constant (the run's total fixed width), so
+// p+n cannot overflow for any real schema.
+func EnsureRunAt(b []byte, p, n int) (int, error) {
+	if p+n > len(b) {
+		return p, io.ErrUnexpectedEOF
+	}
+	return p + n, nil
+}
+
+// RunBoolAt reads a 1-byte bool at offset p WITHOUT bounds checking. Only valid
+// inside a window already covered by EnsureRunAt.
+func RunBoolAt(b []byte, p int) bool { return b[p] != 0 }
+
+// RunInt32At reads a 4-byte little-endian int32 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunInt32At(b []byte, p int) int32 { return int32(binary.LittleEndian.Uint32(b[p:])) }
+
+// RunInt64At reads an 8-byte little-endian int64 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunInt64At(b []byte, p int) int64 { return int64(binary.LittleEndian.Uint64(b[p:])) }
+
+// RunUint32At reads a 4-byte little-endian uint32 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunUint32At(b []byte, p int) uint32 { return binary.LittleEndian.Uint32(b[p:]) }
+
+// RunUint64At reads an 8-byte little-endian uint64 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunUint64At(b []byte, p int) uint64 { return binary.LittleEndian.Uint64(b[p:]) }
+
+// RunFloat32At reads a 4-byte little-endian float32 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunFloat32At(b []byte, p int) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(b[p:]))
+}
+
+// RunFloat64At reads an 8-byte little-endian float64 at offset p WITHOUT bounds
+// checking. Only valid inside a window already covered by EnsureRunAt.
+func RunFloat64At(b []byte, p int) float64 {
+	return math.Float64frombits(binary.LittleEndian.Uint64(b[p:]))
+}
+
+// Encode contract: the generated Marshal/MarshalTo extends the local buffer once
+// for a run of N total bytes via ExtendRun(buf, N), which returns the grown slice
+// and the offset of the run's first byte. It then writes each field at a known
+// offset with the Put*At writers below (no per-field capacity re-check). The
+// bytes written are byte-identical to the per-field Append*To path.
+
+// ExtendRun grows b's length by n bytes (reallocating if needed) and returns the
+// extended slice together with the offset of the first newly-added byte. The
+// caller fills [off, off+n) with the Put*At writers; the contents of the new
+// region are otherwise unspecified, so every byte of the run must be written.
+func ExtendRun(b []byte, n int) ([]byte, int) {
+	off := len(b)
+	b = slices.Grow(b, n)
+	return b[:off+n], off
+}
+
+// PutBoolAt writes a 1-byte bool at offset p. Only valid inside a region
+// already extended by ExtendRun.
+func PutBoolAt(b []byte, p int, v bool) {
+	if v {
+		b[p] = 1
+	} else {
+		b[p] = 0
+	}
+}
+
+// PutInt32At writes a 4-byte little-endian int32 at offset p. Only valid inside a
+// region already extended by ExtendRun.
+func PutInt32At(b []byte, p int, v int32) { binary.LittleEndian.PutUint32(b[p:], uint32(v)) }
+
+// PutInt64At writes an 8-byte little-endian int64 at offset p. Only valid inside a
+// region already extended by ExtendRun.
+func PutInt64At(b []byte, p int, v int64) { binary.LittleEndian.PutUint64(b[p:], uint64(v)) }
+
+// PutUint32At writes a 4-byte little-endian uint32 at offset p. Only valid inside
+// a region already extended by ExtendRun.
+func PutUint32At(b []byte, p int, v uint32) { binary.LittleEndian.PutUint32(b[p:], v) }
+
+// PutUint64At writes an 8-byte little-endian uint64 at offset p. Only valid inside
+// a region already extended by ExtendRun.
+func PutUint64At(b []byte, p int, v uint64) { binary.LittleEndian.PutUint64(b[p:], v) }
+
+// PutFloat32At writes a 4-byte little-endian float32 at offset p. Only valid
+// inside a region already extended by ExtendRun.
+func PutFloat32At(b []byte, p int, v float32) {
+	binary.LittleEndian.PutUint32(b[p:], math.Float32bits(v))
+}
+
+// PutFloat64At writes an 8-byte little-endian float64 at offset p. Only valid
+// inside a region already extended by ExtendRun.
+func PutFloat64At(b []byte, p int, v float64) {
+	binary.LittleEndian.PutUint64(b[p:], math.Float64bits(v))
+}

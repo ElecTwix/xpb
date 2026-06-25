@@ -29,6 +29,30 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   unchanged, and the stateful `Encoder` API (`NewEncoder`/`GetEncoder`/`Write*`/
   `MarshalTo`) is preserved for manual callers and the pool. On Apple M5 the
   value-style pooled encode drops from ~24 ns to ~13 ns/op (~1.9x, 0 allocs).
+- **Generated Go decode/encode now coalesce contiguous fixed-width field runs.**
+  A maximal run of two or more consecutive fields whose wire encoding is
+  fixed-width and unconditional (bool/int32/uint32/float32/enum = 1/4 bytes,
+  int64/uint64/float64 = 8 bytes; never optional, repeated, map, string, bytes,
+  or nested message) is one contiguous little-endian byte region, so it is now
+  bounds-checked once on decode (`xpb.EnsureRunAt`, then unchecked `xpb.Run*At`
+  reads at known offsets) and grown once on encode (`xpb.ExtendRun`, then
+  unchecked `xpb.Put*At` writes at known offsets), instead of one bounds
+  check / capacity check per field. Runs of length 1 keep the per-field
+  `*At`/`Append*To` path unchanged (coalescing one field buys nothing). The
+  wire format is byte-identical, decode stays 0 allocations and pooled encode
+  stays 0 allocations, and a truncated input that ends partway through a run is
+  rejected by the single up-front `EnsureRunAt` exactly as the per-field path
+  rejected a short field (covered by a new mid-run truncation test + fuzz
+  seeds). The gain scales with run length: messages dominated by long
+  fixed-width runs (e.g. all-scalar structs) collapse N per-field checks into
+  one; the `uteka` benchmark message has only a single 2-field run
+  (`Seq`+`Flags`) buried among optional/string fields, so its decode/encode are
+  flat-to-slightly-faster (~9.0→~8.9 ns decode, ~12.7→~13.0 ns encode on Apple
+  M5, both within run-to-run noise and still 0 allocs). Repeated fixed-width
+  primitive arrays (`[]int32`/`[]float64`/…) bulk-`memmove` was scoped but
+  **deferred**: it requires an `unsafe` slice reinterpret plus a big-endian
+  fallback, which is not worth the correctness risk for this optional polish
+  phase and is not exercised by the benchmark.
 
 ### Added
 
@@ -48,6 +72,16 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   register-local-cursor counterparts of the `Decoder.Read*` methods, with
   identical bounds, compact-length (`0xFF`), negative-length, and array-count
   validation. Added alongside the unchanged stateful `Decoder` API.
+- Coalesced fixed-width run helpers in `runtime/go/xpb`: `EnsureRunAt` (one
+  up-front bounds check for a whole fixed-width run) and the unchecked offset
+  readers `RunBoolAt`/`RunInt32At`/`RunInt64At`/`RunUint32At`/`RunUint64At`/
+  `RunFloat32At`/`RunFloat64At`; `ExtendRun` (grow the local encode buffer once
+  by a run width, returning the run's base offset) and the unchecked offset
+  writers `PutBoolAt`/`PutInt32At`/`PutInt64At`/`PutUint32At`/`PutUint64At`/
+  `PutFloat32At`/`PutFloat64At`. The `Run*`/`Put*` accessors carry no per-field
+  bounds/capacity check and are valid only inside a window already guarded by
+  `EnsureRunAt` / extended by `ExtendRun`; all stay inlinable (guarded by
+  `TestInliningGuard_HotHelpers`).
 - `--go-optional-style=value` flag on `xpbc` (and `golang.Options.OptionalStyle`):
   generates optional scalar/string/bytes/enum fields as a value field plus a
   `Has<Field>` bool instead of `*T`. Eliminates the per-present-field

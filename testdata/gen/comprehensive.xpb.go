@@ -2,12 +2,10 @@
 package myapp
 
 import (
-	"github.com/ElecTwix/xpb/pkg/wire"
 	"github.com/ElecTwix/xpb/runtime/go/xpb"
 )
 
 var _ = xpb.NewEncoder
-var _ = wire.WireVarint
 
 // Status is an enum type.
 type Status int32
@@ -39,88 +37,122 @@ type User struct {
 	Name   string
 	Age    int32
 	Active bool
-	Email  string
+	Email  *string
 	Tags   []string
 	Status Status
 }
 
 func (m *User) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(514)
-	enc.WriteString(1, m.Name)
-	enc.WriteInt32(2, m.Age)
-	enc.WriteBool(3, m.Active)
-	if m.Email != "" {
-		enc.WriteString(4, m.Email)
+	enc := xpb.NewEncoder(468)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 14)
+	buf = xpb.AppendStringTo(buf, m.Name)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 5)
+		xpb.PutInt32At(buf, runOff+0, m.Age)
+		xpb.PutBoolAt(buf, runOff+4, m.Active)
 	}
+	buf = xpb.AppendBoolTo(buf, m.Email != nil)
+	if m.Email != nil {
+		buf = xpb.AppendStringTo(buf, *m.Email)
+	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Tags)))
 	for _, v := range m.Tags {
-		enc.WriteString(5, v)
+		buf = xpb.AppendStringTo(buf, v)
 	}
-	enc.WriteInt32(6, int32(m.Status))
+	buf = xpb.AppendInt32To(buf, int32(m.Status))
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
 func (m *User) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.Name)
-	enc.WriteInt32(2, m.Age)
-	enc.WriteBool(3, m.Active)
-	if m.Email != "" {
-		enc.WriteString(4, m.Email)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 14)
+	buf = xpb.AppendStringTo(buf, m.Name)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 5)
+		xpb.PutInt32At(buf, runOff+0, m.Age)
+		xpb.PutBoolAt(buf, runOff+4, m.Active)
 	}
+	buf = xpb.AppendBoolTo(buf, m.Email != nil)
+	if m.Email != nil {
+		buf = xpb.AppendStringTo(buf, *m.Email)
+	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Tags)))
 	for _, v := range m.Tags {
-		enc.WriteString(5, v)
+		buf = xpb.AppendStringTo(buf, v)
 	}
-	enc.WriteInt32(6, int32(m.Status))
+	buf = xpb.AppendInt32To(buf, int32(m.Status))
+	enc.SetBuf(buf)
 }
 
 func (m *User) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *User) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Name = v
-		case 2:
-			v, err := dec.ReadInt32()
-			if err != nil {
-				return err
-			}
-			m.Age = v
-		case 3:
-			v, err := dec.ReadBool()
-			if err != nil {
-				return err
-			}
-			m.Active = v
-		case 4:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Email = v
-		case 5:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Tags = append(m.Tags, v)
-		case 6:
-			v, err := dec.ReadInt32()
-			if err != nil {
-				return err
-			}
-			m.Status = Status(v)
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
+		m.Name = v
+	}
+	{
+		runEnd, rerr := xpb.EnsureRunAt(data, pos, 5)
+		if rerr != nil {
+			return rerr
 		}
+		m.Age = xpb.RunInt32At(data, pos+0)
+		m.Active = xpb.RunBoolAt(data, pos+4)
+		pos = runEnd
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
+			if err != nil {
+				return err
+			}
+			m.Email = &v
+		}
+	}
+	{
+		var count int32
+		count, pos, err = xpb.ReadArrayCountAt(data, pos, 1, 16777216)
+		if err != nil {
+			return err
+		}
+		m.Tags = make([]string, count)
+		for i := int32(0); i < count; i++ {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
+			if err != nil {
+				return err
+			}
+			m.Tags[i] = v
+		}
+	}
+	{
+		var v int32
+		v, pos, err = xpb.ReadInt32At(data, pos)
+		if err != nil {
+			return err
+		}
+		m.Status = Status(v)
 	}
 	return nil
 }
@@ -129,57 +161,74 @@ func (m *User) Unmarshal(data []byte) error {
 type Address struct {
 	City       string
 	Country    string
-	PostalCode string
+	PostalCode *string
 }
 
 func (m *Address) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(102)
-	enc.WriteString(1, m.City)
-	enc.WriteString(2, m.Country)
-	if m.PostalCode != "" {
-		enc.WriteString(3, m.PostalCode)
+	enc := xpb.NewEncoder(96)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 1)
+	buf = xpb.AppendStringTo(buf, m.City)
+	buf = xpb.AppendStringTo(buf, m.Country)
+	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
+	if m.PostalCode != nil {
+		buf = xpb.AppendStringTo(buf, *m.PostalCode)
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
 func (m *Address) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.City)
-	enc.WriteString(2, m.Country)
-	if m.PostalCode != "" {
-		enc.WriteString(3, m.PostalCode)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 1)
+	buf = xpb.AppendStringTo(buf, m.City)
+	buf = xpb.AppendStringTo(buf, m.Country)
+	buf = xpb.AppendBoolTo(buf, m.PostalCode != nil)
+	if m.PostalCode != nil {
+		buf = xpb.AppendStringTo(buf, *m.PostalCode)
 	}
+	enc.SetBuf(buf)
 }
 
 func (m *Address) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *Address) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
+		m.City = v
+	}
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
+		if err != nil {
+			return err
+		}
+		m.Country = v
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
-			m.City = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.Country = v
-		case 3:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.PostalCode = v
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
+			m.PostalCode = &v
 		}
 	}
 	return nil
@@ -188,7 +237,7 @@ func (m *Address) Unmarshal(data []byte) error {
 // Profile is a generated XPB message.
 type Profile struct {
 	Bio       string
-	AvatarUrl string
+	AvatarUrl *string
 	User      *User
 	Address   *Address
 	Scores    []int32
@@ -196,132 +245,192 @@ type Profile struct {
 }
 
 func (m *Profile) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(894)
-	enc.WriteString(1, m.Bio)
-	if m.AvatarUrl != "" {
-		enc.WriteString(2, m.AvatarUrl)
+	enc := xpb.NewEncoder(848)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 10)
+	buf = xpb.AppendStringTo(buf, m.Bio)
+	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
+	if m.AvatarUrl != nil {
+		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
 	}
-	nestedEnc := xpb.NewEncoder(64)
-	m.User.MarshalTo(nestedEnc)
-	enc.WriteMessage(3, nestedEnc.Bytes())
+	{
+		nestedEnc := xpb.GetEncoder()
+		if m.User != nil {
+			m.User.MarshalTo(nestedEnc)
+		}
+		buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+		xpb.PutEncoder(nestedEnc)
+	}
+	buf = xpb.AppendBoolTo(buf, m.Address != nil)
 	if m.Address != nil {
-		nestedEnc := xpb.NewEncoder(64)
-		m.Address.MarshalTo(nestedEnc)
-		enc.WriteMessage(4, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if m.Address != nil {
+				m.Address.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Scores)))
 	for _, v := range m.Scores {
-		enc.WriteInt32(5, v)
+		buf = xpb.AppendInt32To(buf, v)
 	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Metadata)))
 	for k, v := range m.Metadata {
-		mapEnc := xpb.NewEncoder(32)
-		enc.WriteString(1, k)
-		enc.WriteString(2, v)
-		enc.WriteMessage(6, mapEnc.Bytes())
+		buf = xpb.AppendStringTo(buf, k)
+		buf = xpb.AppendStringTo(buf, v)
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
 func (m *Profile) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteString(1, m.Bio)
-	if m.AvatarUrl != "" {
-		enc.WriteString(2, m.AvatarUrl)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 10)
+	buf = xpb.AppendStringTo(buf, m.Bio)
+	buf = xpb.AppendBoolTo(buf, m.AvatarUrl != nil)
+	if m.AvatarUrl != nil {
+		buf = xpb.AppendStringTo(buf, *m.AvatarUrl)
 	}
-	nestedEnc := xpb.NewEncoder(64)
-	m.User.MarshalTo(nestedEnc)
-	enc.WriteMessage(3, nestedEnc.Bytes())
+	{
+		nestedEnc := xpb.GetEncoder()
+		if m.User != nil {
+			m.User.MarshalTo(nestedEnc)
+		}
+		buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+		xpb.PutEncoder(nestedEnc)
+	}
+	buf = xpb.AppendBoolTo(buf, m.Address != nil)
 	if m.Address != nil {
-		nestedEnc := xpb.NewEncoder(64)
-		m.Address.MarshalTo(nestedEnc)
-		enc.WriteMessage(4, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if m.Address != nil {
+				m.Address.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Scores)))
 	for _, v := range m.Scores {
-		enc.WriteInt32(5, v)
+		buf = xpb.AppendInt32To(buf, v)
 	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Metadata)))
 	for k, v := range m.Metadata {
-		mapEnc := xpb.NewEncoder(32)
-		enc.WriteString(1, k)
-		enc.WriteString(2, v)
-		enc.WriteMessage(6, mapEnc.Bytes())
+		buf = xpb.AppendStringTo(buf, k)
+		buf = xpb.AppendStringTo(buf, v)
 	}
+	enc.SetBuf(buf)
 }
 
 func (m *Profile) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *Profile) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadString()
+		m.Bio = v
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var v string
+			v, pos, err = xpb.ReadStringAt(data, pos)
 			if err != nil {
 				return err
 			}
-			m.Bio = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.AvatarUrl = v
-		case 3:
-			data, err := dec.ReadMessageBytes()
-			if err != nil {
-				return err
-			}
+			m.AvatarUrl = &v
+		}
+	}
+	{
+		var mb []byte
+		mb, pos, err = xpb.ReadMessageBytesAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if len(mb) > 0 {
 			m.User = &User{}
-			if err := m.User.Unmarshal(data); err != nil {
+			if err := m.User.unmarshalAt(mb, depth+1); err != nil {
 				return err
 			}
-		case 4:
-			data, err := dec.ReadMessageBytes()
+		}
+	}
+	{
+		var present bool
+		present, pos, err = xpb.ReadBoolAt(data, pos)
+		if err != nil {
+			return err
+		}
+		if present {
+			var mb []byte
+			mb, pos, err = xpb.ReadMessageBytesAt(data, pos)
 			if err != nil {
 				return err
 			}
 			m.Address = &Address{}
-			if err := m.Address.Unmarshal(data); err != nil {
+			if err := m.Address.unmarshalAt(mb, depth+1); err != nil {
 				return err
 			}
-		case 5:
-			v, err := dec.ReadInt32()
+		}
+	}
+	{
+		var count int32
+		count, pos, err = xpb.ReadArrayCountAt(data, pos, 4, 16777216)
+		if err != nil {
+			return err
+		}
+		m.Scores = make([]int32, count)
+		for i := int32(0); i < count; i++ {
+			var v int32
+			v, pos, err = xpb.ReadInt32At(data, pos)
 			if err != nil {
 				return err
 			}
-			m.Scores = append(m.Scores, v)
-		case 6:
-			mapData, err := dec.ReadMessageBytes()
-			if err != nil {
-				return err
-			}
-			mapDec := xpb.NewDecoder(mapData)
+			m.Scores[i] = v
+		}
+	}
+	{
+		var count int32
+		count, pos, err = xpb.ReadArrayCountAt(data, pos, 2, 16777216)
+		if err != nil {
+			return err
+		}
+		m.Metadata = make(map[string]string)
+		for i := int32(0); i < count; i++ {
 			var mk string
 			var mv string
-			for !mapDec.EOF() {
-				fn, _, _ := mapDec.ReadTag()
-				switch fn {
-				case 1:
-					v, err := dec.ReadString()
-					if err != nil {
-						return err
-					}
-					mk = v
-				case 2:
-					v, err := dec.ReadString()
-					if err != nil {
-						return err
-					}
-					mv = v
+			{
+				var v string
+				v, pos, err = xpb.ReadStringAt(data, pos)
+				if err != nil {
+					return err
 				}
+				mk = v
 			}
-			if m.Metadata == nil {
-				m.Metadata = make(map[string]string)
+			{
+				var v string
+				v, pos, err = xpb.ReadStringAt(data, pos)
+				if err != nil {
+					return err
+				}
+				mv = v
 			}
 			m.Metadata[mk] = mv
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -338,118 +447,150 @@ type Order struct {
 }
 
 func (m *Order) Marshal() ([]byte, error) {
-	enc := xpb.NewEncoder(527)
-	enc.WriteUint64(1, m.Id)
-	enc.WriteString(2, m.CustomerName)
+	enc := xpb.NewEncoder(489)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 25)
+	buf = xpb.AppendUint64To(buf, m.Id)
+	buf = xpb.AppendStringTo(buf, m.CustomerName)
+	buf = xpb.AppendInt32To(buf, int32(len(m.Profiles)))
 	for _, v := range m.Profiles {
-		nestedEnc := xpb.NewEncoder(64)
-		v.MarshalTo(nestedEnc)
-		enc.WriteMessage(3, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if v != nil {
+				v.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
-	enc.WriteFloat64(4, m.Total)
-	enc.WriteBool(5, m.Paid)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 9)
+		xpb.PutFloat64At(buf, runOff+0, m.Total)
+		xpb.PutBoolAt(buf, runOff+8, m.Paid)
+	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Items)))
 	for k, v := range m.Items {
-		mapEnc := xpb.NewEncoder(32)
-		enc.WriteInt32(1, k)
-		enc.WriteString(2, v)
-		enc.WriteMessage(6, mapEnc.Bytes())
+		buf = xpb.AppendInt32To(buf, k)
+		buf = xpb.AppendStringTo(buf, v)
 	}
+	enc.SetBuf(buf)
 	return enc.Bytes(), nil
 }
 
 func (m *Order) MarshalTo(enc *xpb.Encoder) {
-	enc.WriteUint64(1, m.Id)
-	enc.WriteString(2, m.CustomerName)
+	buf := enc.Buf()
+	buf = xpb.GrowBuf(buf, 25)
+	buf = xpb.AppendUint64To(buf, m.Id)
+	buf = xpb.AppendStringTo(buf, m.CustomerName)
+	buf = xpb.AppendInt32To(buf, int32(len(m.Profiles)))
 	for _, v := range m.Profiles {
-		nestedEnc := xpb.NewEncoder(64)
-		v.MarshalTo(nestedEnc)
-		enc.WriteMessage(3, nestedEnc.Bytes())
+		{
+			nestedEnc := xpb.GetEncoder()
+			if v != nil {
+				v.MarshalTo(nestedEnc)
+			}
+			buf = xpb.AppendMessageTo(buf, nestedEnc.Bytes())
+			xpb.PutEncoder(nestedEnc)
+		}
 	}
-	enc.WriteFloat64(4, m.Total)
-	enc.WriteBool(5, m.Paid)
+	{
+		var runOff int
+		buf, runOff = xpb.ExtendRun(buf, 9)
+		xpb.PutFloat64At(buf, runOff+0, m.Total)
+		xpb.PutBoolAt(buf, runOff+8, m.Paid)
+	}
+	buf = xpb.AppendInt32To(buf, int32(len(m.Items)))
 	for k, v := range m.Items {
-		mapEnc := xpb.NewEncoder(32)
-		enc.WriteInt32(1, k)
-		enc.WriteString(2, v)
-		enc.WriteMessage(6, mapEnc.Bytes())
+		buf = xpb.AppendInt32To(buf, k)
+		buf = xpb.AppendStringTo(buf, v)
 	}
+	enc.SetBuf(buf)
 }
 
 func (m *Order) Unmarshal(data []byte) error {
-	dec := xpb.NewDecoder(data)
-	for !dec.EOF() {
-		fieldNum, wireType, err := dec.ReadTag()
+	return m.unmarshalAt(data, 0)
+}
+
+func (m *Order) unmarshalAt(data []byte, depth int) error {
+	if depth > xpb.MaxDecodeDepth {
+		return xpb.ErrMaxDepthExceeded
+	}
+	pos := 0
+	var err error
+	{
+		var v uint64
+		v, pos, err = xpb.ReadUint64At(data, pos)
 		if err != nil {
 			return err
 		}
-		switch fieldNum {
-		case 1:
-			v, err := dec.ReadUint64()
+		m.Id = v
+	}
+	{
+		var v string
+		v, pos, err = xpb.ReadStringAt(data, pos)
+		if err != nil {
+			return err
+		}
+		m.CustomerName = v
+	}
+	{
+		var count int32
+		count, pos, err = xpb.ReadArrayCountAt(data, pos, 1, 16777216)
+		if err != nil {
+			return err
+		}
+		m.Profiles = make([]*Profile, count)
+		for i := int32(0); i < count; i++ {
+			var mb []byte
+			mb, pos, err = xpb.ReadMessageBytesAt(data, pos)
 			if err != nil {
 				return err
 			}
-			m.Id = v
-		case 2:
-			v, err := dec.ReadString()
-			if err != nil {
-				return err
-			}
-			m.CustomerName = v
-		case 3:
-			data, err := dec.ReadMessageBytes()
-			if err != nil {
-				return err
-			}
-			v := &Profile{}
-			if err := v.Unmarshal(data); err != nil {
-				return err
-			}
-			m.Profiles = append(m.Profiles, v)
-		case 4:
-			v, err := dec.ReadFloat64()
-			if err != nil {
-				return err
-			}
-			m.Total = v
-		case 5:
-			v, err := dec.ReadBool()
-			if err != nil {
-				return err
-			}
-			m.Paid = v
-		case 6:
-			mapData, err := dec.ReadMessageBytes()
-			if err != nil {
-				return err
-			}
-			mapDec := xpb.NewDecoder(mapData)
-			var mk int32
-			var mv string
-			for !mapDec.EOF() {
-				fn, _, _ := mapDec.ReadTag()
-				switch fn {
-				case 1:
-					v, err := dec.ReadInt32()
-					if err != nil {
-						return err
-					}
-					mk = v
-				case 2:
-					v, err := dec.ReadString()
-					if err != nil {
-						return err
-					}
-					mv = v
+			if len(mb) > 0 {
+				m.Profiles[i] = &Profile{}
+				if err := m.Profiles[i].unmarshalAt(mb, depth+1); err != nil {
+					return err
 				}
 			}
-			if m.Items == nil {
-				m.Items = make(map[int32]string)
+		}
+	}
+	{
+		runEnd, rerr := xpb.EnsureRunAt(data, pos, 9)
+		if rerr != nil {
+			return rerr
+		}
+		m.Total = xpb.RunFloat64At(data, pos+0)
+		m.Paid = xpb.RunBoolAt(data, pos+8)
+		pos = runEnd
+	}
+	{
+		var count int32
+		count, pos, err = xpb.ReadArrayCountAt(data, pos, 5, 16777216)
+		if err != nil {
+			return err
+		}
+		m.Items = make(map[int32]string)
+		for i := int32(0); i < count; i++ {
+			var mk int32
+			var mv string
+			{
+				var v int32
+				v, pos, err = xpb.ReadInt32At(data, pos)
+				if err != nil {
+					return err
+				}
+				mk = v
+			}
+			{
+				var v string
+				v, pos, err = xpb.ReadStringAt(data, pos)
+				if err != nil {
+					return err
+				}
+				mv = v
 			}
 			m.Items[mk] = mv
-		default:
-			if err := dec.Skip(wireType); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
