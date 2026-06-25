@@ -3,6 +3,51 @@
 All notable changes to xpb are documented here. Versions follow semantic
 versioning; while pre-1.0, breaking changes bump the minor version.
 
+## [0.5.0]
+
+### Changed — BREAKING (Go codegen source/semantics; wire format UNCHANGED)
+
+The Go code generator now emits the **fast path by default**. These are
+source-level and decode-time changes only — the wire format is byte-identical,
+so the cross-language conformance golden vectors are unchanged and data encoded
+by older xpb versions still decodes. Both breaks fail at Go compile time (or at
+an explicit aliasing-safety boundary), which is intended.
+
+- **Optional scalar/string/bytes/enum fields now default to the VALUE style**
+  (`m.X T` plus a generated `m.HasX bool`) instead of a pointer (`m.X *T`).
+  `golang.Generate()` with a zero-value `Options{}` — and `xpbc` with no
+  optional-style flag — now emit value-style optionals. Non-enum message
+  optionals stay `*T`.
+  - Migration: a call site that did `*m.X` (deref) must become `m.X`, and one
+    that did `if m.X != nil` must become `if m.HasX`. Setting a field changes
+    from `m.X = &v` to `m.X, m.HasX = v, true`. These fail to compile against
+    the new structs, which surfaces every site that must change.
+  - Opt out with `xpbc --go-optional-style=pointer` (or
+    `golang.Options{OptionalStyle: golang.OptionalPointer}`) to keep `*T`.
+- **`bytes` fields now decode ZERO-COPY by default**: the decoded `[]byte`
+  ALIASES the decoder's input buffer (`ReadBytesUnsafe`) instead of copying it
+  (`ReadBytes`). Decoded `string` fields already aliased the input; `bytes` now
+  matches. `golang.Generate()` with a zero-value `Options{}` — and `xpbc` with
+  no bytes flag — now emit the aliasing decode.
+  - Migration: a caller that retains decoded `[]byte` (or `string`) past the
+    point where the source buffer is reused or mutated must now clone it
+    (`append([]byte(nil), b...)`) **or** opt out of zero-copy. This does NOT
+    fail at compile time — it is a runtime aliasing hazard — so audit callers
+    that hold decoded slices across buffer reuse.
+  - Opt out with `xpbc --go-safe-bytes` (or `golang.Options{SafeBytes: true}`)
+    to get a copying decode whose `[]byte` owns its memory.
+- The previously-unreleased `golang.Options.ZeroCopyBytes bool` (zero-copy as an
+  opt-IN) is **replaced** by `golang.Options.SafeBytes bool` (copy as an
+  opt-OUT), so the `Options{}` zero value selects the fast path with no
+  Go-bool "unset vs false" ambiguity. The corresponding `xpbc` flag is renamed
+  from `--go-zero-copy-bytes` to `--go-safe-bytes`. (`ZeroCopyBytes` /
+  `--go-zero-copy-bytes` never shipped in a release.)
+- All committed generated Go (`testdata/gen/*.xpb.go`,
+  `benchmarks/go/uteka/val/*`) is regenerated under the new defaults;
+  `benchmarks/go/uteka/ptr/*` is regenerated with the explicit
+  `--go-optional-style=pointer --go-safe-bytes` opt-out so it remains the
+  pointer + copying variant the differential/aliasing tests compare against.
+
 ## [Unreleased]
 
 ### Changed
@@ -82,16 +127,15 @@ versioning; while pre-1.0, breaking changes bump the minor version.
   bounds/capacity check and are valid only inside a window already guarded by
   `EnsureRunAt` / extended by `ExtendRun`; all stay inlinable (guarded by
   `TestInliningGuard_HotHelpers`).
-- `--go-optional-style=value` flag on `xpbc` (and `golang.Options.OptionalStyle`):
-  generates optional scalar/string/bytes/enum fields as a value field plus a
-  `Has<Field>` bool instead of `*T`. Eliminates the per-present-field
-  pointer-boxing heap allocation on decode. Non-enum message optionals stay
-  `*T`. Default remains `pointer`, so existing output is unchanged. The wire
-  format is identical between styles.
-- `--go-zero-copy-bytes` flag on `xpbc` (and `golang.Options.ZeroCopyBytes`):
-  decodes `bytes` fields by aliasing the input buffer (`ReadBytesUnsafe`)
-  instead of copying. The decoded `[]byte` is valid only while the source
-  buffer is alive and unmodified. Off by default.
+- `--go-optional-style` flag on `xpbc` (and `golang.Options.OptionalStyle`)
+  selecting the optional scalar/string/bytes/enum representation: `value` (a
+  value field plus a `Has<Field>` bool, the 0.5.0 default — see the BREAKING
+  notes above) or `pointer` (`*T`, the opt-out). Non-enum message optionals
+  stay `*T`. The wire format is identical between styles.
+- `--go-safe-bytes` flag on `xpbc` (and `golang.Options.SafeBytes`): opts OUT of
+  the 0.5.0 zero-copy bytes default, decoding `bytes` fields by copying
+  (`ReadBytes`) so the decoded `[]byte` owns its memory. Default (off) decodes
+  by aliasing the input buffer (`ReadBytesUnsafe`).
 - `benchmarks/go/uteka/`: a realistic control-plane RPC message benchmark
   (`UTEKA_MESSAGE`) comparing both XPB codegen styles against JSON and msgpack.
   On Apple M5 the value+zero-copy style decodes in 14.5 ns / 0 allocs vs the

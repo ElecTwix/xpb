@@ -2,9 +2,11 @@
 // realistic control-plane RPC message (UTEKA_MESSAGE). Two XPB variants are
 // generated from identical schemas:
 //
-//	ptr/ — default: optional fields are *T (one heap box per present field on decode)
-//	val/ — --go-optional-style=value --go-zero-copy-bytes: value + Has<Field> bool,
-//	       bytes decoded by aliasing the input buffer
+//	val/ — DEFAULT (0.5.0): value + Has<Field> bool optionals, bytes decoded by
+//	       aliasing the input buffer (zero-copy)
+//	ptr/ — opt-out (--go-optional-style=pointer --go-safe-bytes; the old default):
+//	       optional fields are *T (one heap box per present field on decode),
+//	       bytes copied on decode
 //
 // Run: go test ./benchmarks/go/uteka/ -bench=. -benchmem -run=Roundtrip
 package utekabench

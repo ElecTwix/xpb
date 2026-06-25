@@ -14,28 +14,51 @@ import (
 
 // Optional-field representation styles for Options.OptionalStyle.
 const (
-	// OptionalPointer represents optional scalar/string/bytes/enum fields as
-	// *T, so nil distinguishes "absent" from a zero value. This is the
-	// default and the backward-compatible behavior.
-	OptionalPointer = "pointer"
-	// OptionalValue represents optional fields as a value field plus a
-	// generated Has<Field> bool. This avoids the per-present-field pointer-
-	// boxing heap allocation that *T optionals incur on decode.
+	// OptionalValue represents optional scalar/string/bytes/enum fields as a
+	// value field plus a generated Has<Field> bool. This avoids the
+	// per-present-field pointer-boxing heap allocation that *T optionals incur
+	// on decode, and is the default (an empty OptionalStyle resolves to it).
 	OptionalValue = "value"
+	// OptionalPointer represents optional scalar/string/bytes/enum fields as
+	// *T, so nil distinguishes "absent" from a zero value. This is the explicit
+	// opt-out from the value default. Non-enum message optionals are always *T
+	// regardless of this setting.
+	OptionalPointer = "pointer"
 )
 
 // Options controls Go code generation.
+//
+// The zero value (Options{}) selects the fast defaults: value-style optionals
+// (value field + Has<Field> bool, no per-present-field pointer box on decode)
+// and zero-copy bytes decode (the decoded []byte aliases the input buffer). The
+// fields below are framed as explicit opt-outs so Options{} = fast path:
+//
+//   - OptionalStyle: empty resolves to OptionalValue; set OptionalPointer to opt
+//     out to *T optionals.
+//   - SafeBytes: false (the zero value) decodes bytes by aliasing the input
+//     buffer (zero-copy); set true to opt out to a copying decode.
 type Options struct {
 	// OptionalStyle selects how optional scalar/string/bytes/enum fields are
-	// represented: OptionalPointer (default) or OptionalValue. Non-enum
-	// message optionals are always *T regardless of this setting, since the
-	// pointer is the natural absence marker and decode allocates the nested
-	// struct anyway.
+	// represented: OptionalValue (the default; an empty string resolves to it)
+	// or OptionalPointer (the opt-out *T). Non-enum message optionals are
+	// always *T regardless of this setting, since the pointer is the natural
+	// absence marker and decode allocates the nested struct anyway.
 	OptionalStyle string
-	// ZeroCopyBytes makes bytes fields decode by aliasing the decoder's input
-	// buffer (ReadBytesUnsafe) instead of copying it (ReadBytes). The decoded
-	// []byte stays valid only while the source buffer is unmodified and alive.
-	ZeroCopyBytes bool
+	// SafeBytes opts OUT of the zero-copy bytes default. When false (the zero
+	// value) bytes fields decode by aliasing the decoder's input buffer
+	// (ReadBytesUnsafe) — fast, but the decoded []byte stays valid only while
+	// the source buffer is unmodified and alive. When true, bytes decode by
+	// copying (ReadBytes), so the decoded slice owns its memory.
+	SafeBytes bool
+}
+
+// resolvedOptionalStyle returns the effective optional style, resolving the
+// empty/zero OptionalStyle to the OptionalValue default.
+func (g *Generator) resolvedOptionalStyle() string {
+	if g.opts.OptionalStyle == "" {
+		return OptionalValue
+	}
+	return g.opts.OptionalStyle
 }
 
 // Generator generates Go code from an AST.
@@ -64,7 +87,7 @@ func GenerateWithOptions(file *ast.File, opts Options) ([]byte, error) {
 // representation rather than a *T pointer. Only optional scalar/string/bytes/
 // enum fields qualify; non-enum message optionals always stay pointers.
 func (g *Generator) valueOptional(field *ast.Field) bool {
-	if g.opts.OptionalStyle != OptionalValue || !field.Optional {
+	if g.resolvedOptionalStyle() != OptionalValue || !field.Optional {
 		return false
 	}
 	if field.Type.Kind == ast.TypeMessage && !g.isEnumType(field.Type) {
@@ -74,13 +97,15 @@ func (g *Generator) valueOptional(field *ast.Field) bool {
 }
 
 // bytesReadCall returns the stateless cursor expression for reading a bytes
-// field, honoring the ZeroCopyBytes option. The expression yields
-// `(value, newPos, error)` and takes (data, pos) as the cursor.
+// field, honoring the SafeBytes opt-out. The expression yields
+// `(value, newPos, error)` and takes (data, pos) as the cursor. The default
+// (SafeBytes false) is the zero-copy ReadBytesUnsafeAt that aliases the input
+// buffer; SafeBytes true opts out to the copying ReadBytesAt.
 func (g *Generator) bytesReadCall() string {
-	if g.opts.ZeroCopyBytes {
-		return "xpb.ReadBytesUnsafeAt(data, pos)"
+	if g.opts.SafeBytes {
+		return "xpb.ReadBytesAt(data, pos)"
 	}
-	return "xpb.ReadBytesAt(data, pos)"
+	return "xpb.ReadBytesUnsafeAt(data, pos)"
 }
 
 func (g *Generator) generate(file *ast.File) ([]byte, error) {
@@ -699,10 +724,11 @@ func (g *Generator) goTypeName(field *ast.Field) string {
 	if t.Kind == ast.TypeMap {
 		return fmt.Sprintf("map[%s]%s", g.goBaseTypeName(*t.KeyType), g.goBaseTypeName(*t.ValType))
 	}
-	// Optional fields are pointers so absence (nil) is distinguishable from a
-	// zero value. Message fields are already pointers, so they stay as-is.
-	// Under OptionalValue style, scalar/string/bytes/enum optionals are plain
-	// values paired with a generated Has<Field> bool instead.
+	// Under the OptionalPointer opt-out, optional fields are pointers so
+	// absence (nil) is distinguishable from a zero value. Message fields are
+	// already pointers, so they stay as-is. Under the default OptionalValue
+	// style, scalar/string/bytes/enum optionals are plain values paired with a
+	// generated Has<Field> bool instead.
 	if field.Optional && t.Kind != ast.TypeMessage && !g.valueOptional(field) {
 		return "*" + base
 	}

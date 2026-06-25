@@ -15,8 +15,9 @@ import (
 
 // TestZeroAlloc_ValDecode asserts that decoding the realistic RPC message into a
 // reused value-style struct (value optionals + zero-copy bytes) performs zero
-// heap allocations. This is the core promise of --go-optional-style=value
-// --go-zero-copy-bytes: no per-present-field pointer boxing and no payload copy.
+// heap allocations. This is the core promise of the 0.5.0 default Go codegen
+// (value optionals + zero-copy bytes): no per-present-field pointer boxing and
+// no payload copy.
 func TestZeroAlloc_ValDecode(t *testing.T) {
 	data, err := sampleVal().Marshal()
 	if err != nil {
