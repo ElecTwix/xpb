@@ -12,18 +12,74 @@ import (
 	"github.com/ElecTwix/xpb/pkg/wire"
 )
 
+// Optional-field representation styles for Options.OptionalStyle.
+const (
+	// OptionalPointer represents optional scalar/string/bytes/enum fields as
+	// *T, so nil distinguishes "absent" from a zero value. This is the
+	// default and the backward-compatible behavior.
+	OptionalPointer = "pointer"
+	// OptionalValue represents optional fields as a value field plus a
+	// generated Has<Field> bool. This avoids the per-present-field pointer-
+	// boxing heap allocation that *T optionals incur on decode.
+	OptionalValue = "value"
+)
+
+// Options controls Go code generation.
+type Options struct {
+	// OptionalStyle selects how optional scalar/string/bytes/enum fields are
+	// represented: OptionalPointer (default) or OptionalValue. Non-enum
+	// message optionals are always *T regardless of this setting, since the
+	// pointer is the natural absence marker and decode allocates the nested
+	// struct anyway.
+	OptionalStyle string
+	// ZeroCopyBytes makes bytes fields decode by aliasing the decoder's input
+	// buffer (ReadBytesUnsafe) instead of copying it (ReadBytes). The decoded
+	// []byte stays valid only while the source buffer is unmodified and alive.
+	ZeroCopyBytes bool
+}
+
 // Generator generates Go code from an AST.
 type Generator struct {
 	buf   bytes.Buffer
 	enums map[string]bool // Track enum names for resolution
+	opts  Options
 }
 
-// Generate generates Go code for the given file AST.
+// Generate generates Go code for the given file AST using default options.
 func Generate(file *ast.File) ([]byte, error) {
+	return GenerateWithOptions(file, Options{})
+}
+
+// GenerateWithOptions generates Go code for the given file AST using the
+// supplied options.
+func GenerateWithOptions(file *ast.File, opts Options) ([]byte, error) {
 	g := &Generator{
 		enums: make(map[string]bool),
+		opts:  opts,
 	}
 	return g.generate(file)
+}
+
+// valueOptional reports whether field should use the value+Has<Field>
+// representation rather than a *T pointer. Only optional scalar/string/bytes/
+// enum fields qualify; non-enum message optionals always stay pointers.
+func (g *Generator) valueOptional(field *ast.Field) bool {
+	if g.opts.OptionalStyle != OptionalValue || !field.Optional {
+		return false
+	}
+	if field.Type.Kind == ast.TypeMessage && !g.isEnumType(field.Type) {
+		return false
+	}
+	return true
+}
+
+// bytesReadCall returns the decoder expression for reading a bytes field,
+// honoring the ZeroCopyBytes option.
+func (g *Generator) bytesReadCall() string {
+	if g.opts.ZeroCopyBytes {
+		return "dec.ReadBytesUnsafe()"
+	}
+	return "dec.ReadBytes()"
 }
 
 func (g *Generator) generate(file *ast.File) ([]byte, error) {
@@ -101,6 +157,9 @@ func (g *Generator) generateMessage(msg *ast.Message) error {
 	for _, field := range msg.Fields {
 		goType := g.goTypeName(field)
 		g.printf("\t%s %s\n", toCamelCase(field.Name), goType)
+		if g.valueOptional(field) {
+			g.printf("\tHas%s bool\n", toCamelCase(field.Name))
+		}
 	}
 	g.printf("}\n\n")
 
@@ -172,6 +231,15 @@ func (g *Generator) generateFieldEncode(field *ast.Field) {
 			// byte, then the message body only when non-nil.
 			g.printf("\tenc.WriteBool(m.%s != nil)\n", fieldName)
 			g.printf("\tif m.%s != nil {\n", fieldName)
+			g.generateScalarEncode("m."+fieldName, field.Type, "\t\t", isEnum)
+			g.printf("\t}\n")
+			return
+		}
+		if g.valueOptional(field) {
+			// Value style: presence comes from the Has<Field> bool and the
+			// value is used directly (no pointer deref).
+			g.printf("\tenc.WriteBool(m.Has%s)\n", fieldName)
+			g.printf("\tif m.Has%s {\n", fieldName)
 			g.generateScalarEncode("m."+fieldName, field.Type, "\t\t", isEnum)
 			g.printf("\t}\n")
 			return
@@ -270,6 +338,19 @@ func (g *Generator) generateFieldDecode(field *ast.Field) {
 			g.printf("\t\t\tif err != nil { return err }\n")
 			g.printf("\t\t\tm.%s = &%s{}\n", fieldName, field.Type.Message)
 			g.printf("\t\t\tif err := m.%s.unmarshalAt(data, depth+1); err != nil { return err }\n", fieldName)
+		} else if g.valueOptional(field) {
+			// Value style: store the decoded value and flip the Has<Field>
+			// bool. No pointer is taken, so no per-field boxing allocation.
+			if isEnum {
+				g.printf("\t\t\tv, err := dec.ReadInt32()\n")
+				g.printf("\t\t\tif err != nil { return err }\n")
+				g.printf("\t\t\tm.%s = %s(v)\n", fieldName, field.Type.Message)
+			} else {
+				g.printf("\t\t\tv, err := %s\n", g.scalarReadCall(field.Type))
+				g.printf("\t\t\tif err != nil { return err }\n")
+				g.printf("\t\t\tm.%s = v\n", fieldName)
+			}
+			g.printf("\t\t\tm.Has%s = true\n", fieldName)
 		} else if isEnum {
 			g.printf("\t\t\tv, err := dec.ReadInt32()\n")
 			g.printf("\t\t\tif err != nil { return err }\n")
@@ -369,9 +450,9 @@ func (g *Generator) scalarReadCall(t ast.FieldType) string {
 	case ast.TypeString:
 		return "dec.ReadString()"
 	case ast.TypeBytes:
-		return "dec.ReadBytes()"
+		return g.bytesReadCall()
 	}
-	return "dec.ReadBytes()"
+	return g.bytesReadCall()
 }
 
 func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, indent string, isEnum bool) {
@@ -416,7 +497,7 @@ func (g *Generator) generateScalarDecodeInto(varName string, t ast.FieldType, in
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = v\n", indent, varName)
 	case ast.TypeBytes:
-		g.printf("%sv, err := dec.ReadBytes()\n", indent)
+		g.printf("%sv, err := %s\n", indent, g.bytesReadCall())
 		g.printf("%sif err != nil { return err }\n", indent)
 		g.printf("%s%s = v\n", indent, varName)
 	case ast.TypeMessage:
@@ -449,7 +530,9 @@ func (g *Generator) goTypeName(field *ast.Field) string {
 	}
 	// Optional fields are pointers so absence (nil) is distinguishable from a
 	// zero value. Message fields are already pointers, so they stay as-is.
-	if field.Optional && t.Kind != ast.TypeMessage {
+	// Under OptionalValue style, scalar/string/bytes/enum optionals are plain
+	// values paired with a generated Has<Field> bool instead.
+	if field.Optional && t.Kind != ast.TypeMessage && !g.valueOptional(field) {
 		return "*" + base
 	}
 	return base

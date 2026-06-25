@@ -342,6 +342,95 @@ func TestGenerator_DefaultPackage(t *testing.T) {
 	}
 }
 
+// valueOptFile builds a message with one required string and one optional
+// string + one optional bytes, used by the option tests below.
+func valueOptFile() *ast.File {
+	return &ast.File{
+		Package: "test",
+		Messages: []*ast.Message{
+			{
+				Name: "Msg",
+				Fields: []*ast.Field{
+					{Number: 1, Name: "id", Type: ast.FieldType{Kind: ast.TypeString}},
+					{Number: 2, Name: "method", Type: ast.FieldType{Kind: ast.TypeString}, Optional: true},
+					{Number: 3, Name: "payload", Type: ast.FieldType{Kind: ast.TypeBytes}, Optional: true},
+				},
+			},
+		},
+	}
+}
+
+func TestGenerate_DefaultOptionalIsPointer(t *testing.T) {
+	src, err := Generate(valueOptFile())
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	output := string(src)
+	if !contains(output, "*string") {
+		t.Errorf("default style should keep pointer optional (*string), got:\n%s", output)
+	}
+	if contains(output, "HasMethod") {
+		t.Error("default style must not emit a presence bool field")
+	}
+}
+
+func TestGenerate_ValueOptionalStyle(t *testing.T) {
+	src, err := GenerateWithOptions(valueOptFile(), Options{OptionalStyle: OptionalValue})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions failed: %v", err)
+	}
+	output := string(src)
+
+	// Struct: presence bool fields exist (gofmt aligns the type column, so
+	// match field names, not exact spacing).
+	if !contains(output, "HasMethod") {
+		t.Errorf("value style should emit a HasMethod field, got:\n%s", output)
+	}
+	if !contains(output, "HasPayload") {
+		t.Error("value style should emit a HasPayload field")
+	}
+	if contains(output, "*string") {
+		t.Error("value style must not produce pointer optionals (*string)")
+	}
+	if contains(output, "*[]byte") {
+		t.Error("value style must not produce pointer optionals (*[]byte)")
+	}
+
+	// Encode: presence driven by Has<Field>, value passed directly.
+	if !contains(output, "enc.WriteBool(m.HasMethod)") {
+		t.Error("encode should gate on m.HasMethod")
+	}
+	if !contains(output, "enc.WriteString(m.Method)") {
+		t.Error("encode should write m.Method directly (no deref)")
+	}
+
+	// Decode: set value + presence bool.
+	if !contains(output, "m.HasMethod = true") {
+		t.Error("decode should set m.HasMethod = true when present")
+	}
+}
+
+func TestGenerate_ZeroCopyBytes(t *testing.T) {
+	src, err := GenerateWithOptions(valueOptFile(), Options{ZeroCopyBytes: true})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions failed: %v", err)
+	}
+	output := string(src)
+	if !contains(output, "ReadBytesUnsafe") {
+		t.Errorf("zero-copy should decode bytes via ReadBytesUnsafe, got:\n%s", output)
+	}
+}
+
+func TestGenerate_DefaultBytesCopies(t *testing.T) {
+	src, err := Generate(valueOptFile())
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if contains(string(src), "ReadBytesUnsafe") {
+		t.Error("default should use copying ReadBytes, not ReadBytesUnsafe")
+	}
+}
+
 func BenchmarkGenerate_Simple(b *testing.B) {
 	file := &ast.File{
 		Package: "test",

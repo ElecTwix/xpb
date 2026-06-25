@@ -3,6 +3,25 @@
 All notable changes to xpb are documented here. Versions follow semantic
 versioning; while pre-1.0, breaking changes bump the minor version.
 
+## [Unreleased]
+
+### Added
+
+- `--go-optional-style=value` flag on `xpbc` (and `golang.Options.OptionalStyle`):
+  generates optional scalar/string/bytes/enum fields as a value field plus a
+  `Has<Field>` bool instead of `*T`. Eliminates the per-present-field
+  pointer-boxing heap allocation on decode. Non-enum message optionals stay
+  `*T`. Default remains `pointer`, so existing output is unchanged. The wire
+  format is identical between styles.
+- `--go-zero-copy-bytes` flag on `xpbc` (and `golang.Options.ZeroCopyBytes`):
+  decodes `bytes` fields by aliasing the input buffer (`ReadBytesUnsafe`)
+  instead of copying. The decoded `[]byte` is valid only while the source
+  buffer is alive and unmodified. Off by default.
+- `benchmarks/go/uteka/`: a realistic control-plane RPC message benchmark
+  (`UTEKA_MESSAGE`) comparing both XPB codegen styles against JSON and msgpack.
+  On Apple M5 the value+zero-copy style decodes in 14.5 ns / 0 allocs vs the
+  default pointer style's 51 ns / 4 allocs (and vs JSON's ~1000 ns / 10 allocs).
+
 ## [0.4.0] - 2026-06-09
 
 ### Changed — BREAKING (wire format)

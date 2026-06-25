@@ -24,6 +24,8 @@ func main() {
 		outDir          = flag.String("out", ".", "Output directory")
 		stdout          = flag.Bool("stdout", false, "Output generated code to stdout instead of files")
 		tsRuntimeImport = flag.String("ts-runtime-import", "", "Module specifier for the xpb runtime import in generated TypeScript (default \""+typescript.DefaultRuntimeImport+"\")")
+		goOptionalStyle = flag.String("go-optional-style", golang.OptionalPointer, "Go optional-field representation: pointer (*T, default) or value (value + Has<Field> bool, fewer decode allocations)")
+		goZeroCopyBytes = flag.Bool("go-zero-copy-bytes", false, "Go: decode bytes fields by aliasing the input buffer (zero-copy) instead of copying; decoded []byte stays valid only while the source buffer is alive and unmodified")
 		help            = flag.Bool("help", false, "Show help")
 	)
 
@@ -43,6 +45,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  xpbc --out=./gen user.xpb        Output to ./gen directory\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --stdout user.xpb           Output to stdout\n")
 		fmt.Fprintf(os.Stderr, "  xpbc --lang=ts --ts-runtime-import=../runtime user.xpb   Vendored TS runtime import\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-optional-style=value user.xpb       Value optionals (fewer decode allocs)\n")
+		fmt.Fprintf(os.Stderr, "  xpbc --lang=go --go-zero-copy-bytes user.xpb            Zero-copy bytes decode (aliases input)\n")
 	}
 
 	flag.Parse()
@@ -50,6 +54,13 @@ func main() {
 	if *help || flag.NArg() == 0 {
 		flag.Usage()
 		os.Exit(0)
+	}
+
+	switch *goOptionalStyle {
+	case golang.OptionalPointer, golang.OptionalValue:
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid --go-optional-style %q: want %q or %q\n", *goOptionalStyle, golang.OptionalPointer, golang.OptionalValue)
+		os.Exit(1)
 	}
 
 	schemaPath := flag.Arg(0)
@@ -82,7 +93,8 @@ func main() {
 		l = strings.TrimSpace(l)
 		switch l {
 		case "go", "golang":
-			if err := generateGo(file, *outDir, baseName, *stdout); err != nil {
+			goOpts := golang.Options{OptionalStyle: *goOptionalStyle, ZeroCopyBytes: *goZeroCopyBytes}
+			if err := generateGo(file, *outDir, baseName, *stdout, goOpts); err != nil {
 				fmt.Fprintf(os.Stderr, "Go generation error: %v\n", err)
 				os.Exit(1)
 			}
@@ -142,8 +154,8 @@ func main() {
 	}
 }
 
-func generateGo(file *xpbast.File, outDir, baseName string, stdout bool) error {
-	code, err := golang.Generate(file)
+func generateGo(file *xpbast.File, outDir, baseName string, stdout bool, opts golang.Options) error {
+	code, err := golang.GenerateWithOptions(file, opts)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,14 @@
+package ptr
+
+message UtekaMessage {
+    1: int32 Type
+    2: string Id
+    3: ?string Method
+    4: ?bytes Payload
+    5: int64 Timestamp
+    6: ?string Error
+    7: ?string StreamId
+    8: int64 Seq
+    9: int32 Flags
+    10: ?string SessionId
+}
